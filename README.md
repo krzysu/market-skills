@@ -2,7 +2,7 @@
 
 Agent Skills for trading and market analysis. Portable, composable technical analysis skills following the [Agent Skills](https://agentskills.io) specification.
 
-Uses Yahoo Finance data (free, no API keys).
+Uses Yahoo Finance (free, no API keys) and the Kraken Spot API via a local `kraken` CLI. Auto-routes crypto pairs to Kraken, equities to Yahoo Finance.
 
 ## License
 
@@ -56,10 +56,31 @@ uv run skills/market-rsi/scripts/run.py AAPL --json
 uv run pytest
 ```
 
+## Data Providers
+
+Skills accept `--source` to pick a data provider. Omit it for auto-detection.
+
+| Provider | Covers | `--source=` |
+|----------|--------|-------------|
+| Kraken | Crypto pairs (BTC-USD, ETH-USD, SOL-USD, ...) | `kraken` |
+| Yahoo Finance | Stocks, ETFs (AAPL, SPY, GLD, QQQ, ...) | `yfinance` |
+
+```bash
+# Auto-detect: crypto → Kraken, equities → Yahoo Finance
+uv run skills/market-ema/scripts/run.py BTC-USD
+
+# Explicit provider
+uv run skills/market-ema/scripts/run.py BTC-USD --source=kraken
+uv run skills/market-ema/scripts/run.py AAPL --source=yfinance
+```
+
+**How auto-routing works:** Each provider has a `supports(ticker)` method. `KrakenProvider` queries `kraken pairs --pair <PAIR>` to check if the pair is actually listed. `YFinanceProvider` accepts everything as fallback. The registry tries providers in priority order and uses the first match.
+
 ## Conventions
 
 - All scripts accept `--json` for machine-readable output
 - All scripts accept a ticker as first positional argument (default: `SPY`)
-- Data source is Yahoo Finance (free, no API key)
+- All scripts accept `--source=kraken|yfinance` (default: auto-detect)
 - `lib/` functions are pure math — no I/O, no side effects
 - Each skill folder follows the Agent Skills spec: `SKILL.md` + optional `scripts/`, `references/`
+- Data providers live in `lib/providers/` — add new ones by implementing the `Provider` protocol

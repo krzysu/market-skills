@@ -1,50 +1,47 @@
-"""Data fetching via yfinance — free, no API key required."""
+"""Unified data-fetching layer with pluggable providers."""
 
-import yfinance as yf
+from lib.providers.base import Provider
+from lib.providers.kraken import KrakenProvider
+from lib.providers.yfinance import YFinanceProvider
+
+_REGISTRY: list[Provider] = [
+    KrakenProvider(),
+    YFinanceProvider(),
+]
 
 
-def fetch_ohlc(ticker, interval="1d", period="1y"):
-    """Fetch OHLC candles for a ticker via Yahoo Finance.
+def _get_provider(source: str) -> Provider:
+    for p in _REGISTRY:
+        if p.name == source:
+            return p
+    raise ValueError(f"Unknown provider: {source}")
+
+
+def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y",
+               source: str | None = None) -> list[list]:
+    """Fetch OHLC candles for a ticker.
 
     Args:
-        ticker: yfinance ticker symbol (e.g. "AAPL", "BTC-USD", "SPY")
-        interval: candle interval — "1d", "1wk", "1h", etc.
-        period: how far back to fetch — "1y", "6mo", "2y", "max"
+        ticker: Ticker symbol (e.g. "AAPL", "BTC-USD", "SPY").
+        interval: Candle interval — "1d", "1wk", "1h", etc.
+        period: How far back — "1y", "6mo", "2y", "max".
+        source: Provider name ("kraken", "yfinance") or None for auto-detect.
 
     Returns:
         List of candles: [[timestamp, open, high, low, close, volume], ...]
-        Timestamps are Unix seconds (int).
-        Returns [] if the ticker has no data.
+        Timestamps are Unix seconds (int). Returns [] on failure.
     """
-    try:
-        df = yf.download(ticker, interval=interval, period=period, progress=False, auto_adjust=True)
-    except Exception:
-        return []
+    if source:
+        try:
+            return _get_provider(source).fetch(ticker, interval, period)
+        except Exception:
+            return []
 
-    if df.empty:
-        return []
+    for p in _REGISTRY:
+        if p.supports(ticker):
+            try:
+                return p.fetch(ticker, interval, period)
+            except Exception:
+                continue
 
-    # yfinance returns MultiIndex columns like ('Close', 'SPY') — flatten
-    if hasattr(df.columns, "get_level_values"):
-        df.columns = df.columns.get_level_values(0)
-
-    if "Open" not in df.columns:
-        return []
-
-    import math
-
-    candles = []
-    for idx, row in df.iterrows():
-        o, h, l, c, v = row["Open"], row["High"], row["Low"], row["Close"], row["Volume"]
-        if any(isinstance(x, float) and math.isnan(x) for x in (o, h, l, c)):
-            continue
-        ts = int(idx.timestamp())
-        candles.append([
-            ts,
-            float(o),
-            float(h),
-            float(l),
-            float(c),
-            float(v),
-        ])
-    return candles
+    return []
