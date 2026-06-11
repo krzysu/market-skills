@@ -1,0 +1,97 @@
+import json
+import subprocess
+
+
+_INTERVAL_MAP = {
+    "1d": 1440,
+    "1wk": 10080,
+    "1h": 60,
+    "4h": 240,
+    "1m": 1,
+    "5m": 5,
+    "15m": 15,
+    "30m": 30,
+}
+
+
+class KrakenProvider:
+    name = "kraken"
+
+    def __init__(self):
+        self._cache: dict[str, bool] = {}
+
+    def supports(self, ticker: str) -> bool:
+        pair = ticker.replace("-", "").replace("/", "").upper()
+
+        if pair in self._cache:
+            return self._cache[pair]
+
+        try:
+            result = subprocess.run(
+                ["kraken", "pairs", "--pair", pair, "-o", "json"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            self._cache[pair] = False
+            return False
+
+        if result.returncode != 0:
+            self._cache[pair] = False
+            return False
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            self._cache[pair] = False
+            return False
+
+        if isinstance(data, dict) and "error" in data:
+            self._cache[pair] = False
+            return False
+
+        self._cache[pair] = True
+        return True
+
+    def fetch(self, ticker: str, interval: str = "1d", period: str = "1y") -> list[list]:
+        pair = ticker.replace("-", "").replace("/", "").upper()
+        kraken_interval = _INTERVAL_MAP.get(interval)
+        if kraken_interval is None:
+            return []
+
+        args = ["kraken", "ohlc", pair, "--interval", str(kraken_interval), "-o", "json"]
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return []
+
+        if result.returncode != 0:
+            return []
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return []
+
+        candles_raw = None
+        if isinstance(data, dict):
+            for v in data.values():
+                if isinstance(v, list) and v and isinstance(v[0], list):
+                    candles_raw = v
+                    break
+
+        if not candles_raw:
+            return []
+
+        candles = []
+        for c in candles_raw:
+            try:
+                ts = int(c[0])
+                o = float(c[1])
+                h = float(c[2])
+                l = float(c[3])
+                cl = float(c[4])
+                vo = float(c[6])
+                candles.append([ts, o, h, l, cl, vo])
+            except (IndexError, ValueError, TypeError):
+                continue
+        return candles

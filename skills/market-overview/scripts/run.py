@@ -17,10 +17,10 @@ from lib.formatting import emit_json, print_header, safe_round
 DEFAULT_WATCHLIST = ["SPY", "QQQ", "AAPL", "GOOGL", "BTC-USD", "GLD"]
 
 
-def _analyze_one(ticker):
+def _analyze_one(ticker, source=None):
     """Run composite trend analysis on a single ticker, return dict or error."""
     try:
-        candles = fetch_ohlc(ticker, period="2y")
+        candles = fetch_ohlc(ticker, period="2y", source=source)
         if not candles:
             return {"ticker": ticker, "error": "no data"}
         if len(candles) < 220:
@@ -105,12 +105,12 @@ def _analyze_one(ticker):
         return {"ticker": ticker, "error": str(e)}
 
 
-def scan(tickers, action_filter=None, top_n=None):
+def scan(tickers, action_filter=None, top_n=None, source=None):
     results = []
     errors = []
 
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {pool.submit(_analyze_one, t): t for t in tickers}
+        futures = {pool.submit(_analyze_one, t, source): t for t in tickers}
         for future in as_completed(futures):
             r = future.result()
             if "error" in r:
@@ -136,11 +136,12 @@ def main():
     parser.add_argument("--action", help="Filter by action: STRONG_BUY, BUY, WATCH, AVOID")
     parser.add_argument("--top", type=int, help="Limit to top N results")
     parser.add_argument("--json", action="store_true", help="JSON output")
+    parser.add_argument("--source", help="Data provider: kraken, yfinance (default: auto)")
     parser.add_argument("--pretty", action="store_true", help="Human-readable table (default without --json)")
     args = parser.parse_args()
 
     tickers = args.tickers if args.tickers else DEFAULT_WATCHLIST
-    results, errors = scan(tickers, action_filter=args.action, top_n=args.top)
+    results, errors = scan(tickers, action_filter=args.action, top_n=args.top, source=args.source)
 
     output = {
         "tickers_scanned": len(tickers),

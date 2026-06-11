@@ -10,8 +10,8 @@ from lib.indicators import compute_squeeze, classify_squeeze, compute_ema, compu
 from lib.formatting import emit_json, print_header, parse_args, safe_round
 
 
-def analyze(ticker):
-    candles = fetch_ohlc(ticker)
+def analyze(ticker, source=None):
+    candles = fetch_ohlc(ticker, source=source)
     if not candles:
         return {"ticker": ticker, "error": "no data"}
 
@@ -88,8 +88,8 @@ def analyze(ticker):
 
 
 def main():
-    ticker, json_mode, _ = parse_args(sys.argv[1:], default_ticker="SPY")
-    result = analyze(ticker)
+    ticker, json_mode, source = parse_args(sys.argv[1:], default_ticker="SPY")
+    result = analyze(ticker, source=source)
 
     if json_mode:
         emit_json(result)
