@@ -1,0 +1,28 @@
+[project]
+name = "market-skills"
+version = "0.1.0"
+description = "Agent Skills for trading and market analysis — portable indicator library and composable skills"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+readme = "README.md"
+dependencies = [
+    "yfinance>=0.2.0",
+]
+
+[project.urls]
+Repository = "https://github.com/krzysu/market-skills"
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["lib*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
