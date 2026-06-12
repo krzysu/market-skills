@@ -192,7 +192,7 @@ def realized_vol(returns, window):
 
 def compute_squeeze(closes, highs, lows, bb_period=20, bb_mult=2.0, kc_period=20, kc_mult=1.5):
     """Squeeze momentum: returns (squeeze_on, momentum, direction)."""
-    if len(closes) < bb_period:
+    if len(closes) < bb_period + 1 or len(highs) < bb_period + 1 or len(lows) < bb_period + 1:
         return None, None, None
 
     bb_closes = closes[-bb_period:]
@@ -202,11 +202,9 @@ def compute_squeeze(closes, highs, lows, bb_period=20, bb_mult=2.0, kc_period=20
     bb_lower = bb_mean - bb_mult * bb_std
 
     trs = []
-    for i in range(-bb_period + 1, 0):
+    for i in range(-kc_period, 0):
         tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
         trs.append(tr)
-    if not trs:
-        return None, None, None
     atr = sum(trs) / len(trs)
     kc_upper = bb_mean + kc_mult * atr
     kc_lower = bb_mean - kc_mult * atr
@@ -396,10 +394,27 @@ def detect_crossover(short_series, long_series, lookback=5):
 
 
 def ema_slope_pct(series, period=5):
-    """Slope as percentage change over `period` bars."""
+    """Slope as percentage change over `period` intervals (period+1 data points)."""
     if len(series) < period + 1:
         return None
     return (series[-1] - series[-period - 1]) / series[-period - 1] * 100
+
+
+def classify_ema_trend(ema21, ema50, price):
+    """Classify EMA trend into (signal, score).
+
+    Returns one of: BULLISH(2), BEARISH(-2), LEAN_BULLISH(1),
+    LEAN_BEARISH(-1), UNKNOWN(0).
+    """
+    if ema21 is None or ema50 is None:
+        return "UNKNOWN", 0
+    if ema21 > ema50 and price > ema21:
+        return "BULLISH", 2
+    if ema21 < ema50 and price < ema21:
+        return "BEARISH", -2
+    if price > ema21:
+        return "LEAN_BULLISH", 1
+    return "LEAN_BEARISH", -1
 
 
 def compute_macd(closes, fast=12, slow=26, signal=9):

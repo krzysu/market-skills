@@ -139,23 +139,23 @@ def analyze(ticker, source=None):
         + vol_score * weights["volume"]
     )
 
-    # Map raw score (-10 to +10) to verdict
-    if raw_score >= 5.0:
+    # Max achievable |raw_score| ~2.7; map thresholds accordingly.
+    if raw_score >= 2.0:
         direction = "BULLISH"
         conviction = "HIGH"
-    elif raw_score >= 2.0:
+    elif raw_score >= 1.0:
         direction = "BULLISH"
         conviction = "MEDIUM"
-    elif raw_score >= 0.5:
+    elif raw_score >= 0.3:
         direction = "BULLISH"
         conviction = "LOW"
-    elif raw_score > -0.5:
+    elif raw_score > -0.3:
         direction = "NEUTRAL"
         conviction = "LOW"
-    elif raw_score > -2.0:
+    elif raw_score > -1.0:
         direction = "BEARISH"
         conviction = "LOW"
-    elif raw_score > -5.0:
+    elif raw_score > -2.0:
         direction = "BEARISH"
         conviction = "MEDIUM"
     else:

@@ -10,7 +10,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from lib.data import fetch_ohlc
 from lib.indicators import (
     compute_ema, compute_rsi, compute_squeeze, classify_squeeze,
-    compute_obv_trend, detect_crossover, ema_slope_pct, extract_ohlcv,
+    classify_ema_trend, compute_obv_trend, detect_crossover,
+    ema_slope_pct, extract_ohlcv,
 )
 from lib.formatting import emit_json, print_header, safe_round
 
@@ -32,24 +33,7 @@ def _analyze_one(ticker, source=None):
         # EMA
         ema_21, ema_21_series = compute_ema(closes, 21)
         ema_50, ema_50_series = compute_ema(closes, 50)
-        emas = [ema_21, ema_50]
-        emas_valid = [e for e in emas if e is not None]
-        if len(emas_valid) >= 2:
-            if emas_valid[0] > emas_valid[1] and price > emas_valid[0]:
-                trend = "BULLISH"
-                trend_score = 2
-            elif emas_valid[0] < emas_valid[1] and price < emas_valid[0]:
-                trend = "BEARISH"
-                trend_score = -2
-            elif price > emas_valid[0]:
-                trend = "LEAN_BULLISH"
-                trend_score = 1
-            else:
-                trend = "LEAN_BEARISH"
-                trend_score = -1
-        else:
-            trend = "UNKNOWN"
-            trend_score = 0
+        trend, trend_score = classify_ema_trend(ema_21, ema_50, price)
 
         # RSI
         rsi = compute_rsi(closes, 14)

@@ -11,6 +11,8 @@ _REGISTRY: list[Provider] = [
     CCXTProvider("binance"),
 ]
 
+_CCXT_CACHE: dict[str, CCXTProvider] = {}
+
 
 def _get_provider(source: str) -> Provider:
     if source.startswith("ccxt"):
@@ -20,7 +22,9 @@ def _get_provider(source: str) -> Provider:
         for p in _REGISTRY:
             if p.name == "ccxt":
                 if exchange_id:
-                    return CCXTProvider(exchange_id=exchange_id)
+                    if exchange_id not in _CCXT_CACHE:
+                        _CCXT_CACHE[exchange_id] = CCXTProvider(exchange_id=exchange_id)
+                    return _CCXT_CACHE[exchange_id]
                 return p
 
     for p in _REGISTRY:
