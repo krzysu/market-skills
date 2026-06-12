@@ -8,9 +8,8 @@ Single-indicator skills. Run independently to get one specific metric.
 
 | Skill | Description |
 |-------|-------------|
-| [market-ema](./skills/market-ema/SKILL.md) | Moving averages (EMA 21/50/100/200), trend alignment, golden/death cross detection |
-| [market-rsi](./skills/market-rsi/SKILL.md) | RSI(14) momentum oscillator with oversold/overbought zones |
 | [market-squeeze](./skills/market-squeeze/SKILL.md) | Bollinger Band / Keltner Channel squeeze momentum for breakout timing |
+| [market-basis](./skills/market-basis/SKILL.md) | Perpetual swap market structure — funding rate, spot-perp basis, and squeeze/RSI divergence between spot and perp |
 
 ## Mid-Level Analysis
 
@@ -54,6 +53,7 @@ uv run skills/<skill-name>/scripts/run.py TICKER --json
 - Pass `--json` for machine-readable output (recommended for agents)
 - Omit `--json` for human-readable terminal output
 - Default ticker is `SPY` if none provided
+- Pass `--source` to pick a provider: `yfinance`, `kraken`, `ccxt`, `ccxt:binance`, `ccxt:bybit`, etc.
 
 ### Example: Full agent workflow
 
@@ -67,6 +67,9 @@ uv run skills/market-trend-analysis/scripts/run.py AAPL --json
 # 3. Check individual components that matter
 uv run skills/market-rsi/scripts/run.py AAPL --json
 uv run skills/market-squeeze/scripts/run.py AAPL --json
+
+# 4. For crypto perps, check market structure and funding
+uv run skills/market-basis/scripts/run.py BTC/USDT --source ccxt:binance --json
 ```
 
 ## Shared Library
@@ -74,7 +77,7 @@ uv run skills/market-squeeze/scripts/run.py AAPL --json
 All skills share a common `lib/` package with pure indicator functions:
 
 - `lib/indicators.py` — EMA, RSI, squeeze, MACD, ATR, OBV, Fibonacci, swing points, etc.
-- `lib/data.py` — Yahoo Finance data fetcher
+- `lib/data.py` — Unified data fetching with pluggable providers (yfinance, kraken, ccxt)
 - `lib/formatting.py` — JSON output and CLI helpers
 
 Import from `lib/` to build your own skills or use the functions directly:

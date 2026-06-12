@@ -15,3 +15,11 @@ class Provider(Protocol):
         Timestamps are Unix seconds (int). Returns [] on failure.
         """
         ...
+
+    def fetch_funding_rate(self, ticker: str) -> dict | None:
+        """Fetch current funding rate for a perpetual swap ticker.
+
+        Returns a dict with keys like 'fundingRate', 'fundingTime',
+        'nextFundingTime', or None if not applicable.
+        """
+        return None
