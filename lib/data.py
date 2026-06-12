@@ -1,20 +1,71 @@
 """Unified data-fetching layer with pluggable providers."""
 
 from lib.providers.base import Provider
+from lib.providers.ccxt import CCXTProvider
 from lib.providers.kraken import KrakenProvider
 from lib.providers.yfinance import YFinanceProvider
 
 _REGISTRY: list[Provider] = [
     KrakenProvider(),
     YFinanceProvider(),
+    CCXTProvider("binance"),
 ]
 
 
 def _get_provider(source: str) -> Provider:
+    if source.startswith("ccxt"):
+        parts = source.split(":", 1)
+        exchange_id = parts[1] if len(parts) > 1 else None
+
+        for p in _REGISTRY:
+            if p.name == "ccxt":
+                if exchange_id:
+                    return CCXTProvider(exchange_id=exchange_id)
+                return p
+
     for p in _REGISTRY:
         if p.name == source:
             return p
     raise ValueError(f"Unknown provider: {source}")
+
+
+def fetch_funding_rate(ticker: str, source: str | None = None) -> dict | None:
+    """Fetch current funding rate for a perpetual swap ticker.
+
+    Returns a dict with funding rate info, or None if unavailable.
+    Only CCXT-based providers support this.
+    """
+    if source:
+        try:
+            p = _get_provider(source)
+            if hasattr(p, "fetch_funding_rate"):
+                return p.fetch_funding_rate(ticker)
+        except Exception:
+            return None
+        return None
+
+    for p in _REGISTRY:
+        if hasattr(p, "fetch_funding_rate") and p.name != "ccxt":
+            try:
+                if p.supports(ticker):
+                    result = p.fetch_funding_rate(ticker)
+                    if result:
+                        return result
+            except Exception:
+                continue
+
+    # Try CCXT providers last — check markets before attempting
+    for p in _REGISTRY:
+        if hasattr(p, "fetch_funding_rate") and p.name == "ccxt":
+            try:
+                if p.supports(ticker):
+                    result = p.fetch_funding_rate(ticker)
+                    if result:
+                        return result
+            except Exception:
+                continue
+
+    return None
 
 
 def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y",
