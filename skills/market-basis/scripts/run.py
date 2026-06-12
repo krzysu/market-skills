@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from lib.data import fetch_ohlc, fetch_funding_rate
 from lib.indicators import (
     compute_ema, compute_rsi, compute_squeeze, classify_squeeze,
-    extract_ohlcv,
+    classify_ema_trend, extract_ohlcv,
 )
 from lib.formatting import emit_json, print_header, safe_round
 
@@ -24,14 +24,7 @@ def _analyze_one(data, label):
     sq, mom, sdir = compute_squeeze(c, h, l)
     sig = classify_squeeze(mom, sdir)
     if ema21 and ema50:
-        if ema21 > ema50 and price > ema21:
-            trend = "BULLISH"
-        elif ema21 < ema50 and price < ema21:
-            trend = "BEARISH"
-        elif price > ema21:
-            trend = "LEAN_BULLISH"
-        else:
-            trend = "LEAN_BEARISH"
+        trend, _ = classify_ema_trend(ema21, ema50, price)
     else:
         trend = "NEUTRAL"
     return {

@@ -306,10 +306,20 @@ class TestOBVDivergence:
         assert detect_obv_divergence(closes, volumes, lookback=28) is None
 
     def test_bullish_divergence(self):
-        # Price making lower low, OBV making higher low
-        closes = [100.0] * 20 + [90.0] * 14 + [80.0] * 14 + [85.0] * 14
-        volumes = [100.0] * len(closes)
-        volumes[35] = 10000.0  # spike volume on the lower low
-        div = detect_obv_divergence(closes, volumes, lookback=20)
-        # May or may not detect — depends on exact values
-        assert div in (None, "bullish", "bearish")
+        lookback = 28
+        n = 60
+        closes = [100.0] * 4
+        for i in range(28):
+            closes.append(100.0 - i * 0.5)
+        for i in range(10):
+            closes.append(closes[-1] + 0.5)
+        for i in range(18):
+            closes.append(closes[-1] - 0.5)
+        assert len(closes) == n
+
+        volumes = [100.0] * n
+        for i in range(32, 42):
+            volumes[i] = 10000.0
+
+        div = detect_obv_divergence(closes, volumes, lookback=lookback)
+        assert div == "bullish"
