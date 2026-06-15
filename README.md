@@ -50,6 +50,15 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full domain-driven design.
 | [strategy-exhaustion-fade](./skills/strategy-exhaustion-fade/SKILL.md) | market-exhaustion, market-s-r, market-trend | Fade blowoff/capitulation at S/R in extended trend |
 | [strategy-liquidity-sweep](./skills/strategy-liquidity-sweep/SKILL.md) | market-liquidity-sweep, market-accumulation, market-volume | Enter after sweep with accumulation + volume confirmation |
 
+### Batch Runners
+
+Fetch candles once per ticker, run all skills in-process. Use for cron jobs / morning briefs to avoid N×M fetches.
+
+| Skill | Runs | Use case |
+|-------|------|----------|
+| [run-all-l2](./skills/run-all-l2/SKILL.md) | All 6 L2 pattern skills | Pattern context for briefing |
+| [run-all-l3](./skills/run-all-l3/SKILL.md) | All 6 L3 strategies | Aggregated trade ideas across strategies |
+
 
 ## Quick Start
 
@@ -66,6 +75,10 @@ uv run skills/market-trend-analysis/scripts/run.py AAPL --json
 # L3: trade ideas
 uv run skills/strategy-trend-follow/scripts/run.py SPY --json
 uv run skills/strategy-liquidity-sweep/scripts/run.py BTC-USD --json
+
+# Batch runners (fetch once, run all)
+uv run skills/run-all-l2/scripts/run.py SPY BTC-USD AAPL --json
+uv run skills/run-all-l3/scripts/run.py SPY BTC-USD --json
 
 # Tests
 uv run pytest
