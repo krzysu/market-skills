@@ -1,12 +1,14 @@
 # Market Skills
 
-Portable, composable technical analysis skills for trading agents. Pure-math indicators (L1) stacked into pattern-detection skills (L2). No API keys required.
+Portable, composable technical analysis skills for trading agents. Pure-math indicators (L1) stacked into pattern-detection skills (L2) and trade-idea strategies (L3). No API keys required.
 
 ## Architecture
 
 **L1 — Indicator skills** — pure math, no I/O. Each exposes `analyze(candles)` returning structured dicts.
 
 **L2 — Pattern skills** — compose L1 indicators into higher-level patterns (breakout, accumulation, exhaustion, etc.). Each exposes `analyze(candles)` returning `{pattern, signals, input_scores, narrative}`.
+
+**L3 — Strategy skills** — compose L2s into trade ideas with entry/stop/target. Each exposes `analyze(candles)` returning `{ideas, narrative}`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full domain-driven design.
 
@@ -37,6 +39,17 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full domain-driven design.
 | [market-trend-analysis](./skills/market-trend-analysis/SKILL.md) | Trend, RSI, Squeeze, Volume | Composite trend verdict (BUY/WATCH/AVOID) |
 | [market-trend-quality](./skills/market-trend-quality/SKILL.md) | Trend, Fibonacci, Volume, EMA | Uptrend/downtrend quality, weakening, degrading |
 
+### L3 — Strategy Skills (Trade Ideas)
+
+| Skill | Composes | Entry Logic |
+|-------|----------|-------------|
+| [strategy-trend-follow](./skills/strategy-trend-follow/SKILL.md) | market-trend-quality, market-breakout | Long/short in healthy trends, pullback or breakout |
+| [strategy-mean-reversion](./skills/strategy-mean-reversion/SKILL.md) | market-rsi, market-s-r, market-volatility | Fade oversold/overbought at S/R levels |
+| [strategy-breakout-confirm](./skills/strategy-breakout-confirm/SKILL.md) | market-breakout, market-volume, market-squeeze | Enter only on confirmed breakout with volume + squeeze |
+| [strategy-accumulation-swing](./skills/strategy-accumulation-swing/SKILL.md) | market-accumulation, market-trend-quality | Wyckoff spring/reaccumulation within healthy trend |
+| [strategy-exhaustion-fade](./skills/strategy-exhaustion-fade/SKILL.md) | market-exhaustion, market-s-r, market-trend | Fade blowoff/capitulation at S/R in extended trend |
+| [strategy-liquidity-sweep](./skills/strategy-liquidity-sweep/SKILL.md) | market-liquidity-sweep, market-accumulation, market-volume | Enter after sweep with accumulation + volume confirmation |
+
 
 ## Quick Start
 
@@ -50,6 +63,10 @@ uv run skills/market-rsi/scripts/run.py AAPL --json
 uv run skills/market-breakout/scripts/run.py BTC-USD --json
 uv run skills/market-trend-analysis/scripts/run.py AAPL --json
 
+# L3: trade ideas
+uv run skills/strategy-trend-follow/scripts/run.py SPY --json
+uv run skills/strategy-liquidity-sweep/scripts/run.py BTC-USD --json
+
 # Tests
 uv run pytest
 ```
@@ -57,13 +74,19 @@ uv run pytest
 ## Composition
 
 ```
-L2 Skills
+L3 Strategy Skills
+  strategy-trend-follow  strategy-mean-reversion  strategy-breakout-confirm
+  strategy-accumulation-swing  strategy-exhaustion-fade  strategy-liquidity-sweep
+        │                    │
+        └───────┬────────────┘
+                │
+L2 Pattern Skills
   market-accumulation  market-breakout  market-exhaustion
   market-liquidity-sweep  market-trend-analysis  market-trend-quality
         │                    │
         └───────┬────────────┘
                 │
-          L1 Indicator Skills
+L1 Indicator Skills
   market-ema  market-rsi  market-squeeze  market-trend
   market-volume  market-volatility  market-macd
   market-fibonacci  market-s-r
@@ -101,4 +124,4 @@ uv run skills/market-ema/scripts/run.py yf:AAPL --json
 - `lib/` functions are pure math — no I/O, no side effects
 - Each skill follows the Agent Skills spec: `SKILL.md` + `lib.py` + `scripts/`
 - Data providers in `lib/providers/` implement the `Provider` protocol
-- Skill return shapes are typed in `lib/contracts.py` (`L1Result`, `L2Result`, `L2Pattern`)
+- Skill return shapes are typed in `lib/contracts.py` (`L1Result`, `L2Result`, `L2Pattern`, `L3Result`, `L3Idea`)
