@@ -1,33 +1,35 @@
 """Tests for lib/indicators.py — pure math indicator functions."""
 
-import pytest
 import math
+
+import pytest
+
 from lib.indicators import (
-    compute_ema,
-    compute_sma,
-    compute_sma_series,
-    compute_rsi,
     classify_rsi,
-    compute_atr,
-    compute_squeeze,
     classify_squeeze,
+    cluster_levels,
+    compute_atr,
+    compute_ema,
+    compute_fib_levels,
+    compute_macd,
     compute_obv,
     compute_obv_trend,
-    compute_macd,
-    compute_fib_levels,
+    compute_rsi,
+    compute_sma,
+    compute_sma_series,
+    compute_squeeze,
     detect_crossover,
-    ema_slope_pct,
-    stdev,
-    linreg,
-    percentile_rank,
-    pearson_corr,
-    log_returns,
-    realized_vol,
     detect_obv_divergence,
+    ema_slope_pct,
+    extract_ohlcv,
     find_swing_highs,
     find_swing_lows,
-    cluster_levels,
-    extract_ohlcv,
+    linreg,
+    log_returns,
+    pearson_corr,
+    percentile_rank,
+    realized_vol,
+    stdev,
 )
 
 
@@ -171,10 +173,10 @@ class TestOBV:
         volumes = [100, 200, 150, 300, 100]
         obv = compute_obv(closes, volumes)
         assert obv[0] == 0
-        assert obv[1] == 200   # up: +200
-        assert obv[2] == 50    # down: -150
-        assert obv[3] == 350   # up: +300
-        assert obv[4] == 250   # down: -100
+        assert obv[1] == 200  # up: +200
+        assert obv[2] == 50  # down: -150
+        assert obv[3] == 350  # up: +300
+        assert obv[4] == 250  # down: -100
 
     def test_obv_trend_rising(self):
         closes = [10.0]

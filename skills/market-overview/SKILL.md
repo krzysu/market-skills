@@ -1,6 +1,11 @@
 ---
 name: market-overview
 description: "Unified market scan: runs trend-analysis + squeeze + RSI on multiple tickers in parallel, scores them 0-100, and ranks them with actions (BUY/SELL/WATCH). Use for a full market landscape, screening, or daily brief. Supports any yfinance tickers."
+version: 0.1.0
+metadata:
+  hermes:
+    tags: [market, scan, overview, screening]
+    category: market
 compatibility: "Requires Python 3.12+ and uv"
 ---
 

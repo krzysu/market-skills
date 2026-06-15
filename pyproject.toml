@@ -8,6 +8,7 @@ readme = "README.md"
 dependencies = [
     "yfinance>=0.2.0",
     "ccxt>=4.4",
+    "hyperliquid>=0.4.66",
 ]
 
 [project.urls]
@@ -23,7 +24,21 @@ include = ["lib*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"skills/*/scripts/run.py" = ["E402", "E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "ruff>=0.11.0",
 ]

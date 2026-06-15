@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """market-overview — unified market scan across multiple tickers."""
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from lib.data import fetch_ohlc
-from lib.indicators import (
-    compute_ema, compute_rsi, compute_squeeze, classify_squeeze,
-    classify_ema_trend, compute_obv_trend, detect_crossover,
-    ema_slope_pct, extract_ohlcv,
-)
 from lib.formatting import emit_json, print_header, safe_round
+from lib.indicators import (
+    classify_ema_trend,
+    classify_squeeze,
+    compute_ema,
+    compute_obv_trend,
+    compute_rsi,
+    compute_squeeze,
+    extract_ohlcv,
+)
 
 DEFAULT_WATCHLIST = ["SPY", "QQQ", "AAPL", "GOOGL", "BTC-USD", "GLD"]
 
@@ -115,6 +120,7 @@ def scan(tickers, action_filter=None, top_n=None, source=None):
 
 def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="Unified market overview scan")
     parser.add_argument("tickers", nargs="*", help="Ticker symbols (default: watchlist)")
     parser.add_argument("--action", help="Filter by action: STRONG_BUY, BUY, WATCH, AVOID")
@@ -141,9 +147,11 @@ def main():
     print_header("UNIFIED MARKET OVERVIEW")
     if results:
         print(f"  {'Ticker':<10} {'Price':>10} {'Trend':<16} {'RSI':>6} {'Squeeze':<16} {'Score':>6} {'Action'}")
-        print(f"  {'-'*10} {'-'*10} {'-'*16} {'-'*6} {'-'*16} {'-'*6} {'-'*10}")
+        print(f"  {'-' * 10} {'-' * 10} {'-' * 16} {'-' * 6} {'-' * 16} {'-' * 6} {'-' * 10}")
         for r in results:
-            print(f"  {r['ticker']:<10} {r['price']:>10,.2f} {r['trend']:<16} {r['rsi']:>6} {r['squeeze']:<16} {r['unified_score']:>6.0f} {r['action']}")
+            print(
+                f"  {r['ticker']:<10} {r['price']:>10,.2f} {r['trend']:<16} {r['rsi']:>6} {r['squeeze']:<16} {r['unified_score']:>6.0f} {r['action']}"
+            )
     else:
         print("  No tickers matched the filter.")
 

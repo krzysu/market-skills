@@ -1,17 +1,42 @@
-"""Unified data-fetching layer with pluggable providers."""
+"""Unified data-fetching layer with pluggable providers and explicit routing.
+
+Ticker format:
+  - `provider:ticker` — explicit provider routing (e.g. `hl:LIT`, `kraken:BTC-USD`)
+  - `ticker` — auto-detect based on provider capability
+
+Provider prefixes:
+  - `hl:` — Hyperliquid (strip prefix, pass bare coin name)
+  - `kraken:` — Kraken spot (strip prefix, pass pair name)
+  - `yf:` — YFinance (strip prefix, pass ticker symbol)
+  - `yfinance:` — same as `yf:`
+"""
+
+import logging
 
 from lib.providers.base import Provider
 from lib.providers.ccxt import CCXTProvider
+from lib.providers.hyperliquid import HyperliquidProvider
 from lib.providers.kraken import KrakenProvider
 from lib.providers.yfinance import YFinanceProvider
 
+logger = logging.getLogger(__name__)
+
 _REGISTRY: list[Provider] = [
+    HyperliquidProvider(),
+    CCXTProvider("binance"),
     KrakenProvider(),
     YFinanceProvider(),
-    CCXTProvider("binance"),
 ]
 
 _CCXT_CACHE: dict[str, CCXTProvider] = {}
+
+# Short prefix → provider name mapping for explicit `provider:ticker` routing
+_PREFIX_MAP: dict[str, str] = {
+    "hl": "hyperliquid",
+    "kraken": "kraken",
+    "yf": "yfinance",
+    "yfinance": "yfinance",
+}
 
 
 def _get_provider(source: str) -> Provider:
@@ -33,18 +58,46 @@ def _get_provider(source: str) -> Provider:
     raise ValueError(f"Unknown provider: {source}")
 
 
+def _resolve_ticker_prefix(ticker: str) -> tuple[str, str] | None:
+    """Check if ticker uses `provider:ticker` format and return (resolved_ticker, provider_name).
+
+    Returns None if no known prefix is found.
+    """
+    if ":" not in ticker:
+        return None
+    parts = ticker.split(":", 1)
+    prefix = parts[0].lower()
+    provider_name = _PREFIX_MAP.get(prefix)
+    if provider_name is None:
+        return None
+    return (parts[1], provider_name)
+
+
 def fetch_funding_rate(ticker: str, source: str | None = None) -> dict | None:
     """Fetch current funding rate for a perpetual swap ticker.
 
     Returns a dict with funding rate info, or None if unavailable.
     Only CCXT-based providers support this.
+    Supports ``provider:ticker`` prefix routing (e.g. ``ccxtbin:BTC/USDT:USDT``).
     """
+    resolved = _resolve_ticker_prefix(ticker)
+    if resolved is not None:
+        raw_ticker, provider_name = resolved
+        try:
+            p = _get_provider(provider_name)
+            if hasattr(p, "fetch_funding_rate"):
+                return p.fetch_funding_rate(raw_ticker)
+        except Exception as e:
+            logger.warning("fetch_funding_rate(prefix=%s): %s", provider_name, e)
+            return None
+
     if source:
         try:
             p = _get_provider(source)
             if hasattr(p, "fetch_funding_rate"):
                 return p.fetch_funding_rate(ticker)
-        except Exception:
+        except Exception as e:
+            logger.warning("fetch_funding_rate(source=%s): %s", source, e)
             return None
         return None
 
@@ -55,10 +108,10 @@ def fetch_funding_rate(ticker: str, source: str | None = None) -> dict | None:
                     result = p.fetch_funding_rate(ticker)
                     if result:
                         return result
-            except Exception:
+            except Exception as e:
+                logger.debug("fetch_funding_rate(auto, %s=%s): %s", p.name, ticker, e)
                 continue
 
-    # Try CCXT providers last — check markets before attempting
     for p in _REGISTRY:
         if hasattr(p, "fetch_funding_rate") and p.name == "ccxt":
             try:
@@ -66,37 +119,59 @@ def fetch_funding_rate(ticker: str, source: str | None = None) -> dict | None:
                     result = p.fetch_funding_rate(ticker)
                     if result:
                         return result
-            except Exception:
+            except Exception as e:
+                logger.debug("fetch_funding_rate(auto, %s=%s): %s", p.name, ticker, e)
                 continue
 
     return None
 
 
-def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y",
-               source: str | None = None) -> list[list]:
+def _resolve_explicit(ticker: str, interval: str, period: str) -> list[list] | None:
+    """Check if ticker uses ``provider:ticker`` format and route explicitly."""
+    resolved = _resolve_ticker_prefix(ticker)
+    if resolved is None:
+        return None
+    raw_ticker, provider_name = resolved
+    try:
+        return _get_provider(provider_name).fetch(raw_ticker, interval, period)
+    except Exception as e:
+        logger.warning("_resolve_explicit(%s): %s", ticker, e)
+        return []
+
+
+def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y", source: str | None = None) -> list[list]:
     """Fetch OHLC candles for a ticker.
 
     Args:
-        ticker: Ticker symbol (e.g. "AAPL", "BTC-USD", "SPY").
+        ticker: Ticker symbol. Supports `provider:ticker` format (e.g. `hl:LIT`).
         interval: Candle interval — "1d", "1wk", "1h", etc.
         period: How far back — "1y", "6mo", "2y", "max".
-        source: Provider name ("kraken", "yfinance") or None for auto-detect.
+        source: Provider name override, or None for auto-detect.
 
     Returns:
         List of candles: [[timestamp, open, high, low, close, volume], ...]
         Timestamps are Unix seconds (int). Returns [] on failure.
     """
+    # Try explicit `provider:ticker` routing first
+    explicit = _resolve_explicit(ticker, interval, period)
+    if explicit is not None:
+        return explicit
+
+    # Legacy source argument (used by some scripts)
     if source:
         try:
             return _get_provider(source).fetch(ticker, interval, period)
-        except Exception:
+        except Exception as e:
+            logger.warning("fetch_ohlc(source=%s, %s): %s", source, ticker, e)
             return []
 
+    # Auto-detect: try each provider in registry order
     for p in _REGISTRY:
         if p.supports(ticker):
             try:
                 return p.fetch(ticker, interval, period)
-            except Exception:
+            except Exception as e:
+                logger.debug("fetch_ohlc(auto, %s=%s): %s", p.name, ticker, e)
                 continue
 
     return []

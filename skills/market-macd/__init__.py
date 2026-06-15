@@ -1,0 +1,1 @@
+"""market-macd skill."""

@@ -1,6 +1,11 @@
 ---
 name: market-trend-analysis
 description: "Composite trend verdict combining EMA alignment, RSI momentum, squeeze, and volume trend. Use for a single, weighted trend direction with conviction level. More comprehensive than individual indicators. Supports any yfinance ticker."
+version: 0.1.0
+metadata:
+  hermes:
+    tags: [market, technical-analysis, composite, trend]
+    category: market
 compatibility: "Requires Python 3.12+ and uv"
 ---
 

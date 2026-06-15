@@ -1,7 +1,6 @@
 import json
 import subprocess
 
-
 _INTERVAL_MAP = {
     "1d": 1440,
     "1wk": 10080,
@@ -29,7 +28,9 @@ class KrakenProvider:
         try:
             result = subprocess.run(
                 ["kraken", "pairs", "--pair", pair, "-o", "json"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             self._cache[pair] = False
@@ -88,10 +89,10 @@ class KrakenProvider:
                 ts = int(c[0])
                 o = float(c[1])
                 h = float(c[2])
-                l = float(c[3])
+                low = float(c[3])
                 cl = float(c[4])
                 vo = float(c[6])
-                candles.append([ts, o, h, l, cl, vo])
+                candles.append([ts, o, h, low, cl, vo])
             except (IndexError, ValueError, TypeError):
                 continue
         return candles

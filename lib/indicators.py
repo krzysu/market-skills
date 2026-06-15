@@ -1,6 +1,4 @@
 """Pure indicator functions — no external dependencies beyond stdlib.
-
-Ported from kraken-cli trading/analysis/indicators.py.
 All functions operate on plain Python lists of floats.
 """
 
@@ -345,8 +343,8 @@ def find_sr_levels(candles, current_price, window=3):
     swing_lows = find_swing_lows(lows, window)
 
     all_levels = swing_highs + swing_lows
-    support = [l for l in all_levels if l < current_price]
-    resistance = [l for l in all_levels if l >= current_price]
+    support = [level for level in all_levels if level < current_price]
+    resistance = [level for level in all_levels if level >= current_price]
 
     nearest_s = max(support) if support else None
     nearest_r = min(resistance) if resistance else None
@@ -426,10 +424,7 @@ def compute_macd(closes, fast=12, slow=26, signal=9):
     fast_padded = [None] * (n - len(ema_fast_full)) + ema_fast_full
     slow_padded = [None] * (n - len(ema_slow_full)) + ema_slow_full
 
-    macd_line = [
-        f - s if f is not None and s is not None else None
-        for f, s in zip(fast_padded, slow_padded)
-    ]
+    macd_line = [f - s if f is not None and s is not None else None for f, s in zip(fast_padded, slow_padded)]
 
     valid = [v for v in macd_line if v is not None]
     if len(valid) < signal:
@@ -439,10 +434,7 @@ def compute_macd(closes, fast=12, slow=26, signal=9):
 
     _, sig_full = compute_ema(valid, signal)
     sig_padded = [None] * (n - len(sig_full)) + sig_full
-    histogram = [
-        (m - s) if m is not None and s is not None else None
-        for m, s in zip(macd_line, sig_padded)
-    ]
+    histogram = [(m - s) if m is not None and s is not None else None for m, s in zip(macd_line, sig_padded)]
     return macd_line, sig_padded, histogram
 
 

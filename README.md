@@ -1,86 +1,104 @@
 # Market Skills
 
-Agent Skills for trading and market analysis. Portable, composable technical analysis skills following the [Agent Skills](https://agentskills.io) specification.
+Portable, composable technical analysis skills for trading agents. Pure-math indicators (L1) stacked into pattern-detection skills (L2). No API keys required.
 
-Uses Yahoo Finance (free, no API keys) and the Kraken Spot API via a local `kraken` CLI. Auto-routes crypto pairs to Kraken, equities to Yahoo Finance.
+## Architecture
 
-## License
+**L1 — Indicator skills** — pure math, no I/O. Each exposes `analyze(candles)` returning structured dicts.
 
-MIT — see [LICENSE](LICENSE).
+**L2 — Pattern skills** — compose L1 indicators into higher-level patterns (breakout, accumulation, exhaustion, etc.). Each exposes `analyze(candles)` returning `{pattern, signals, input_scores, narrative}`.
 
-## Why Market Skills?
-
-AI agents that do trading or market analysis need more than just price data — they need structured technical analysis they can trust. These skills give agents:
-
-- **Single-indicator primitives**: RSI, moving averages, squeeze momentum — run one, get clean JSON
-- **Composite analysis**: Trend verdict from multiple weighted indicators with conviction scoring
-- **Screening workflows**: Scan watchlists, filter by action, rank by score
-- **Composability**: Higher-level skills import the same `lib/` functions — no subprocess overhead
-
-## Indicator Library
-
-Pure math, no I/O, no external deps beyond stdlib:
-
-EMA — ATR — RSI — MACD — OBV — Fibonacci — Pearson correlation — standard deviation — linear regression — log returns — realized volatility — swing highs/lows — support/resistance clustering — golden/death cross detection — squeeze momentum (BB/KC) — OBV divergence — percentile rank
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full domain-driven design.
 
 ## Skills
 
-| Skill | Layer | What it does |
-|-------|-------|--------------|
-| [market-ema](./skills/market-ema/SKILL.md) | Low-level | EMA 21/50/100/200, trend alignment, golden/death crosses |
-| [market-rsi](./skills/market-rsi/SKILL.md) | Low-level | RSI(14) oscillator with oversold/overbought zones |
-| [market-squeeze](./skills/market-squeeze/SKILL.md) | Low-level | BB/KC squeeze momentum for breakout timing |
-| [market-trend-analysis](./skills/market-trend-analysis/SKILL.md) | Mid-level | Weighted composite: EMA + RSI + squeeze + volume → conviction-scored verdict |
-| [market-overview](./skills/market-overview/SKILL.md) | High-level | Multi-ticker parallel scan, 0-100 unified score, BUY/WATCH/AVOID |
-| [recipe-scanner](./skills/recipe-scanner/SKILL.md) | Recipe | Watchlist momentum sweep, filters actionable setups, ranks by conviction |
+### L1 — Base Indicators
 
-### How they compose
+| Skill | Returns |
+|-------|---------|
+| [market-ema](./skills/market-ema/SKILL.md) | EMA 21/50/100/200, alignment, golden/death crosses |
+| [market-rsi](./skills/market-rsi/SKILL.md) | RSI(14), oversold/overbought zones, 7d delta |
+| [market-squeeze](./skills/market-squeeze/SKILL.md) | BB/KC squeeze, momentum histogram, release signal |
+| [market-trend](./skills/market-trend/SKILL.md) | Trend score (-4 to +4), HH/HL structure, EMA alignment |
+| [market-volume](./skills/market-volume/SKILL.md) | Volume ratio, OBV trend, OBV divergence, regime |
+| [market-volatility](./skills/market-volatility/SKILL.md) | Realized vol 7d/30d, percentile rank, regime |
+| [market-macd](./skills/market-macd/SKILL.md) | MACD line, signal, histogram, flips, crossovers |
+| [market-fibonacci](./skills/market-fibonacci/SKILL.md) | Retracement/ext levels, nearest fib distance |
+| [market-s-r](./skills/market-s-r/SKILL.md) | Support/resistance clusters, nearest levels, sit-on |
 
-```
-recipe-scanner ──→ market-overview ──→ market-trend-analysis
-                                           │
-                         ┌─────────────────┼─────────────────┐
-                    market-ema         market-rsi       market-squeeze
-```
+### L2 — Pattern Detection & Composite Verdicts
+
+| Skill | Composes | Detects |
+|-------|----------|---------|
+| [market-accumulation](./skills/market-accumulation/SKILL.md) | S/R, Volume, Volatility, Trend | Wyckoff accumulation, spring, reaccumulation, UTAD |
+| [market-breakout](./skills/market-breakout/SKILL.md) | Trend, Volume, S/R, Squeeze | Fresh/stale/confirmed breakouts |
+| [market-exhaustion](./skills/market-exhaustion/SKILL.md) | Volume, Volatility, MACD, RSI | Capitulation, blowoff, impulse exhaustion |
+| [market-liquidity-sweep](./skills/market-liquidity-sweep/SKILL.md) | S/R, Trend, Volume | Support/resistance sweeps, double tests |
+| [market-trend-analysis](./skills/market-trend-analysis/SKILL.md) | Trend, RSI, Squeeze, Volume | Composite trend verdict (BUY/WATCH/AVOID) |
+| [market-trend-quality](./skills/market-trend-quality/SKILL.md) | Trend, Fibonacci, Volume, EMA | Uptrend/downtrend quality, weakening, degrading |
+
 
 ## Quick Start
 
 ```bash
-# Install
 uv sync
 
-# Run a skill
+# L1: single indicator
 uv run skills/market-rsi/scripts/run.py AAPL --json
 
-# Run tests
+# L2: pattern detection or composite verdict
+uv run skills/market-breakout/scripts/run.py BTC-USD --json
+uv run skills/market-trend-analysis/scripts/run.py AAPL --json
+
+# Tests
 uv run pytest
+```
+
+## Composition
+
+```
+L2 Skills
+  market-accumulation  market-breakout  market-exhaustion
+  market-liquidity-sweep  market-trend-analysis  market-trend-quality
+        │                    │
+        └───────┬────────────┘
+                │
+          L1 Indicator Skills
+  market-ema  market-rsi  market-squeeze  market-trend
+  market-volume  market-volatility  market-macd
+  market-fibonacci  market-s-r
+                │
+          lib/indicators.py (pure math)
 ```
 
 ## Data Providers
 
-Skills accept `--source` to pick a data provider. Omit it for auto-detection.
+| Provider | Covers | `--source=` | Prefix |
+|----------|--------|-------------|--------|
+| Kraken | Crypto spot (BTC-USD, ETH-USD, ...) | `kraken` | `kraken:` |
+| Hyperliquid | Perps (LIT, HYPE, BTC, ...) via official SDK | `hyperliquid` | `hl:` |
+| Yahoo Finance | Stocks, ETFs (AAPL, SPY, ...) | `yfinance` | `yf:` / `yfinance:` |
+| CCXT (binance) | Multi-exchange, funding rates | `ccxt:binance` | — |
 
-| Provider | Covers | `--source=` |
-|----------|--------|-------------|
-| Kraken | Crypto pairs (BTC-USD, ETH-USD, SOL-USD, ...) | `kraken` |
-| Yahoo Finance | Stocks, ETFs (AAPL, SPY, GLD, QQQ, ...) | `yfinance` |
+For perp-specific data (funding rate, basis, spot-perp divergence), use [market-basis](./skills/market-basis/SKILL.md) — it reads funding rate data from CCXT providers alongside standard OHLC indicators.
+
+Auto-routing: providers are tried in priority order. Use `provider:ticker` notation for explicit routing (e.g. `hl:LIT`, `yf:AAPL`).
 
 ```bash
-# Auto-detect: crypto → Kraken, equities → Yahoo Finance
+# Auto-detect
 uv run skills/market-ema/scripts/run.py BTC-USD
 
 # Explicit provider
-uv run skills/market-ema/scripts/run.py BTC-USD --source=kraken
-uv run skills/market-ema/scripts/run.py AAPL --source=yfinance
+uv run skills/market-ema/scripts/run.py hl:LIT --json
+uv run skills/market-ema/scripts/run.py yf:AAPL --json
 ```
-
-**How auto-routing works:** Each provider has a `supports(ticker)` method. `KrakenProvider` queries `kraken pairs --pair <PAIR>` to check if the pair is actually listed. `YFinanceProvider` accepts everything as fallback. The registry tries providers in priority order and uses the first match.
 
 ## Conventions
 
 - All scripts accept `--json` for machine-readable output
 - All scripts accept a ticker as first positional argument (default: `SPY`)
-- All scripts accept `--source=kraken|yfinance` (default: auto-detect)
+- All accept `--source=<provider>` (default: auto-detect)
 - `lib/` functions are pure math — no I/O, no side effects
-- Each skill folder follows the Agent Skills spec: `SKILL.md` + optional `scripts/`, `references/`
-- Data providers live in `lib/providers/` — add new ones by implementing the `Provider` protocol
+- Each skill follows the Agent Skills spec: `SKILL.md` + `lib.py` + `scripts/`
+- Data providers in `lib/providers/` implement the `Provider` protocol
+- Skill return shapes are typed in `lib/contracts.py` (`L1Result`, `L2Result`, `L2Pattern`)
