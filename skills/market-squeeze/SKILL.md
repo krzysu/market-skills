@@ -1,6 +1,11 @@
 ---
 name: market-squeeze
 description: "Detects Bollinger Band / Keltner Channel squeeze with momentum direction. Use for pre-breakout compression signals and breakout confirmation. Supports any yfinance ticker."
+version: 0.1.0
+metadata:
+  hermes:
+    tags: [market, technical-analysis, squeeze, breakout]
+    category: market
 compatibility: "Requires Python 3.12+ and uv"
 ---
 

@@ -1,6 +1,11 @@
 ---
 name: market-ema
 description: "Computes moving averages (EMA 21/50/100/200) for a ticker. Detects trend alignment, golden/death crosses, and EMA slope. Use for trend direction, support/resistance proxy, or DCA timing. Supports any yfinance ticker."
+version: 0.1.0
+metadata:
+  hermes:
+    tags: [market, technical-analysis, ema]
+    category: market
 compatibility: "Requires Python 3.12+ and uv"
 ---
 

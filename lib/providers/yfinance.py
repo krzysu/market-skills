@@ -26,9 +26,9 @@ class YFinanceProvider:
 
         candles = []
         for idx, row in df.iterrows():
-            o, h, l, c, v = row["Open"], row["High"], row["Low"], row["Close"], row["Volume"]
-            if any(isinstance(x, float) and math.isnan(x) for x in (o, h, l, c)):
+            o, h, low, c, v = row["Open"], row["High"], row["Low"], row["Close"], row["Volume"]
+            if any(isinstance(x, float) and math.isnan(x) for x in (o, h, low, c)):
                 continue
             ts = int(idx.timestamp())
-            candles.append([ts, float(o), float(h), float(l), float(c), float(v)])
+            candles.append([ts, float(o), float(h), float(low), float(c), float(v)])
         return candles

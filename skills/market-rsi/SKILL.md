@@ -1,6 +1,11 @@
 ---
 name: market-rsi
 description: "Computes RSI(14) momentum oscillator for a ticker. Use for oversold/overbought identification, DCA entry timing, or momentum confirmation. Supports any yfinance ticker."
+version: 0.1.0
+metadata:
+  hermes:
+    tags: [market, technical-analysis, rsi]
+    category: market
 compatibility: "Requires Python 3.12+ and uv"
 ---
 

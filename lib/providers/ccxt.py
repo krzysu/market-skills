@@ -2,7 +2,6 @@ import time
 
 import ccxt
 
-
 _INTERVAL_MAP = {
     "1m": "1m",
     "5m": "5m",
@@ -90,10 +89,10 @@ class CCXTProvider:
                 ts = int(c[0] // 1000)
                 o = float(c[1])
                 h = float(c[2])
-                l = float(c[3])
+                low = float(c[3])
                 cl = float(c[4])
                 v = float(c[5])
-                candles.append([ts, o, h, l, cl, v])
+                candles.append([ts, o, h, low, cl, v])
             except (IndexError, ValueError, TypeError):
                 continue
         return candles

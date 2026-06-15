@@ -1,8 +1,7 @@
 """JSON output formatting helpers for skill scripts."""
 
 import json
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def clamp(val, min_val=0, max_val=100):
@@ -31,7 +30,7 @@ def parse_args(argv, default_ticker=None):
     """
     ticker = default_ticker
     json_mode = False
-    source = "yfinance"
+    source = None
 
     for arg in argv:
         if arg == "--json":
@@ -46,7 +45,7 @@ def parse_args(argv, default_ticker=None):
 
 def print_header(title, width=60):
     """Print a formatted header to stdout (for non-JSON mode)."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     print("=" * width)
     print(f" {title} — {now}")
     print("=" * width)

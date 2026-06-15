@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
 """market-basis — perp market structure: funding, basis, spot-perp squeeze/RSI divergence."""
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-from lib.data import fetch_ohlc, fetch_funding_rate
-from lib.indicators import (
-    compute_ema, compute_rsi, compute_squeeze, classify_squeeze,
-    classify_ema_trend, extract_ohlcv,
-)
+from lib.data import fetch_funding_rate, fetch_ohlc
 from lib.formatting import emit_json, print_header, safe_round
+from lib.indicators import (
+    classify_ema_trend,
+    classify_squeeze,
+    compute_ema,
+    compute_rsi,
+    compute_squeeze,
+    extract_ohlcv,
+)
 
 
 def _analyze_one(data, label):
     if not data or len(data) < 50:
         return None
-    o, h, l, c, v = extract_ohlcv(data)
+    o, h, low, c, v = extract_ohlcv(data)
     price = c[-1]
     ema21, _ = compute_ema(c, 21)
     ema50, _ = compute_ema(c, 50)
     rsi = compute_rsi(c, 14)
-    sq, mom, sdir = compute_squeeze(c, h, l)
+    sq, mom, sdir = compute_squeeze(c, h, low)
     sig = classify_squeeze(mom, sdir)
     if ema21 and ema50:
         trend, _ = classify_ema_trend(ema21, ema50, price)
@@ -104,12 +109,18 @@ def analyze(ticker, source="ccxt:binance"):
         s_rsi = spot.get("rsi")
         p_rsi = perp.get("rsi")
         if s_rsi is not None and p_rsi is not None:
+
             def _zone(r):
-                if r < 30: return "oversold"
-                if r < 40: return "near_oversold"
-                if r <= 60: return "neutral"
-                if r <= 70: return "near_overbought"
+                if r < 30:
+                    return "oversold"
+                if r < 40:
+                    return "near_oversold"
+                if r <= 60:
+                    return "neutral"
+                if r <= 70:
+                    return "near_overbought"
                 return "overbought"
+
             if _zone(s_rsi) != _zone(p_rsi):
                 divergences.append(f"rsi_zone: spot={_zone(s_rsi)} vs perp={_zone(p_rsi)}")
     if divergences:
@@ -120,6 +131,7 @@ def analyze(ticker, source="ccxt:binance"):
 
 def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="Perpetual swap market structure analysis")
     parser.add_argument("ticker", nargs="?", default="BTC/USDT", help="Ticker (e.g. BTC/USDT)")
     parser.add_argument("--source", default="ccxt:binance", help="CCXT provider and exchange (default: ccxt:binance)")
