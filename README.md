@@ -59,6 +59,12 @@ Fetch candles once per ticker, run all skills in-process. Use for cron jobs / mo
 | [run-all-l2](./skills/run-all-l2/SKILL.md) | All 6 L2 pattern skills | Pattern context for briefing |
 | [run-all-l3](./skills/run-all-l3/SKILL.md) | All 6 L3 strategies | Aggregated trade ideas across strategies |
 
+### Utilities
+
+| Skill | Purpose |
+|-------|---------|
+| [portfolio-mgmt](./skills/portfolio-mgmt/SKILL.md) | SQLite-backed portfolio tracking with FIFO cost basis, multi-portfolio support, live price fetching, P&L, replay, and external reconciliation |
+
 
 ## Quick Start
 
@@ -79,6 +85,12 @@ uv run skills/strategy-liquidity-sweep/scripts/run.py BTC-USD --json
 # Batch runners (fetch once, run all)
 uv run skills/run-all-l2/scripts/run.py SPY BTC-USD AAPL --json
 uv run skills/run-all-l3/scripts/run.py SPY BTC-USD --json
+
+# Portfolio tracking
+uv run skills/portfolio-mgmt/scripts/run.py init
+uv run skills/portfolio-mgmt/scripts/run.py portfolio create --name spot
+uv run skills/portfolio-mgmt/scripts/run.py add --portfolio spot --asset=kraken:BTCUSD --side buy --qty 0.01 --price 45000
+uv run skills/portfolio-mgmt/scripts/run.py positions
 
 # Tests
 uv run pytest
