@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from lib.indicators import (
+from analysis.indicators import (
     classify_rsi,
     classify_squeeze,
     cluster_levels,

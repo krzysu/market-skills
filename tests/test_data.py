@@ -1,6 +1,6 @@
 """Tests for lib/data.py — data fetching and provider routing."""
 
-from lib.data import _PREFIX_MAP, _resolve_ticker_prefix
+from analysis.data import _PREFIX_MAP, _resolve_ticker_prefix
 
 
 class TestResolveTickerPrefix:

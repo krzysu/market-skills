@@ -25,7 +25,7 @@ uv run skills/market-exhaustion/scripts/run.py SPY --json
 | Sub-signal | Weight | Source L1 |
 |---|---|---|
 | Volume climax (volume_ratio >= 2.5 or regime == CLIMAX) | 0.30 | market-volume |
-| RSI extreme (rsi < 30 or rsi > 70) | 0.25 | computed directly via lib.indicators |
+| RSI extreme (rsi < 30 or rsi > 70) | 0.25 | computed directly via analysis.indicators |
 | Narrowing range (volatility regime == LOW) | 0.20 | market-volatility |
 | Momentum divergence (histogram_flip exists) | 0.15 | market-macd |
 | Sentiment extreme (fear_greed < 25 or > 75) | 0.10 | market-fear-greed (optional) |

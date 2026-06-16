@@ -1,7 +1,7 @@
 """market-ema — L1 indicator: EMA filter and trend structure analysis."""
 
-from lib.formatting import safe_round
-from lib.indicators import compute_ema, detect_crossover, ema_slope_pct, extract_ohlcv
+from analysis.formatting import safe_round
+from analysis.indicators import compute_ema, detect_crossover, ema_slope_pct, extract_ohlcv
 
 
 def analyze(candles, interval="1d", period="1y"):

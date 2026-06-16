@@ -116,7 +116,7 @@ L1 Indicator Skills
   market-volume  market-volatility  market-macd
   market-fibonacci  market-s-r
                 │
-          lib/indicators.py (pure math)
+          analysis/indicators.py (pure math)
 ```
 
 ## Data Providers
@@ -146,7 +146,7 @@ uv run skills/market-ema/scripts/run.py yf:AAPL --json
 - All scripts accept `--json` for machine-readable output
 - All scripts accept a ticker as first positional argument (default: `SPY`)
 - All accept `--source=<provider>` (default: auto-detect)
-- `lib/` functions are pure math — no I/O, no side effects
+- `analysis/` functions are pure math — no I/O, no side effects
 - Each skill follows the Agent Skills spec: `SKILL.md` + `lib.py` + `scripts/`
-- Data providers in `lib/providers/` implement the `Provider` protocol
-- Skill return shapes are typed in `lib/contracts.py` (`L1Result`, `L2Result`, `L2Pattern`, `L3Result`, `L3Idea`)
+- Data providers in `analysis/providers/` implement the `Provider` protocol
+- Skill return shapes are typed in `analysis/contracts.py` (`L1Result`, `L2Result`, `L2Pattern`, `L3Result`, `L3Idea`)

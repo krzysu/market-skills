@@ -1,7 +1,7 @@
 """market-rsi — L1 indicator: RSI momentum oscillator."""
 
-from lib.formatting import safe_round
-from lib.indicators import compute_rsi, extract_ohlcv
+from analysis.formatting import safe_round
+from analysis.indicators import compute_rsi, extract_ohlcv
 
 
 def analyze(candles, interval="1d", period="1y"):

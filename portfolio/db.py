@@ -501,7 +501,7 @@ def get_cached_prices(db_path: str) -> dict[str, float]:
 
 def refresh_prices(db_path: str) -> dict[str, float]:
     """Fetch current prices for all held assets via lib/data.py, update cache."""
-    from lib.data import fetch_ohlc
+    from analysis.data import fetch_ohlc
 
     conn = get_db(db_path)
     assets = [r[0] for r in conn.execute("SELECT DISTINCT asset FROM transactions").fetchall()]
@@ -523,7 +523,7 @@ def refresh_prices(db_path: str) -> dict[str, float]:
     for asset, price in prices.items():
         conn.execute(
             "INSERT OR REPLACE INTO price_cache (asset, price, ts, source) VALUES (?, ?, ?, ?)",
-            (asset, price, now_ts, "lib.data"),
+            (asset, price, now_ts, "analysis.data"),
         )
     conn.commit()
     conn.close()
