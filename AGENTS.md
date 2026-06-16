@@ -19,7 +19,7 @@ uv run pytest tests/test_X.py -v  # single file
 - **Prefer L3 strategies for trade ideas** — they synthesize L2 verdicts into actionable trade setups with entry/stop/target. Use L2 for pattern context, L1 only for debugging or building new L2+ skills.
 - **`lib/indicators.py`**: all pure math — EMA, RSI, squeeze, MACD, ATR, OBV, Fibonacci, swing points, etc.
 - **`lib/data.py`**: data-fetching layer with prefix routing (`hl:LIT`, `yf:AAPL`, `kraken:BTC-USD`). Providers implement `Provider` protocol from `lib/providers/base.py`.
-- **`lib/` is the only importable package** (`pyproject.toml` → `packages.find = {include = ["lib*"]}`). Skills are loaded dynamically via `importlib`.
+- **`lib/` and `portfolio/` are importable packages** (`pyproject.toml` → `packages.find = {include = ["lib*", "portfolio*"]}`). Skills are loaded dynamically via `importlib`.
 - **`lib/contracts.py`** defines TypedDict return shapes (`L1Result`, `L2Result`, `L2Pattern`, `L3Result`, `L3Idea`) — type-check against these in CI.
 - Every skill follows Agent Skills spec: `SKILL.md` + `lib.py` + `scripts/run.py`.
 
@@ -32,7 +32,5 @@ uv run pytest tests/test_X.py -v  # single file
 
 ## What to avoid
 
-- No hardcoded paths to private repos (`kraken-cli`, `/Users/bulka/agents/`).
-- Don't make skills importable as regular packages — the `lib/` package is the only one registered in `pyproject.toml`.
+- No hardcoded paths to private repos.
 - Don't create `__pycache__/`, `.venv/`, `.ruff_cache/`, `.pytest_cache/`, `*.egg-info/`, `dist/` — already in `.gitignore`.
-- Don't make skills importable as regular packages — the `lib/` package is the only one registered in `pyproject.toml`.
