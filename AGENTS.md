@@ -17,16 +17,16 @@ uv run pytest tests/test_X.py -v  # single file
 - **L3 strategies** (`skills/strategy-{trend-follow,mean-reversion,breakout-confirm,accumulation-swing,exhaustion-fade,liquidity-sweep}/`): compose L2s (and some L1s directly) via `_load_l2_skill()`. Return `{ideas, narrative}` where each idea has direction, conviction, entry/stop/target, reasoning, and source skills.
 - **Batch runners** (`skills/run-all-l2/`, `skills/run-all-l3/`): fetch candles once per ticker, then run all L2 or L3 skills in-process. Use these from cron jobs / morning briefs to avoid N×M fetches.
 - **Prefer L3 strategies for trade ideas** — they synthesize L2 verdicts into actionable trade setups with entry/stop/target. Use L2 for pattern context, L1 only for debugging or building new L2+ skills.
-- **`lib/indicators.py`**: all pure math — EMA, RSI, squeeze, MACD, ATR, OBV, Fibonacci, swing points, etc.
-- **`lib/data.py`**: data-fetching layer with prefix routing (`hl:LIT`, `yf:AAPL`, `kraken:BTC-USD`). Providers implement `Provider` protocol from `lib/providers/base.py`.
-- **`lib/` and `portfolio/` are importable packages** (`pyproject.toml` → `packages.find = {include = ["lib*", "portfolio*"]}`). Skills are loaded dynamically via `importlib`.
-- **`lib/contracts.py`** defines TypedDict return shapes (`L1Result`, `L2Result`, `L2Pattern`, `L3Result`, `L3Idea`) — type-check against these in CI.
+- **`analysis/indicators.py`**: all pure math — EMA, RSI, squeeze, MACD, ATR, OBV, Fibonacci, swing points, etc.
+- **`analysis/data.py`**: data-fetching layer with prefix routing (`hl:LIT`, `yf:AAPL`, `kraken:BTC-USD`). Providers implement `Provider` protocol from `analysis/providers/base.py`.
+- **`analysis/` and `portfolio/` are importable packages** (`pyproject.toml` → `packages.find = {include = ["analysis*", "portfolio*"]}`). Skills are loaded dynamically via `importlib`.
+- **`analysis/contracts.py`** defines TypedDict return shapes (`L1Result`, `L2Result`, `L2Pattern`, `L3Result`, `L3Idea`) — type-check against these in CI.
 - Every skill follows Agent Skills spec: `SKILL.md` + `lib.py` + `scripts/run.py`.
 
 ## Conventions
 
 - All `scripts/run.py` accept `--json` for machine output, first positional arg as ticker (default `SPY`), and `--source=<provider>`.
-- Ruff exceptions: `skills/*/scripts/run.py` have E402 (sys.path trick before lib import) and E501 (long display f-strings) ignored.
+- Ruff exceptions: `skills/*/scripts/run.py` have E402 (sys.path trick before analysis import) and E501 (long display f-strings) ignored.
 - Provider notation: `provider:ticker` (e.g., `hl:LIT`, `yf:AAPL`, `kraken:BTC-USD`). Auto-detect tries Hyperliquid → CCXT(binance) → Kraken → YFinance.
 - Never use `l` as a variable name — ambiguous with `1`, triggers E741.
 

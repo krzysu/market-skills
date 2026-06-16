@@ -4,7 +4,7 @@ import functools
 import importlib.util
 import os
 
-from lib.indicators import compute_atr_from_candles
+from analysis.indicators import compute_atr_from_candles
 
 
 @functools.cache

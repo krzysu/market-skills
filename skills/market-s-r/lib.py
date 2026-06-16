@@ -1,7 +1,7 @@
 """market-s-r — Support and Resistance from swing point clustering."""
 
-from lib.formatting import safe_round
-from lib.indicators import (
+from analysis.formatting import safe_round
+from analysis.indicators import (
     cluster_levels,
     extract_ohlcv,
     find_sr_levels,

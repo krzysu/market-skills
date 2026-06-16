@@ -1,7 +1,7 @@
 """market-fibonacci — Fibonacci retracement and extension levels."""
 
-from lib.formatting import safe_round
-from lib.indicators import compute_fib_levels, extract_ohlcv, find_swing_high, find_swing_low
+from analysis.formatting import safe_round
+from analysis.indicators import compute_fib_levels, extract_ohlcv, find_swing_high, find_swing_low
 
 
 def analyze(candles, interval="1d", period="1y"):

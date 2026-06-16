@@ -1,7 +1,7 @@
 """market-volume — Volume analysis: ratio, OBV trend, regime classification."""
 
-from lib.formatting import safe_round
-from lib.indicators import (
+from analysis.formatting import safe_round
+from analysis.indicators import (
     compute_obv_trend,
     compute_sma,
     detect_obv_divergence,

@@ -1,7 +1,7 @@
 """market-macd — MACD momentum indicator analysis."""
 
-from lib.formatting import safe_round
-from lib.indicators import compute_macd
+from analysis.formatting import safe_round
+from analysis.indicators import compute_macd
 
 
 def analyze(candles, interval="1d", period="1y"):

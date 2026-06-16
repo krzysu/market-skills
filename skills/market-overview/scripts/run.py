@@ -8,9 +8,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from lib.data import fetch_ohlc
-from lib.formatting import emit_json, print_header, safe_round
-from lib.indicators import (
+from analysis.data import fetch_ohlc
+from analysis.formatting import emit_json, print_header, safe_round
+from analysis.indicators import (
     classify_ema_trend,
     classify_squeeze,
     compute_ema,

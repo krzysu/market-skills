@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-from lib.data import fetch_ohlc
-from lib.formatting import emit_json, parse_args, print_header
+from analysis.data import fetch_ohlc
+from analysis.formatting import emit_json, parse_args, print_header
 
 
 def _load_lib():

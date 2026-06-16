@@ -1,7 +1,7 @@
 """market-squeeze — L1 indicator: Bollinger Band / Keltner Channel squeeze momentum."""
 
-from lib.formatting import safe_round
-from lib.indicators import classify_squeeze, compute_squeeze, extract_ohlcv, true_range
+from analysis.formatting import safe_round
+from analysis.indicators import classify_squeeze, compute_squeeze, extract_ohlcv, true_range
 
 
 def analyze(candles, interval="1d", period="1y"):

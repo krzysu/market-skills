@@ -19,8 +19,8 @@ def _load_lib():
 
 from datetime import UTC, datetime
 
-from lib.data import fetch_ohlc
-from lib.formatting import emit_json, parse_args, print_header
+from analysis.data import fetch_ohlc
+from analysis.formatting import emit_json, parse_args, print_header
 
 
 def analyze(ticker, source=None):

@@ -46,7 +46,7 @@ lots [--portfolio X] [--asset Y]
 edit <id> --field notes --value "updated"     # Only notes and ref are editable
 remove <id> [--yes]                           # Delete a transaction
 
-prices refresh                                # Fetch live prices via lib/data.py for held assets
+prices refresh                                # Fetch live prices via analysis/data.py for held assets
 allocation [--portfolio X] [--no-refresh]       # % breakdown by asset
 performance [--portfolio X] [--no-refresh]      # Realized PnL, profit factor
 replay [--portfolio X] [--json]                # FIFO audit trail — per-lot creation & consumption
@@ -72,7 +72,7 @@ Pass via `--asset`. All transactions in a portfolio must use the same base curre
 | `hl:LIT` | Hyperliquid | USDC | HL spot tokens |
 | `BTC` | none | — | Watch-only (manual price) |
 
-The `provider:` prefix routes through `lib/data.py` for `prices refresh`. Assets without a `:` prefix are skipped (manual price only).
+The `provider:` prefix routes through `analysis/data.py` for `prices refresh`. Assets without a `:` prefix are skipped (manual price only).
 
 ## Currency
 
@@ -80,7 +80,7 @@ Each portfolio has its own `base_ccy` (EUR, USD, USDC, etc.). All numbers are re
 
 **All transactions in a given portfolio must use the same base currency.** If you trade in both EUR and USD, create two portfolios (e.g., `spot-eur` and `spot-usd`).
 
-`view`, `positions`, `pnl`, `allocation`, `performance` auto-refresh prices from `lib/data.py` on every call. Add `--no-refresh` to skip network calls and use stale cache. `--price-override` always takes precedence.
+`view`, `positions`, `pnl`, `allocation`, `performance` auto-refresh prices from `analysis/data.py` on every call. Add `--no-refresh` to skip network calls and use stale cache. `--price-override` always takes precedence.
 
 ## Price overrides
 

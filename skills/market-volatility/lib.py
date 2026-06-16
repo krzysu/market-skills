@@ -1,7 +1,7 @@
 """market-volatility — Realized volatility analysis, percentile rank, regime."""
 
-from lib.formatting import safe_round
-from lib.indicators import log_returns, percentile_rank, realized_vol
+from analysis.formatting import safe_round
+from analysis.indicators import log_returns, percentile_rank, realized_vol
 
 
 def analyze(candles, interval="1d", period="1y"):

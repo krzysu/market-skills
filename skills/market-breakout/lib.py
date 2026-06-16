@@ -4,7 +4,7 @@ import functools
 import importlib.util
 import os
 
-from lib.indicators import compute_sma, extract_ohlcv
+from analysis.indicators import compute_sma, extract_ohlcv
 
 
 @functools.cache

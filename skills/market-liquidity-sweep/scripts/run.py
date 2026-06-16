@@ -20,8 +20,8 @@ def _load_lib():
 
 from datetime import UTC, datetime  # noqa: E402
 
-from lib.data import fetch_ohlc  # noqa: E402
-from lib.formatting import emit_json, parse_args, print_header  # noqa: E402
+from analysis.data import fetch_ohlc  # noqa: E402
+from analysis.formatting import emit_json, parse_args, print_header  # noqa: E402
 
 
 def analyze(ticker, source=None):

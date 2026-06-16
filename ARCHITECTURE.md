@@ -14,7 +14,7 @@ The architecture below describes the **long-term domain design**, with each laye
 │          Schema-validated settings (tiers, budget,           │
 │          venue keys, strategy params)                       │
 │          ─── consumed by every other domain ───             │
-│          ▶ NOT BUILT — planned as lib/config.py             │
+│          ▶ NOT BUILT — planned as analysis/config.py             │
 └─────────────────────────────────────────────────────────────┘
        │                         │                         │
        ▼                         ▼                         │
@@ -85,10 +85,10 @@ The architecture below describes the **long-term domain design**, with each laye
 └────────┬─────────────────────────────┘
          │
 ┌────────▼─────────────────────────────┐
-│   lib/indicators.py  pure math       │
-│   lib/contracts.py   TypedDicts      │
-│   lib/data.py        data fetch      │
-│   lib/providers/*    exchanges       │
+│   analysis/indicators.py  pure math       │
+│   analysis/contracts.py   TypedDicts      │
+│   analysis/data.py        data fetch      │
+│   analysis/providers/*    exchanges       │
 └──────────────────────────────────────┘
 ```
 
@@ -211,12 +211,12 @@ Each domain becomes one or more skills callable by a Hermes agent:
 
 ## Extensibility model
 
-- **New indicator**: add function in `lib/indicators.py`, optionally wrap as L1 skill.
+- **New indicator**: add function in `analysis/indicators.py`, optionally wrap as L1 skill.
 - **New pattern**: create L2 skill in `skills/market-{name}/`. Compose L1s via `_load_l1_skill()`. Return `{pattern, signals, input_scores, narrative}`.
 - **New strategy**: create L3 strategy in `skills/strategy-{name}/`. Compose L2s via `_load_l2_skill()`. Return `{ideas, narrative}`.
 - **New exchange data**: implement `DataProvider`, register in `_REGISTRY` and `_PREFIX_MAP`.
 - **New exchange execution**: implement `ExecutionProvider`, add to execution registry.
-- **New risk policy**: add function to `lib/risk.py`, compose in `vet()`.
+- **New risk policy**: add function to `analysis/risk.py`, compose in `vet()`.
 
 No file outside the new skill/module needs to change (except registries for providers).
 
@@ -224,9 +224,9 @@ No file outside the new skill/module needs to change (except registries for prov
 
 - [x] **L3 strategy skills** (6 built: trend-follow, mean-reversion, breakout-confirm, accumulation-swing, exhaustion-fade, liquidity-sweep)
 - [x] **Batch runners** (`run-all-l2`, `run-all-l3`) — fetch once, run all skills in-process
-- [ ] **Portfolio** (`lib/portfolio.py`) — standalone SQLite module. Skills and the agent brain query it for position context.
+- [ ] **Portfolio** (`analysis/portfolio.py`) — standalone SQLite module. Skills and the agent brain query it for position context.
 - [ ] **Execution provider protocol** + paper mode — same pattern as data providers.
-- [ ] **Risk** (`lib/risk.py`) — validate ideas against portfolio + config.
+- [ ] **Risk** (`analysis/risk.py`) — validate ideas against portfolio + config.
 - [ ] **Wire up** — L3 → risk → execution → portfolio loop the agent brain calls.
 
 Each step is independently usable. You can use L3 for analysis today, add portfolio tracking next quarter, and never touch execution.

@@ -1,7 +1,7 @@
 """market-trend — Trend structure analysis: EMA alignment, HH/HL, slope."""
 
-from lib.formatting import safe_round
-from lib.indicators import (
+from analysis.formatting import safe_round
+from analysis.indicators import (
     compute_ema,
     detect_crossover,
     ema_slope_pct,

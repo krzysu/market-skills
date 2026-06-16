@@ -4,7 +4,7 @@ import functools
 import importlib.util
 import os
 
-from lib.indicators import extract_ohlcv, find_swing_high, find_swing_low
+from analysis.indicators import extract_ohlcv, find_swing_high, find_swing_low
 
 
 @functools.cache

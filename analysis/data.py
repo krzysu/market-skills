@@ -13,11 +13,11 @@ Provider prefixes:
 
 import logging
 
-from lib.providers.base import Provider
-from lib.providers.ccxt import CCXTProvider
-from lib.providers.hyperliquid import HyperliquidProvider
-from lib.providers.kraken import KrakenProvider
-from lib.providers.yfinance import YFinanceProvider
+from analysis.providers.base import Provider
+from analysis.providers.ccxt import CCXTProvider
+from analysis.providers.hyperliquid import HyperliquidProvider
+from analysis.providers.kraken import KrakenProvider
+from analysis.providers.yfinance import YFinanceProvider
 
 logger = logging.getLogger(__name__)
 
