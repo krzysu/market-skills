@@ -1,31 +1,17 @@
 """strategy-exhaustion-fade — L3 strategy: fade exhaustion at extremes."""
 
-import functools
-import importlib.util
-import os
-
 from analysis.indicators import compute_atr_from_candles
+from analysis.skill_loader import load_skill
 
 
-@functools.cache
-def _load_l2_skill(name):
-    lib_path = os.path.join(os.path.dirname(__file__), "..", name, "lib.py")
-    if not os.path.exists(lib_path):
-        return None
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_") + "_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def analyze(candles, interval="1d", period="1y"):
+def analyze(candles, *, ticker, interval="1d", period="1y"):
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
         return {"ideas": [], "narrative": f"insufficient data (need 50+ candles, got {cc})"}
 
-    exh_mod = _load_l2_skill("market-exhaustion")
-    sr_mod = _load_l2_skill("market-s-r")
-    trend_mod = _load_l2_skill("market-trend")
+    exh_mod = load_skill("market-exhaustion")
+    sr_mod = load_skill("market-s-r")
+    trend_mod = load_skill("market-trend")
 
     err = {"error": "unavailable", "pattern": {"present": False}}
     exh_result = exh_mod.analyze(candles, interval=interval, period=period) if exh_mod else err
@@ -57,7 +43,7 @@ def analyze(candles, interval="1d", period="1y"):
         conviction = min(5, exh_pattern.get("confidence", 3))
         ideas.append(
             {
-                "pair": "...",
+                "pair": ticker,
                 "direction": "short",
                 "conviction": conviction,
                 "entry_type": "limit",
@@ -77,7 +63,7 @@ def analyze(candles, interval="1d", period="1y"):
         conviction = min(5, exh_pattern.get("confidence", 3))
         ideas.append(
             {
-                "pair": "...",
+                "pair": ticker,
                 "direction": "long",
                 "conviction": conviction,
                 "entry_type": "limit",

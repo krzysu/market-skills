@@ -1,8 +1,6 @@
 """run-all-l2 — fetch candles once per ticker, run all L2 pattern skills in-process."""
 
-import functools
-import importlib.util
-import os
+from analysis.skill_loader import load_skill
 
 L2_SKILLS = [
     "market-accumulation",
@@ -11,18 +9,7 @@ L2_SKILLS = [
     "market-liquidity-sweep",
     "market-trend-analysis",
     "market-trend-quality",
-]
-
-
-@functools.cache
-def _load_skill(name):
-    lib_path = os.path.join(os.path.dirname(__file__), "..", name, "lib.py")
-    if not os.path.exists(lib_path):
-        return None
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_") + "_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+]  # noqa: E501
 
 
 def analyze(ticker, candles, interval="1d", period="1y"):
@@ -36,7 +23,7 @@ def analyze(ticker, candles, interval="1d", period="1y"):
     """
     skills_out = {}
     for skill_name in L2_SKILLS:
-        mod = _load_skill(skill_name)
+        mod = load_skill(skill_name)
         if mod is None:
             skills_out[skill_name] = {"error": "skill not found"}
             continue

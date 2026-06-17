@@ -37,7 +37,11 @@ def _parse_argv(argv):
 def main():
     tickers, json_mode, source = _parse_argv(sys.argv[1:])
     if not tickers:
-        tickers = ["SPY"]
+        if json_mode:
+            print('{"error": "at least one ticker required"}')
+        else:
+            print("usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER]")
+        sys.exit(2)
 
     _lib = _load_lib()
 

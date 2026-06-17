@@ -77,20 +77,10 @@ def fetch_funding_rate(ticker: str, source: str | None = None) -> dict | None:
     """Fetch current funding rate for a perpetual swap ticker.
 
     Returns a dict with funding rate info, or None if unavailable.
-    Only CCXT-based providers support this.
-    Supports ``provider:ticker`` prefix routing (e.g. ``ccxtbin:BTC/USDT:USDT``).
+    Only CCXT-based providers support this. Use the ``source`` argument
+    (e.g. ``source="ccxt:binance"``) to pick an exchange explicitly;
+    ticker-prefix routing is not supported for funding rates.
     """
-    resolved = _resolve_ticker_prefix(ticker)
-    if resolved is not None:
-        raw_ticker, provider_name = resolved
-        try:
-            p = _get_provider(provider_name)
-            if hasattr(p, "fetch_funding_rate"):
-                return p.fetch_funding_rate(raw_ticker)
-        except Exception as e:
-            logger.warning("fetch_funding_rate(prefix=%s): %s", provider_name, e)
-            return None
-
     if source:
         try:
             p = _get_provider(source)

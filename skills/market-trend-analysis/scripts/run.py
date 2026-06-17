@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, parse_args, print_header
+from analysis.formatting import emit_json, parse_args, print_header, require_ticker
 
 
 def _load_lib():
@@ -21,7 +21,8 @@ def _load_lib():
 
 
 def main():
-    ticker, json_mode, source = parse_args(sys.argv[1:], default_ticker="SPY")
+    ticker, json_mode, source = parse_args(sys.argv[1:])
+    require_ticker(ticker, json_mode)
 
     candles = fetch_ohlc(ticker, period="2y", source=source)
     if not candles:

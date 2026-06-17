@@ -1,4 +1,4 @@
-"""Tests for lib/data.py — data fetching and provider routing."""
+"""Tests for analysis/data.py — data fetching and provider routing."""
 
 from analysis.data import _PREFIX_MAP, _resolve_ticker_prefix
 

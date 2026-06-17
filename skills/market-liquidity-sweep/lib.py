@@ -1,22 +1,7 @@
 """market-liquidity-sweep — L2 pattern detection: detects liquidity sweeps and fakeouts."""
 
-import functools
-import importlib.util
-import os
-
 from analysis.indicators import extract_ohlcv, find_swing_high, find_swing_low
-
-
-@functools.cache
-def _load_l1_skill(name):
-    """Load an L1 skill lib.py dynamically (handles hyphens in path)."""
-    lib_path = os.path.join(os.path.dirname(__file__), "..", name, "lib.py")
-    if not os.path.exists(lib_path):
-        return None
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_") + "_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from analysis.skill_loader import load_skill
 
 
 def analyze(candles, interval="1d", period="1y"):
@@ -47,9 +32,9 @@ def analyze(candles, interval="1d", period="1y"):
     current_price = closes[-1]
 
     # Load L1 modules
-    sr_mod = _load_l1_skill("market-s-r")
-    trend_mod = _load_l1_skill("market-trend")
-    vol_mod = _load_l1_skill("market-volume")
+    sr_mod = load_skill("market-s-r")
+    trend_mod = load_skill("market-trend")
+    vol_mod = load_skill("market-volume")
 
     # Run L1 analyzers
     err = {"error": "unavailable"}

@@ -116,24 +116,23 @@ L3 strategy skills follow the same pattern as L2 but output trade ideas:
 ```python
 # skills/strategy-trend-follow/lib.py
 
-@functools.cache
-def _load_l2_skill(name):
-    # same importlib pattern as L2's _load_l1_skill
+from analysis.skill_loader import load_skill
 
-def analyze(candles, interval="1d", period="1y", portfolio=None):
-    # Compose L2 verdicts
-    trend_q = _load_l2_skill("market-trend-quality").analyze(candles, interval, period)
-    accum = _load_l2_skill("market-accumulation").analyze(candles, interval, period)
+def analyze(candles, *, ticker, interval="1d", period="1y"):
+    # Compose L2 verdicts (load_skill is @functools.cache'd internally)
+    trend_q = load_skill("market-trend-quality").analyze(candles, interval=interval, period=period)
+    accum = load_skill("market-accumulation").analyze(candles, interval=interval, period=period)
 
     # Apply entry/exit rules
     if trend_q["pattern"]["present"] and accum["pattern"]["present"]:
         return {
             "ideas": [
                 {
-                    "pair": "...",
+                    "pair": ticker,
                     "direction": "long",
                     "conviction": min(trend_q["pattern"]["confidence"], accum["pattern"]["confidence"]),
-                    "entry_zone": {...},
+                    "entry_price": ...,
+                    "entry_range": [...],
                     "stop_loss": ...,
                     "take_profit": [...],
                     "reasoning": "high-quality trend + accumulation",

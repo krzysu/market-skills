@@ -37,7 +37,11 @@ def _parse_argv(argv):
 def main():
     tickers, json_mode, source = _parse_argv(sys.argv[1:])
     if not tickers:
-        tickers = ["SPY"]
+        if json_mode:
+            print('{"error": "at least one ticker required"}')
+        else:
+            print("usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER]")
+        sys.exit(2)
 
     _lib = _load_lib()
 
@@ -61,6 +65,9 @@ def main():
         result = _lib.analyze(t, candles)
         print(f"  {t}")
         for skill_name, skill_result in result["skills"].items():
+            if "error" in skill_result:
+                print(f"    {skill_name:<28s}  error: {skill_result['error']}")
+                continue
             pat = skill_result.get("pattern", {})
             if "error" in pat:
                 print(f"    {skill_name:<28s}  error: {pat['error']}")
