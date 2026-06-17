@@ -21,7 +21,7 @@ def _load_lib():
 from datetime import UTC, datetime  # noqa: E402
 
 from analysis.data import fetch_ohlc  # noqa: E402
-from analysis.formatting import emit_json, parse_args, print_header  # noqa: E402
+from analysis.formatting import emit_json, parse_args, print_header, require_ticker  # noqa: E402
 
 
 def analyze(ticker, source=None):
@@ -54,7 +54,8 @@ def analyze(ticker, source=None):
 
 
 def main():
-    ticker, json_mode, source = parse_args(sys.argv[1:], default_ticker="SPY")
+    ticker, json_mode, source = parse_args(sys.argv[1:])
+    require_ticker(ticker, json_mode)
     result = analyze(ticker, source=source)
 
     if json_mode:

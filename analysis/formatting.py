@@ -1,6 +1,7 @@
 """JSON output formatting helpers for skill scripts."""
 
 import json
+import sys
 from datetime import UTC, datetime
 
 
@@ -23,12 +24,13 @@ def emit_json(data):
     print(json.dumps(data, indent=2, default=str))
 
 
-def parse_args(argv, default_ticker=None):
-    """Parse CLI args: [TICKER] [--json] from sys.argv[1:].
+def parse_args(argv):
+    """Parse CLI args: [TICKER] [--json] [--source=PROVIDER] from sys.argv[1:].
 
-    Returns (ticker, json_mode) tuple.
+    Returns (ticker, json_mode, source) tuple. ``ticker`` is ``None`` if not supplied;
+    callers that require a ticker should validate via :func:`require_ticker`.
     """
-    ticker = default_ticker
+    ticker = None
     json_mode = False
     source = None
 
@@ -41,6 +43,17 @@ def parse_args(argv, default_ticker=None):
             ticker = arg
 
     return ticker, json_mode, source
+
+
+def require_ticker(ticker, json_mode):
+    """Exit with a usage error if ``ticker`` was not provided on the CLI."""
+    if ticker:
+        return
+    if json_mode:
+        print('{"error": "ticker required"}')
+    else:
+        print("usage: run.py TICKER [--json] [--source=PROVIDER]")
+    sys.exit(2)
 
 
 def print_header(title, width=60):

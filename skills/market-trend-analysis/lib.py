@@ -1,19 +1,6 @@
 """market-trend-analysis — composite trend verdict from L1 skills."""
 
-import functools
-import importlib.util
-import os
-
-
-@functools.cache
-def _load_l1_skill(name):
-    lib_path = os.path.join(os.path.dirname(__file__), "..", name, "lib.py")
-    if not os.path.exists(lib_path):
-        return None
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_") + "_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from analysis.skill_loader import load_skill
 
 
 def analyze(candles, interval="1d", period="1y"):
@@ -32,10 +19,10 @@ def analyze(candles, interval="1d", period="1y"):
             "narrative": f"insufficient data (need 60+ candles, got {cc})",
         }
 
-    trend_mod = _load_l1_skill("market-trend")
-    rsi_mod = _load_l1_skill("market-rsi")
-    sqz_mod = _load_l1_skill("market-squeeze")
-    vol_mod = _load_l1_skill("market-volume")
+    trend_mod = load_skill("market-trend")
+    rsi_mod = load_skill("market-rsi")
+    sqz_mod = load_skill("market-squeeze")
+    vol_mod = load_skill("market-volume")
 
     trend_result = trend_mod.analyze(candles, interval=interval, period=period) if trend_mod else {}
     rsi_result = rsi_mod.analyze(candles, interval=interval, period=period) if rsi_mod else {}

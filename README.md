@@ -144,7 +144,7 @@ uv run skills/market-ema/scripts/run.py yf:AAPL --json
 ## Conventions
 
 - All scripts accept `--json` for machine-readable output
-- All scripts accept a ticker as first positional argument (default: `SPY`)
+- All scripts require a ticker as first positional argument
 - All accept `--source=<provider>` (default: auto-detect)
 - `analysis/` functions are pure math — no I/O, no side effects
 - Each skill follows the Agent Skills spec: `SKILL.md` + `lib.py` + `scripts/`

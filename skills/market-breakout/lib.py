@@ -1,22 +1,7 @@
 """market-breakout — L2 pattern detection: composes L1 indicators to detect breakouts."""
 
-import functools
-import importlib.util
-import os
-
 from analysis.indicators import compute_sma, extract_ohlcv
-
-
-@functools.cache
-def _load_l1_skill(name):
-    """Load an L1 skill lib.py dynamically (handles hyphens in path)."""
-    lib_path = os.path.join(os.path.dirname(__file__), "..", name, "lib.py")
-    if not os.path.exists(lib_path):
-        return None
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_") + "_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from analysis.skill_loader import load_skill
 
 
 def analyze(candles, interval="1d", period="1y"):
@@ -46,10 +31,10 @@ def analyze(candles, interval="1d", period="1y"):
     opens, highs, lows, closes, volumes = extract_ohlcv(candles)
 
     # Load L1 modules
-    trend_mod = _load_l1_skill("market-trend")
-    vol_mod = _load_l1_skill("market-volume")
-    sr_mod = _load_l1_skill("market-s-r")
-    sqz_mod = _load_l1_skill("market-squeeze")
+    trend_mod = load_skill("market-trend")
+    vol_mod = load_skill("market-volume")
+    sr_mod = load_skill("market-s-r")
+    sqz_mod = load_skill("market-squeeze")
 
     # Run L1 analyzers
     err = {"error": "unavailable"}

@@ -1,31 +1,17 @@
 """strategy-liquidity-sweep — L3 strategy: sweep + accumulation reversal."""
 
-import functools
-import importlib.util
-import os
-
 from analysis.indicators import compute_atr_from_candles
+from analysis.skill_loader import load_skill
 
 
-@functools.cache
-def _load_l2_skill(name):
-    lib_path = os.path.join(os.path.dirname(__file__), "..", name, "lib.py")
-    if not os.path.exists(lib_path):
-        return None
-    spec = importlib.util.spec_from_file_location(name.replace("-", "_") + "_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def analyze(candles, interval="1d", period="1y"):
+def analyze(candles, *, ticker, interval="1d", period="1y"):
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
         return {"ideas": [], "narrative": f"insufficient data (need 50+ candles, got {cc})"}
 
-    sweep_mod = _load_l2_skill("market-liquidity-sweep")
-    accum_mod = _load_l2_skill("market-accumulation")
-    vol_mod = _load_l2_skill("market-volume")
+    sweep_mod = load_skill("market-liquidity-sweep")
+    accum_mod = load_skill("market-accumulation")
+    vol_mod = load_skill("market-volume")
 
     err = {"error": "unavailable", "pattern": {"present": False}}
     sweep_result = sweep_mod.analyze(candles, interval=interval, period=period) if sweep_mod else err
@@ -56,7 +42,7 @@ def analyze(candles, interval="1d", period="1y"):
         conviction = min(5, sweep_pattern.get("confidence", 3) + accum_pattern.get("confidence", 3) // 2)
         ideas.append(
             {
-                "pair": "...",
+                "pair": ticker,
                 "direction": "long",
                 "conviction": conviction,
                 "entry_type": "limit",
@@ -74,7 +60,7 @@ def analyze(candles, interval="1d", period="1y"):
         risk = entry - stop
         ideas.append(
             {
-                "pair": "...",
+                "pair": ticker,
                 "direction": "long",
                 "conviction": 2,
                 "entry_type": "limit",

@@ -25,7 +25,7 @@ uv run pytest tests/test_X.py -v  # single file
 
 ## Conventions
 
-- All `scripts/run.py` accept `--json` for machine output, first positional arg as ticker (default `SPY`), and `--source=<provider>`.
+- All `scripts/run.py` accept `--json` for machine output, require a ticker as first positional argument, and `--source=<provider>`.
 - Ruff exceptions: `skills/*/scripts/run.py` have E402 (sys.path trick before analysis import) and E501 (long display f-strings) ignored.
 - Provider notation: `provider:ticker` (e.g., `hl:LIT`, `yf:AAPL`, `kraken:BTC-USD`). Auto-detect tries Hyperliquid → CCXT(binance) → Kraken → YFinance.
 - Never use `l` as a variable name — ambiguous with `1`, triggers E741.

@@ -55,18 +55,12 @@ def analyze(candles, interval="1d", period="1y"):
             histogram_flip = "positive_to_negative"
 
     # Signal classification
-    if hist_val > 0 and macd_val > sig_val:
+    if hist_val > 0:
         signal = "BULLISH"
-        score = 2
-    elif hist_val > 0:
-        signal = "BULLISH"
-        score = 1
-    elif hist_val < 0 and macd_val < sig_val:
-        signal = "BEARISH"
-        score = -2
+        score = 2 if macd_val > 0 and sig_val > 0 else 1
     elif hist_val < 0:
         signal = "BEARISH"
-        score = -1
+        score = -2 if macd_val < 0 and sig_val < 0 else -1
     else:
         signal = "NEUTRAL"
         score = 0

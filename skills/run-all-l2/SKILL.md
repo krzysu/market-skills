@@ -20,7 +20,7 @@ Each L2 script's `run.py` calls `fetch_ohlc()` independently. A morning brief fo
 ## Quick Start
 
 ```bash
-# One ticker (default)
+# One ticker
 uv run skills/run-all-l2/scripts/run.py SPY
 
 # Multiple tickers

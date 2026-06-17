@@ -500,7 +500,7 @@ def get_cached_prices(db_path: str) -> dict[str, float]:
 
 
 def refresh_prices(db_path: str) -> dict[str, float]:
-    """Fetch current prices for all held assets via lib/data.py, update cache."""
+    """Fetch current prices for all held assets via analysis/data.py, update cache."""
     from analysis.data import fetch_ohlc
 
     conn = get_db(db_path)

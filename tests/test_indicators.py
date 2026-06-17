@@ -1,4 +1,4 @@
-"""Tests for lib/indicators.py — pure math indicator functions."""
+"""Tests for analysis/indicators.py — pure math indicator functions."""
 
 import math
 

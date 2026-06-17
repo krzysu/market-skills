@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 import importlib.util
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, parse_args, print_header
+from analysis.formatting import emit_json, parse_args, print_header, require_ticker
 
 
 def _load_lib():
@@ -21,16 +21,15 @@ def _load_lib():
 
 
 def main():
-    ticker, json_mode, source = parse_args(sys.argv[1:], default_ticker="BTC-USD")
+    ticker, json_mode, source = parse_args(sys.argv[1:])
+    require_ticker(ticker, json_mode)
     candles = fetch_ohlc(ticker, source=source)
     if not candles:
         print("no data" if not json_mode else '{"error": "no data"}')
         return
 
     _lib = _load_lib()
-    result = _lib.analyze(candles)
-    for idea in result.get("ideas", []):
-        idea["pair"] = ticker
+    result = _lib.analyze(candles, ticker=ticker)
 
     if json_mode:
         emit_json(result)
