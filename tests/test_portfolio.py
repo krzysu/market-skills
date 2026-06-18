@@ -1,7 +1,9 @@
 """Tests for portfolio/db.py — FIFO, multi-portfolio, P&L, CRUD."""
 
+import json
 import os
 import tempfile
+from unittest.mock import patch
 
 import pytest
 
@@ -11,8 +13,10 @@ from portfolio.db import (
     compute_fifo,
     compute_lots,
     compute_pnl,
+    compute_positions,
     delete_portfolio,
     edit_transaction,
+    get_cached_prices,
     get_portfolio,
     get_portfolio_summary,
     get_transaction,
@@ -20,6 +24,7 @@ from portfolio.db import (
     list_portfolios,
     list_transactions,
     reconcile,
+    refresh_prices,
     remove_transaction,
     rename_portfolio,
     replay_fifo,
@@ -95,6 +100,7 @@ def test_add_sell_transaction(db_path):
     txid = add_transaction(db_path, pid, T0, "SELL", "kraken:HYPEEUR", qty=2.99, price=33.35)
     tx = get_transaction(db_path, txid)
     assert round(tx["cost_quote"], 6) == round(2.99 * 33.35, 6)
+
 
 def test_add_transaction_invalid_side(db_path):
     pid = add_portfolio(db_path, "spot")
@@ -477,3 +483,246 @@ def test_reconcile_mixed(db_path):
     assert diffs_map["kraken:BTCUSD"]["status"] == "match"
     assert diffs_map["kraken:HYPEEUR"]["status"] == "missing_external"
     assert diffs_map["hl:LIT"]["status"] == "missing_computed"
+
+
+# ── refresh_prices — spot price vs stale OHLC close ─────────────────────
+
+
+def _kraken_ticker_json(pair: str, *, last: float, bid: float, ask: float) -> str:
+    """Build a fake ``kraken ticker`` JSON payload for one pair."""
+    return json.dumps(
+        {
+            pair: {
+                "a": [f"{ask:.5f}", "1", "1.000"],
+                "b": [f"{bid:.5f}", "1", "1.000"],
+                "c": [f"{last:.5f}", "0.5"],
+                "h": [f"{max(ask, last):.5f}", f"{max(ask, last):.5f}"],
+                "l": [f"{min(bid, last):.5f}", f"{min(bid, last):.5f}"],
+                "o": f"{last:.5f}",
+                "p": [f"{last:.5f}", f"{last:.5f}"],
+                "t": [1, 1],
+                "v": ["1", "1"],
+            }
+        }
+    )
+
+
+def _kraken_ohlc_json(pair: str, candles: list[list]) -> str:
+    """Build a fake ``kraken ohlc`` JSON payload for one pair."""
+    return json.dumps({pair: candles, "last": candles[-1][0] if candles else 0})
+
+
+def test_refresh_prices_uses_live_spot_not_ohlc_close(db_path, capsys):
+    """Bug: refresh_prices used candles[-1][4] (daily close) instead of live spot.
+
+    Reproduction: HYPE live bid=60.10, but the prior daily candle's close was
+    62.46 (off by ~4%). Fix routes through ``kraken ticker`` c[0] (last trade)
+    so positions reflects the current price.
+    """
+    pid = add_portfolio(db_path, "spot", "EUR")
+    add_transaction(db_path, pid, T0, "BUY", "kraken:HYPEEUR", qty=1.66, price=60.15)
+
+    spot_payload = _kraken_ticker_json("HYPEEUR", last=60.31, bid=60.10, ask=60.14)
+    stale_close = 62.46  # the wrong number from the prior daily candle
+    ohlc_payload = _kraken_ohlc_json(
+        "HYPEEUR",
+        [[1769904000, "62.00", "63.00", "61.00", stale_close, "62.20", "100", 5]],
+    )
+
+    def fake_run(cmd, *args, **kwargs):
+        from subprocess import CompletedProcess
+
+        if cmd[:2] == ["kraken", "ticker"]:
+            return CompletedProcess(cmd, 0, stdout=spot_payload, stderr="")
+        if cmd[:2] == ["kraken", "ohlc"]:
+            return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
+        return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
+
+    with patch("analysis.providers.kraken.subprocess.run", side_effect=fake_run):
+        prices = refresh_prices(db_path)
+
+    assert prices["kraken:HYPEEUR"] == 60.31  # live last, NOT 62.46
+
+    cached = get_cached_prices(db_path)
+    assert cached["kraken:HYPEEUR"] == 60.31
+
+    positions = compute_positions(db_path, pid, prices)
+    assert positions[0]["current_price"] == 60.31
+    assert round(positions[0]["current_value"], 2) == round(1.66 * 60.31, 2)
+    assert abs(positions[0]["unrealized_pnl"] - 1.66 * (60.31 - 60.15)) < 0.05
+
+    assert "stale" not in capsys.readouterr().err.lower()
+
+
+def test_refresh_prices_falls_back_to_ohlc_when_spot_unavailable(db_path, capsys):
+    """When ``kraken ticker`` fails, fall back to the latest candle close and warn."""
+    pid = add_portfolio(db_path, "spot", "EUR")
+    add_transaction(db_path, pid, T0, "BUY", "kraken:HYPEEUR", qty=1, price=60)
+
+    ohlc_payload = _kraken_ohlc_json(
+        "HYPEEUR",
+        [[1769904000, "62.00", "63.00", "61.00", 62.46, "62.20", "100", 5]],
+    )
+
+    def fake_run(cmd, *args, **kwargs):
+        from subprocess import CompletedProcess
+
+        if cmd[:2] == ["kraken", "ticker"]:
+            return CompletedProcess(cmd, 1, stdout="", stderr="rate limited")
+        if cmd[:2] == ["kraken", "ohlc"]:
+            return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
+        return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
+
+    with patch("analysis.providers.kraken.subprocess.run", side_effect=fake_run):
+        prices = refresh_prices(db_path)
+
+    assert prices["kraken:HYPEEUR"] == 62.46
+    err = capsys.readouterr().err
+    assert "stale" in err.lower() or "fell back" in err.lower()
+    assert "kraken:HYPEEUR" in err
+
+
+def test_refresh_prices_tracks_source_in_cache(db_path):
+    """Cache ``source`` column distinguishes live spot from OHLC fallback."""
+    pid = add_portfolio(db_path, "spot", "EUR")
+    add_transaction(db_path, pid, T0, "BUY", "kraken:HYPEEUR", qty=1, price=60)
+
+    spot_payload = _kraken_ticker_json("HYPEEUR", last=60.0, bid=59.9, ask=60.1)
+    ohlc_payload = _kraken_ohlc_json(
+        "HYPEEUR",
+        [[1769904000, "60.00", "61.00", "59.00", 60.5, "60.10", "100", 5]],
+    )
+
+    def fake_run(cmd, *args, **kwargs):
+        from subprocess import CompletedProcess
+
+        if cmd[:2] == ["kraken", "ticker"]:
+            return CompletedProcess(cmd, 0, stdout=spot_payload, stderr="")
+        if cmd[:2] == ["kraken", "ohlc"]:
+            return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
+        return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
+
+    with patch("analysis.providers.kraken.subprocess.run", side_effect=fake_run):
+        refresh_prices(db_path)
+
+    from portfolio.db import get_db
+
+    conn = get_db(db_path)
+    row = conn.execute("SELECT source FROM price_cache WHERE asset = 'kraken:HYPEEUR'").fetchone()
+    conn.close()
+    assert row["source"] == "kraken:ticker"
+
+
+def test_refresh_prices_skips_assets_without_provider_prefix(db_path):
+    """Assets like ``BTC`` (no ``provider:``) are skipped — manual price only."""
+    pid = add_portfolio(db_path, "spot", "EUR")
+    add_transaction(db_path, pid, T0, "BUY", "BTC", qty=0.1, price=100_000)
+    add_transaction(db_path, pid, T1, "BUY", "kraken:HYPEEUR", qty=1, price=60)
+
+    spot_payload = _kraken_ticker_json("HYPEEUR", last=60.0, bid=59.9, ask=60.1)
+    ohlc_payload = _kraken_ohlc_json(
+        "HYPEEUR",
+        [[1769904000, "60.00", "61.00", "59.00", 60.5, "60.10", "100", 5]],
+    )
+
+    def fake_run(cmd, *args, **kwargs):
+        from subprocess import CompletedProcess
+
+        if cmd[:2] == ["kraken", "ticker"]:
+            return CompletedProcess(cmd, 0, stdout=spot_payload, stderr="")
+        if cmd[:2] == ["kraken", "ohlc"]:
+            return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
+        return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
+
+    with patch("analysis.providers.kraken.subprocess.run", side_effect=fake_run):
+        prices = refresh_prices(db_path)
+
+    assert "BTC" not in prices
+    assert prices["kraken:HYPEEUR"] == 60.0
+
+
+# ── KrakenProvider.fetch_spot_price ─────────────────────────────────────
+
+
+class TestKrakenProviderSpotPrice:
+    def test_parses_last_trade(self):
+        from analysis.providers.kraken import KrakenProvider
+
+        payload = _kraken_ticker_json("HYPEEUR", last=60.31, bid=60.10, ask=60.14)
+        with patch(
+            "analysis.providers.kraken.subprocess.run",
+            return_value=_completed(payload),
+        ):
+            result = KrakenProvider().fetch_spot_price("HYPEEUR")
+
+        assert result is not None
+        assert result["price"] == 60.31
+        assert result["last"] == 60.31
+        assert result["bid"] == 60.10
+        assert result["ask"] == 60.14
+        assert result["source"] == "kraken:ticker"
+
+    def test_normalises_dash_and_slash(self):
+        from analysis.providers.kraken import KrakenProvider
+
+        payload = _kraken_ticker_json("BTCEUR", last=50000.0, bid=49999.0, ask=50001.0)
+        with patch(
+            "analysis.providers.kraken.subprocess.run",
+            return_value=_completed(payload),
+        ) as run:
+            KrakenProvider().fetch_spot_price("BTC-EUR")
+
+        cmd = run.call_args[0][0]
+        assert cmd == ["kraken", "ticker", "BTCEUR", "-o", "json"]
+
+    def test_falls_back_to_bid_when_last_missing(self):
+        from analysis.providers.kraken import KrakenProvider
+
+        payload = json.dumps({"BTCEUR": {"b": ["49999.0", "1", "1.000"], "a": ["50001.0", "1", "1.000"]}})
+        with patch(
+            "analysis.providers.kraken.subprocess.run",
+            return_value=_completed(payload),
+        ):
+            result = KrakenProvider().fetch_spot_price("BTCEUR")
+
+        assert result["price"] == 49999.0
+        assert result["last"] is None
+        assert result["bid"] == 49999.0
+
+    def test_returns_none_on_cli_failure(self):
+        from subprocess import CompletedProcess
+
+        from analysis.providers.kraken import KrakenProvider
+
+        with patch(
+            "analysis.providers.kraken.subprocess.run",
+            return_value=CompletedProcess(["kraken"], 1, stdout="", stderr="rate limited"),
+        ):
+            assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
+
+    def test_returns_none_on_bad_json(self):
+        from subprocess import CompletedProcess
+
+        from analysis.providers.kraken import KrakenProvider
+
+        with patch(
+            "analysis.providers.kraken.subprocess.run",
+            return_value=CompletedProcess(["kraken"], 0, stdout="not json", stderr=""),
+        ):
+            assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
+
+    def test_returns_none_when_no_price_fields(self):
+        from analysis.providers.kraken import KrakenProvider
+
+        payload = json.dumps({"HYPEEUR": {"o": "60.0"}})
+        with patch(
+            "analysis.providers.kraken.subprocess.run",
+            return_value=_completed(payload),
+        ):
+            assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
+
+
+def _completed(stdout: str):
+    from subprocess import CompletedProcess
+
+    return CompletedProcess(["kraken"], 0, stdout=stdout, stderr="")

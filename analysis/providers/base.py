@@ -23,3 +23,13 @@ class Provider(Protocol):
         'nextFundingTime', or None if not applicable.
         """
         return None
+
+    def fetch_spot_price(self, ticker: str) -> dict | None:
+        """Fetch live spot price for a ticker.
+
+        Returns a dict with keys ``price``, ``last``, ``bid``, ``ask``, ``source``
+        or ``None`` if the provider cannot serve a live spot quote. Default
+        implementation returns ``None``; providers with a public spot endpoint
+        should override.
+        """
+        return None

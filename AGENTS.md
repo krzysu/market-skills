@@ -29,6 +29,7 @@ uv run pytest tests/test_X.py -v  # single file
 - Ruff exceptions: `skills/*/scripts/run.py` have E402 (sys.path trick before analysis import) and E501 (long display f-strings) ignored.
 - Provider notation: `provider:ticker` (e.g., `hl:LIT`, `yf:AAPL`, `kraken:BTC-USD`). Auto-detect tries Hyperliquid → CCXT(binance) → Kraken → YFinance.
 - Never use `l` as a variable name — ambiguous with `1`, triggers E741.
+- Commit messages must be **single line** — no body, no multi-line. Always lead with a semantic prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `perf:`, `style:`, `build:`, `ci:`. Format: `<prefix>: <imperative summary, lowercase after the prefix>`. Good: `fix: use live Kraken ticker instead of stale daily OHLC close`. Bad: `Fix: address HYPE price issue`, `fix(portfolio): ...\n\nLong body...`.
 
 ## What to avoid
 

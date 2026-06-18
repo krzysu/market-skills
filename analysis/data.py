@@ -129,6 +129,57 @@ def _resolve_explicit(ticker: str, interval: str, period: str) -> list[list] | N
         return []
 
 
+def fetch_spot_price(ticker: str, source: str | None = None) -> dict | None:
+    """Fetch live spot price for a ticker.
+
+    Routes through the same explicit ``provider:ticker`` resolution and
+    auto-detection as :func:`fetch_ohlc`, but asks each provider for a live
+    spot quote (Kraken ``ticker``, ccxt ``fetch_ticker``, etc.) instead of an
+    OHLC candle. Returns ``None`` if no provider can serve a live price; the
+    caller is expected to fall back to a stale OHLC close if it needs *some*
+    number.
+
+    Args:
+        ticker: Ticker symbol. Supports ``provider:ticker`` format.
+        source: Provider name override, or None for auto-detect.
+
+    Returns:
+        ``{"price": float, "last": float|None, "bid": float|None, "ask": float|None, "source": str}``
+        or ``None`` on failure.
+    """
+    explicit = _resolve_ticker_prefix(ticker)
+    if explicit is not None:
+        raw_ticker, provider_name = explicit
+        try:
+            provider = _get_provider(provider_name)
+            return provider.fetch_spot_price(raw_ticker)
+        except Exception as e:
+            logger.debug("fetch_spot_price(%s): %s", ticker, e)
+            return None
+
+    if source:
+        try:
+            provider = _get_provider(source)
+            return provider.fetch_spot_price(ticker)
+        except Exception as e:
+            logger.debug("fetch_spot_price(source=%s, %s): %s", source, ticker, e)
+            return None
+
+    for p in _REGISTRY:
+        if not hasattr(p, "fetch_spot_price"):
+            continue
+        try:
+            if p.supports(ticker):
+                result = p.fetch_spot_price(ticker)
+                if result:
+                    return result
+        except Exception as e:
+            logger.debug("fetch_spot_price(auto, %s=%s): %s", p.name, ticker, e)
+            continue
+
+    return None
+
+
 def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y", source: str | None = None) -> list[list]:
     """Fetch OHLC candles for a ticker.
 
