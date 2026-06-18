@@ -163,14 +163,17 @@ def evaluate_signals(
         strategies = sg.get("strategies", [])
         min_conv = int(sg.get("min_conviction", 3))
         cooldown_hours = float(sg.get("cooldown_hours", 0))
+        direction_filter = (sg.get("direction") or "").strip().lower() or None
 
         for strat in strategies:
             for idea in l3_ideas_by_strategy.get(strat, []):
-                direction = idea.get("direction", "")
+                direction = (idea.get("direction", "") or "").strip().lower()
                 conviction = int(idea.get("conviction", 0))
                 entry_p = idea.get("entry_price")
                 stop_p = idea.get("stop_loss")
 
+                if direction_filter and direction != direction_filter:
+                    continue
                 if conviction < min_conv:
                     continue
 

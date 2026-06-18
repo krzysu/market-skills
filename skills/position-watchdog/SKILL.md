@@ -142,6 +142,7 @@ Each entry is a strategy block. The watchdog fetches 1d/1y candles for the watch
 | `strategies` | yes | L3 strategy names: `trend-follow`, `mean-reversion`, `breakout-confirm`, `accumulation-swing`, `exhaustion-fade`, `liquidity-sweep` |
 | `min_conviction` | no, default 3 | Minimum L3 conviction (1–5) to fire |
 | `cooldown_hours` | no, default 0 | Same strategy + same direction will not re-alert within this window |
+| `direction` | no | Restrict alerts to ideas matching this direction: `"long"` or `"short"`. Case-insensitive; mismatched ideas are silently dropped. Cooldown still keyed on actual idea direction. |
 
 Alert format:
 - `🎯 trend-follow LONG conv=4. Entry €X, stop €Y.`

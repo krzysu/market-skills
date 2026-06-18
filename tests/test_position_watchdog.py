@@ -269,6 +269,51 @@ def test_multiple_strategies_in_signal_block():
     assert "trend-follow" in alerts[0]
 
 
+def test_signal_direction_filter_drops_mismatched_ideas():
+    sg_watch = {
+        "name": "ETH",
+        "signals": [
+            {
+                "strategies": ["trend-follow", "mean-reversion"],
+                "min_conviction": 3,
+                "cooldown_hours": 0,
+                "direction": "long",
+            }
+        ],
+    }
+    ideas = {
+        "trend-follow": [{"direction": "short", "conviction": 5, "entry_price": 60.0, "stop_loss": 65.0}],
+        "mean-reversion": [{"direction": "long", "conviction": 4, "entry_price": 58.0, "stop_loss": 55.0}],
+    }
+    alerts, _ = evaluate_signals(sg_watch, ideas, None)
+    assert len(alerts) == 1
+    assert "mean-reversion LONG" in alerts[0]
+    assert "trend-follow" not in alerts[0]
+
+
+def test_signal_direction_filter_is_case_insensitive():
+    sg_watch = {
+        "name": "ETH",
+        "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0, "direction": "LONG"}],
+    }
+    ideas = {"trend-follow": [{"direction": "long", "conviction": 4, "entry_price": 60.0, "stop_loss": 55.0}]}
+    alerts, _ = evaluate_signals(sg_watch, ideas, None)
+    assert len(alerts) == 1
+
+
+def test_signal_no_direction_filter_keeps_both_directions():
+    sg_watch = {
+        "name": "HYPE",
+        "signals": [{"strategies": ["trend-follow", "mean-reversion"], "min_conviction": 3, "cooldown_hours": 0}],
+    }
+    ideas = {
+        "trend-follow": [{"direction": "short", "conviction": 4, "entry_price": 60.0, "stop_loss": 65.0}],
+        "mean-reversion": [{"direction": "long", "conviction": 4, "entry_price": 58.0, "stop_loss": 55.0}],
+    }
+    alerts, _ = evaluate_signals(sg_watch, ideas, None)
+    assert len(alerts) == 2
+
+
 def test_level_id_is_stable_across_calls():
     a = _level_id({"type": "stop", "price": 49.71})
     b = _level_id({"type": "stop", "price": 49.71})
