@@ -139,8 +139,17 @@ def cmd_add(args):
     ts = args.date or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     txid = add_transaction(
-        args.db, pid, ts, side, asset, qty=qty, price=price,
-        fee=fee, tx_hash=tx_hash, ref=ref_val, notes=notes,
+        args.db,
+        pid,
+        ts,
+        side,
+        asset,
+        qty=qty,
+        price=price,
+        fee=fee,
+        tx_hash=tx_hash,
+        ref=ref_val,
+        notes=notes,
     )
     if args.json:
         print(json.dumps({"id": txid}))
@@ -225,7 +234,9 @@ def cmd_positions(args):
         return
 
     pf_names = {p["id"]: p["name"] for p in list_portfolios(args.db)}
-    print(f"{'Portfolio':<14} {'Asset':<24} {'Qty':>12} {'Avg Cost':>12} {'Price':>12} {'Value':>14} {'Unreal P&L':>12}")
+    print(
+        f"{'Portfolio':<14} {'Asset':<24} {'Qty':>12} {'Avg Cost':>12} {'Price':>12} {'Value':>14} {'Unreal P&L':>12}"
+    )
     print("-" * 104)
     for pos in positions:
         pf = pf_names.get(pos["portfolio_id"], "?")
@@ -247,7 +258,9 @@ def cmd_pnl(args):
         print("No transactions found.")
         return
 
-    print(f"{'Portfolio':<14} {'Asset':<24} {'Buys':>5} {'Sells':>5} {'Invested':>12} {'Proceeds':>12} {'Realized':>12} {'Unreal':>10} {'Total':>10} {'Fees':>8}")
+    print(
+        f"{'Portfolio':<14} {'Asset':<24} {'Buys':>5} {'Sells':>5} {'Invested':>12} {'Proceeds':>12} {'Realized':>12} {'Unreal':>10} {'Total':>10} {'Fees':>8}"
+    )
     print("-" * 130)
     for r in rows:
         realized = f"{r['realized_pnl']:+,.2f}" if r["realized_pnl"] else "0"
@@ -270,7 +283,9 @@ def cmd_lots(args):
     print(f"{'Portfolio':>5} {'Asset':<24} {'Qty':>12} {'Entry Price':>12} {'Entry Date'}")
     print("-" * 72)
     for lot in lots:
-        print(f"{lot['portfolio_id']:>5} {lot['asset']:<24} {lot['qty']:>12.8f} {lot['entry_price']:>12.2f} {lot['entry_ts'][:19]}")
+        print(
+            f"{lot['portfolio_id']:>5} {lot['asset']:<24} {lot['qty']:>12.8f} {lot['entry_price']:>12.2f} {lot['entry_ts'][:19]}"
+        )
 
 
 def cmd_edit(args):
@@ -315,11 +330,15 @@ def cmd_replay(args):
         ts = ev["ts"][:19]
         price_str = f"{ev['price']:,.2f}"
         if ev["side"] == "BUY":
-            print(f"  #{ev['tx_id']:<4} {ts}  BUY   {ev['qty']:>10.8f}  {ev['asset']:<24}  @ {price_str:>12}   -> {ev['remain_qty']:.8f} remaining")
+            print(
+                f"  #{ev['tx_id']:<4} {ts}  BUY   {ev['qty']:>10.8f}  {ev['asset']:<24}  @ {price_str:>12}   -> {ev['remain_qty']:.8f} remaining"
+            )
         else:
             print(f"  #{ev['tx_id']:<4} {ts}  SELL  {ev['qty']:>10.8f}  {ev['asset']:<24}  @ {price_str:>12}")
             for lot in ev["consumed_lots"]:
-                print(f"         <- lot #{lot['tx_id']}: consumed {lot['qty_consumed']:.8f}  cost_basis {lot['cost_basis']:,.2f}  P&L {lot['pnl']:+,.2f}")
+                print(
+                    f"         <- lot #{lot['tx_id']}: consumed {lot['qty_consumed']:.8f}  cost_basis {lot['cost_basis']:,.2f}  P&L {lot['pnl']:+,.2f}"
+                )
             total_str = f"{ev['total_realized_pnl']:+,.2f}" if ev["total_realized_pnl"] else "0"
             print(f"         total realized: {total_str}")
 
@@ -343,7 +362,9 @@ def cmd_reconcile(args):
     print(f"  {'-' * 2}  {'-' * 24}  {'-' * 14}  {'-' * 14}  {'-' * 14}  {'-' * 15}")
     for d in diffs:
         delta_str = f"{d['delta']:+,.8f}" if d["delta"] else "0"
-        print(f"  {icon.get(d['status'], '?'):<3} {d['asset']:<24} {d['computed_qty']:>14.8f} {d['external_qty']:>14.8f} {delta_str:>14}  {d['status']}")
+        print(
+            f"  {icon.get(d['status'], '?'):<3} {d['asset']:<24} {d['computed_qty']:>14.8f} {d['external_qty']:>14.8f} {delta_str:>14}  {d['status']}"
+        )
 
 
 def cmd_allocation(args):
@@ -370,7 +391,9 @@ def cmd_performance(args):
     if not rows:
         print("No closed trades yet.")
         return
-    print(f"{'Asset':<30} {'Buys':>5} {'Sells':>5} {'Invested':>12} {'Proceeds':>12} {'Cost Sold':>12} {'Realized':>10} {'Fees':>8} {'PF':>6}")
+    print(
+        f"{'Asset':<30} {'Buys':>5} {'Sells':>5} {'Invested':>12} {'Proceeds':>12} {'Cost Sold':>12} {'Realized':>10} {'Fees':>8} {'PF':>6}"
+    )
     print("-" * 108)
     for r in rows:
         pf_str = f"{r['profit_factor']:.2f}" if r["profit_factor"] else "-"
@@ -387,9 +410,42 @@ def cmd_export(args):
 
         out = io.StringIO()
         w = csv.writer(out)
-        w.writerow(["id", "portfolio_id", "ts", "side", "asset", "qty", "price", "cost_quote", "fee", "tx_hash", "ref", "notes"])
+        w.writerow(
+            [
+                "id",
+                "portfolio_id",
+                "ts",
+                "side",
+                "asset",
+                "qty",
+                "price",
+                "cost_quote",
+                "fee",
+                "tx_hash",
+                "ref",
+                "notes",
+            ]
+        )
         for r in rows:
-            w.writerow([r.get(k) for k in ["id", "portfolio_id", "ts", "side", "asset", "qty", "price", "cost_quote", "fee", "tx_hash", "ref", "notes"]])
+            w.writerow(
+                [
+                    r.get(k)
+                    for k in [
+                        "id",
+                        "portfolio_id",
+                        "ts",
+                        "side",
+                        "asset",
+                        "qty",
+                        "price",
+                        "cost_quote",
+                        "fee",
+                        "tx_hash",
+                        "ref",
+                        "notes",
+                    ]
+                ]
+            )
         content = out.getvalue()
     else:
         content = json.dumps(rows, indent=2)
@@ -533,7 +589,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("reconcile", help="Compare computed positions against external balance file", parents=[shared])
     p.add_argument("--portfolio", type=int)
-    p.add_argument("--balance-file", required=True, help="JSON file: {\"asset\": qty, ...}")
+    p.add_argument("--balance-file", required=True, help='JSON file: {"asset": qty, ...}')
     p.set_defaults(func=cmd_reconcile)
 
     # export

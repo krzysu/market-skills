@@ -5,6 +5,7 @@ the database file location. Tests use ``:memory:`` or a temp file.
 """
 
 import sqlite3
+import sys
 from collections import defaultdict, deque
 from datetime import UTC, datetime
 
@@ -399,7 +400,7 @@ def compute_pnl(
     all_keys: set[tuple] = set(fifo["n_buys"].keys()) | set(fifo["n_sells"].keys()) | set(fifo["open_lots"].keys())
 
     result = []
-    for (pid, asset) in sorted(all_keys):
+    for pid, asset in sorted(all_keys):
         r = fifo["realized"].get((pid, asset), 0)
         cos = fifo["cost_of_sold"].get((pid, asset), 0)
         invested = fifo["total_invested"].get((pid, asset), 0)
@@ -500,8 +501,15 @@ def get_cached_prices(db_path: str) -> dict[str, float]:
 
 
 def refresh_prices(db_path: str) -> dict[str, float]:
-    """Fetch current prices for all held assets via analysis/data.py, update cache."""
-    from analysis.data import fetch_ohlc
+    """Fetch current prices for all held assets via analysis/data.py, update cache.
+
+    Prefers a live spot quote (``analysis.data.fetch_spot_price``) — Kraken
+    ticker ``c[0]`` / ``b[0]``, etc. Falls back to the most recent daily candle
+    close if no provider exposes a live spot endpoint for that asset. Any
+    fallback is flagged in the cache ``source`` column (``ohlc:close``) and on
+    stderr so the operator can see when prices are stale.
+    """
+    from analysis.data import fetch_ohlc, fetch_spot_price
 
     conn = get_db(db_path)
     assets = [r[0] for r in conn.execute("SELECT DISTINCT asset FROM transactions").fetchall()]
@@ -509,21 +517,37 @@ def refresh_prices(db_path: str) -> dict[str, float]:
 
     now_ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     prices: dict[str, float] = {}
+    sources: dict[str, str] = {}
+    stale_assets: list[str] = []
 
     for asset in assets:
         if ":" not in asset:
             continue
-        candles = fetch_ohlc(asset)
-        if not candles:
+
+        spot = fetch_spot_price(asset)
+        if spot:
+            prices[asset] = spot["price"]
+            sources[asset] = spot.get("source", "spot")
             continue
-        price = candles[-1][4]  # close
-        prices[asset] = price
+
+        candles = fetch_ohlc(asset)
+        if candles:
+            prices[asset] = candles[-1][4]
+            sources[asset] = "ohlc:close"
+            stale_assets.append(asset)
+
+    if stale_assets:
+        print(
+            f"refresh_prices: {len(stale_assets)} asset(s) fell back to stale OHLC close "
+            f"(no live spot available): {', '.join(sorted(stale_assets))}",
+            file=sys.stderr,
+        )
 
     conn = get_db(db_path)
     for asset, price in prices.items():
         conn.execute(
             "INSERT OR REPLACE INTO price_cache (asset, price, ts, source) VALUES (?, ?, ?, ?)",
-            (asset, price, now_ts, "analysis.data"),
+            (asset, price, now_ts, sources.get(asset, "analysis.data")),
         )
     conn.commit()
     conn.close()
@@ -543,7 +567,7 @@ def compute_performance(
     fifo = compute_fifo(rows)
 
     result = []
-    for (pid, asset) in sorted(set(fifo["n_buys"].keys()) | set(fifo["n_sells"].keys())):
+    for pid, asset in sorted(set(fifo["n_buys"].keys()) | set(fifo["n_sells"].keys())):
         n_b = fifo["n_buys"].get((pid, asset), 0)
         n_s = fifo["n_sells"].get((pid, asset), 0)
         realized = fifo["realized"].get((pid, asset), 0)

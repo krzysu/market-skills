@@ -64,6 +64,7 @@ Fetch candles once per ticker, run all skills in-process. Use for cron jobs / mo
 | Skill | Purpose |
 |-------|---------|
 | [portfolio-mgmt](./skills/portfolio-mgmt/SKILL.md) | SQLite-backed portfolio tracking with FIFO cost basis, multi-portfolio support, live price fetching, P&L, replay, and external reconciliation |
+| [position-watchdog](./skills/position-watchdog/SKILL.md) | Unified position monitor — entry/stop/TP ladders, multi-zone entry tracking, and L3 strategy signal evaluation. Per-watch state, alert dedup, and a single `watches.json` config for any number of assets |
 
 
 ## Quick Start
@@ -91,6 +92,10 @@ uv run skills/portfolio-mgmt/scripts/run.py init
 uv run skills/portfolio-mgmt/scripts/run.py portfolio create --name spot
 uv run skills/portfolio-mgmt/scripts/run.py add --portfolio spot --asset=kraken:BTCUSD --side buy --qty 0.01 --price 45000
 uv run skills/portfolio-mgmt/scripts/run.py positions
+
+# Position monitoring (entry/stop/TP alerts + L3 signal evaluation)
+uv run skills/position-watchdog/scripts/run.py
+uv run skills/position-watchdog/scripts/run.py --dry-run   # show what would alert, no state writes
 
 # Tests
 uv run pytest
@@ -131,6 +136,8 @@ L1 Indicator Skills
 For perp-specific data (funding rate, basis, spot-perp divergence), use [market-basis](./skills/market-basis/SKILL.md) — it reads funding rate data from CCXT providers alongside standard OHLC indicators.
 
 Auto-routing: providers are tried in priority order. Use `provider:ticker` notation for explicit routing (e.g. `hl:LIT`, `yf:AAPL`).
+
+**Live spot prices** — providers with a public ticker endpoint (Kraken, etc.) serve live spot quotes via `analysis.data.fetch_spot_price()`. `portfolio-mgmt prices refresh` prefers the live spot and only falls back to the most recent daily candle close when no provider exposes a spot endpoint — fallbacks are tagged `ohlc:close` in the price cache so stale rows are visible.
 
 ```bash
 # Auto-detect

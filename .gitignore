@@ -5,3 +5,9 @@ __pycache__/
 .ruff_cache/
 dist/
 *.egg-info/
+
+# Per-watch runtime state files
+skills/*/data/
+
+# Position-watchdog user config (contains personal position data, keep local)
+skills/*/watches.json
