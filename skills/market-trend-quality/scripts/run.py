@@ -1,36 +1,21 @@
 #!/usr/bin/env python3
 """market-trend-quality — L2 pattern detection: assesses trend health quality."""
 
-import os
 import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
-import importlib.util
-
-
-def _load_lib():
-    """Load lib.py from the skill directory (handles hyphens in path)."""
-    lib_path = os.path.join(os.path.dirname(__file__), "..", "lib.py")
-    spec = importlib.util.spec_from_file_location("market_trend_quality_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, parse_args, print_header, require_ticker
+from analysis.formatting import emit_json, print_header, require_ticker, safe_parse_args
+from analysis.skill_loader import load_lib_for_script
 
 
-def analyze(ticker, source=None):
-    candles = fetch_ohlc(ticker, source=source)
+def analyze(ticker, *, source=None, interval="1d", period="1y"):
+    candles = fetch_ohlc(ticker, interval=interval, period=period, source=source)
     if not candles:
         return {"ticker": ticker, "error": "no data"}
 
-    _lib = _load_lib()
-    result = _lib.analyze(candles)
+    _lib = load_lib_for_script(__file__)
+    result = _lib.analyze(candles, interval=interval, period=period)
     if "error" in result.get("pattern", {}) or (
         not result.get("input_scores") and "insufficient" in result.get("narrative", "")
     ):
@@ -45,7 +30,8 @@ def analyze(ticker, source=None):
         "ticker": ticker,
         "timestamp": now,
         "provider": provider,
-        "interval": "1d",
+        "interval": interval,
+        "period": period,
         "pattern": result["pattern"],
         "signals": result["signals"],
         "input_scores": result["input_scores"],
@@ -54,9 +40,9 @@ def analyze(ticker, source=None):
 
 
 def main():
-    ticker, json_mode, source = parse_args(sys.argv[1:])
+    ticker, json_mode, source, interval, period = safe_parse_args(sys.argv[1:])
     require_ticker(ticker, json_mode)
-    result = analyze(ticker, source=source)
+    result = analyze(ticker, source=source, interval=interval, period=period)
 
     if json_mode:
         emit_json(result)

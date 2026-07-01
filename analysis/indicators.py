@@ -282,6 +282,23 @@ def find_swing_lows(lows, window=3):
     return swings
 
 
+def swing_window_for_interval(interval):
+    """Return appropriate swing detection window for the given interval."""
+    interval_lower = interval.lower().strip()
+    if interval_lower in ("1m", "5m", "15m", "30m"):
+        return 20
+    elif interval_lower == "1h":
+        return 12
+    elif interval_lower == "4h":
+        return 8
+    elif interval_lower == "1d":
+        return 5
+    elif interval_lower in ("1wk", "1w"):
+        return 4
+    else:
+        return 5
+
+
 def find_swing_high(candles, window=5):
     """Find the most recent significant swing high.
 

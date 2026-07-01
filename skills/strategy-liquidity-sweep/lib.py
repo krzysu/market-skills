@@ -1,10 +1,18 @@
 """strategy-liquidity-sweep — L3 strategy: sweep + accumulation reversal."""
 
+from analysis.contracts import (
+    compute_rr_to_tp,
+    conviction_version,
+    enforce_min_stop_distance,
+    l2_fired,
+    validate_l3_tp_ladder,
+)
+from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
 
 
-def analyze(candles, *, ticker, interval="1d", period="1y"):
+def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
         return {"ideas": [], "narrative": f"insufficient data (need 50+ candles, got {cc})"}
@@ -19,10 +27,12 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
     vol_result = vol_mod.analyze(candles, interval=interval, period=period) if vol_mod else err
 
     sweep_pattern = sweep_result.get("pattern", {})
-    sweep_present = sweep_pattern.get("present", False)
-
     accum_pattern = accum_result.get("pattern", {})
-    accum_present = accum_pattern.get("present", False)
+
+    # l2_fired returns True only if both pattern.present and classification are
+    # set; single source of truth for "did the L2 actually produce a verdict?".
+    sweep_present = l2_fired(sweep_result)
+    accum_present = l2_fired(accum_result)
 
     vol_ratio = vol_result.get("volume_ratio") if "error" not in vol_result else None
     obv_trend = vol_result.get("obv_trend") if "error" not in vol_result else None
@@ -45,11 +55,22 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
                 "pair": ticker,
                 "direction": "long",
                 "conviction": conviction,
+                "version": conviction_version(conviction),
                 "entry_type": "limit",
-                "entry_price": round(entry, 2),
-                "entry_range": [round(entry - atr * 0.3, 2), round(entry + atr * 0.3, 2)],
-                "stop_loss": round(stop, 2),
-                "take_profit": [round(entry + risk * 2, 2), round(entry + risk * 3, 2)],
+                "entry_price": round_price(entry),
+                "entry_range": [round_price(entry - atr * 0.3), round_price(entry + atr * 0.3)],
+                "stop_loss": round_price(stop),
+                # 3-TP ladder: 2R → 3R → 4R from entry.
+                "take_profit": [
+                    round_price(entry + risk * 2),
+                    round_price(entry + risk * 3),
+                    round_price(entry + risk * 4),
+                ],
+                "take_profit_ideal": [
+                    entry + risk * 2,
+                    entry + risk * 3,
+                    entry + risk * 4,
+                ],
                 "reasoning": "Liquidity sweep with accumulation and volume confirmation — reversal setup.",
                 "source_skills": ["market-liquidity-sweep", "market-accumulation", "market-volume"],
             }
@@ -63,18 +84,47 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
                 "pair": ticker,
                 "direction": "long",
                 "conviction": 2,
+                "version": conviction_version(2),
                 "entry_type": "limit",
-                "entry_price": round(entry, 2),
-                "entry_range": [round(entry - atr * 0.3, 2), round(entry + atr * 0.3, 2)],
-                "stop_loss": round(stop, 2),
-                "take_profit": [round(entry + risk * 2, 2), round(entry + risk * 3, 2)],
+                "entry_price": round_price(entry),
+                "entry_range": [round_price(entry - atr * 0.3), round_price(entry + atr * 0.3)],
+                "stop_loss": round_price(stop),
+                # 3-TP ladder: 2R → 3R → 4R from entry.
+                "take_profit": [
+                    round_price(entry + risk * 2),
+                    round_price(entry + risk * 3),
+                    round_price(entry + risk * 4),
+                ],
+                "take_profit_ideal": [
+                    entry + risk * 2,
+                    entry + risk * 3,
+                    entry + risk * 4,
+                ],
                 "reasoning": "Liquidity sweep with volume confirmation (no accumulation) — speculative reversal.",
                 "source_skills": ["market-liquidity-sweep", "market-volume"],
             }
         )
 
+    for idea in ideas:
+        idea["rr_to_tp"] = compute_rr_to_tp(idea)
+        validate_l3_tp_ladder(idea)
+
+    # Drop sub-2% stops (noise risk in swing mode).
+    stop_2pct_rejection = None
+    if ideas:
+        filtered = []
+        for idea in ideas:
+            ok, rej = enforce_min_stop_distance(idea)
+            if ok:
+                filtered.append(idea)
+            elif stop_2pct_rejection is None:
+                stop_2pct_rejection = rej
+        ideas = filtered
+
     if ideas:
         narrative = f"Liquidity sweep setup: long. {sweep_result.get('narrative', '')}"
+    elif stop_2pct_rejection is not None:
+        narrative = stop_2pct_rejection
     else:
         narrative = "No liquidity sweep setup — sweep, accumulation, or volume confirmation missing."
 

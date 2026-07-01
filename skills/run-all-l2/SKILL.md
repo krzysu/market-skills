@@ -28,7 +28,23 @@ uv run skills/run-all-l2/scripts/run.py SPY BTC-USD AAPL --json
 
 # Explicit provider
 uv run skills/run-all-l2/scripts/run.py hl:LIT --json
+
+# Custom timeframe (e.g. 4h candles for the past month)
+uv run skills/run-all-l2/scripts/run.py AAPL --interval=4h --period=1mo --json
 ```
+
+## Flags
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `TICKER`... (positional, repeatable) | — | At least one ticker required. Supports `provider:ticker`. |
+| `--json` | human | Emit JSON envelope to stdout. |
+| `--source=PROVIDER` | auto-detect | Force a data provider. |
+| `--interval=INTERVAL` | `1d` | `1m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. Passed to each L2. |
+| `--period=PERIOD` | `1y` | `1d`/`5d`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. Passed to each L2. |
+| `--include-notes` | off | Auto-load active [`market-notes`](../market-notes/) for each ticker. |
+
+Both timeframe flags are validated — bad values exit 2 with a friendly error. JSON output includes top-level `interval`/`period` so the consumed timeframe is always visible to downstream agents.
 
 ## Runs
 
@@ -38,7 +54,6 @@ uv run skills/run-all-l2/scripts/run.py hl:LIT --json
 | market-breakout | Fresh/stale/confirmed breakouts |
 | market-exhaustion | Capitulation, blowoff, impulse exhaustion |
 | market-liquidity-sweep | Support/resistance sweeps |
-| market-trend-analysis | Composite trend verdict |
 | market-trend-quality | Trend health (HEALTHY/WEAKENING/DEGRADING) |
 
 ## Output

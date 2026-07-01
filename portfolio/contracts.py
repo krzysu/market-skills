@@ -88,3 +88,20 @@ class ReconcileDiff(TypedDict):
     external_qty: float
     delta: float
     status: str
+
+
+class DecisionRecord(TypedDict):
+    """A recorded decision trace (system of record).
+
+    One decision per ``intent_id``, with an optional FK to the portfolio
+    it was executed in (may be null for decisions that didn't result in a
+    trade).
+    """
+
+    decision_id: int
+    intent_id: str
+    portfolio_id: int | None
+    pair: str
+    decision_context_json: str  # JSON-serialized DecisionContext
+    captured_at: str  # ISO 8601 UTC
+    created_at: str

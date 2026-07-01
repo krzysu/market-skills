@@ -1,11 +1,15 @@
 """position-watchdog — pure evaluator for unified levels + signals.
 
-All functions are pure: they take current price/state + watch config and return
-(new alerts, new state). No I/O, no side effects.
+All functions are pure: they take current price/state + watch config and
+return ``(events, new_state)`` where ``events`` is a list of structured
+dicts (no pre-formatted strings). String rendering lives in
+``formatter.py``.
 
 A watch has:
   levels: list of price-driven alert rules (stop, tp, drop, recovery, zone, invalidation)
   signals: list of strategy-driven alert rules (L3 strategies with conviction threshold)
+  interval: candle interval for live-price tick and L3 evaluation (default "4h")
+  period: candle lookback for live-price tick and L3 evaluation (default "6mo")
 
 levels entries:
   {"type": "stop",         "price": float}                       — alert when price ≤ price
@@ -14,28 +18,56 @@ levels entries:
   {"type": "recovery"}                                               — alert after 2 ticks above entry post-drop
   {"type": "zone",         "low": float, "high": float, "label": str, "emoji": str}  — alert on zone entry
   {"type": "invalidation", "below": float}                        — alert when price < below
+
+Event dict shapes (see ``formatter.py`` for the text rendering layer):
+
+  stop:        {"type": "stop", "level_id", "current_price", "stop_price", "triggered_at"}
+  tp:          {"type": "tp", "level_id", "current_price", "tp_price", "exit_pct",
+                "qty", "position_size", "triggered_at"}
+  drop:        {"type": "drop", "level_id", "current_price", "entry_price",
+                "pct_from_entry", "threshold_pct", "severity", "triggered_at"}
+  recovery:    {"type": "recovery", "level_id", "current_price", "entry_price", "triggered_at"}
+  zone:        {"type": "zone", "level_id", "current_price", "low", "high",
+                "label", "emoji", "triggered_at"}
+  invalidation:{"type": "invalidation", "level_id", "current_price", "below_price", "triggered_at"}
+  signal:      {"type": "signal", "strategy", "direction", "conviction", "entry_price",
+                "entry_range", "stop_loss", "take_profit", "reasoning", "source_skills",
+                "entry_type", "triggered_at"}
 """
 
 import datetime as _dt
 
 
-def _now_iso() -> str:
-    return _dt.datetime.now(_dt.UTC).isoformat()
+def _now_iso(now: _dt.datetime | None = None) -> str:
+    return (now or _dt.datetime.now(_dt.UTC)).isoformat()
 
 
-def _fmt_pct(pct: float) -> str:
-    sign = "−" if pct < 0 else "+"
-    return f"{sign}{abs(pct):.1f}%"
-
-
-def _tp_qty(size, exit_pct, name) -> str:
+def _tp_qty(size, exit_pct) -> float | None:
     if size is None or exit_pct is None:
-        return ""
-    return f"{size * exit_pct / 100:.2f} {name}"
+        return None
+    return round(size * exit_pct / 100, 4)
 
 
-def evaluate_levels(watch: dict, current_price: float, prev_state: dict | None) -> tuple[list[str], dict]:
-    """Walk all levels in the watch and emit alerts on state changes. Returns (alerts, new_state)."""
+def evaluate_levels(
+    watch: dict,
+    current_price: float,
+    prev_state: dict | None,
+    now: _dt.datetime | None = None,
+) -> tuple[list[dict], dict]:
+    """Walk all levels in the watch and emit alert events on state changes.
+
+    Returns ``(events, new_state)`` where ``events`` is a list of
+    structured dicts (no pre-formatted strings — see module docstring for
+    the per-type shapes). The ``now`` argument is used to stamp
+    ``triggered_at`` on every emitted event; callers that need
+    deterministic timestamps in tests should pass a fixed value. When
+    omitted, defaults to ``datetime.now(UTC)`` (added in the same release
+    that moved the formatter out of lib — the old default of
+    ``datetime.now(UTC)`` inside the function still holds).
+
+    Levels are evaluated purely against ``current_price``; the candle
+    timeframe of the live-price tick does not affect this function.
+    """
     levels = watch.get("levels", [])
     if not levels:
         return [], {}
@@ -49,7 +81,9 @@ def evaluate_levels(watch: dict, current_price: float, prev_state: dict | None) 
     above_streak = int(state.get("above_entry_streak", 0))
     prev_price = state.get("prev_price")
 
-    alerts: list[str] = []
+    ts = _now_iso(now)
+
+    events: list[dict] = []
     new_alerted = dict(alerted)
     new_streak = above_streak
 
@@ -62,20 +96,33 @@ def evaluate_levels(watch: dict, current_price: float, prev_state: dict | None) 
         if level_type == "stop":
             stop = float(level["price"])
             if current_price <= stop and alerted.get(level_id) != "fired":
-                alerts.append(f"🔴 STOP BREACHED at €{current_price:.2f} (stop €{stop:.2f}). Verify fill manually.")
+                events.append(
+                    {
+                        "type": "stop",
+                        "level_id": level_id,
+                        "current_price": float(current_price),
+                        "stop_price": stop,
+                        "triggered_at": ts,
+                    }
+                )
                 new_alerted[level_id] = "fired"
 
         elif level_type == "tp":
             tp_price = float(level["price"])
             exit_pct = level.get("exit_pct")
             if current_price >= tp_price and alerted.get(level_id) != "fired":
-                qty = _tp_qty(size, exit_pct, name)
-                if exit_pct is not None and size is not None:
-                    alerts.append(
-                        f"✅ TP hit (€{tp_price:.2f}). RECOMMEND: sell {qty} (~{exit_pct}%). Manual confirm required."
-                    )
-                else:
-                    alerts.append(f"✅ TP hit (€{tp_price:.2f}). RECOMMEND: partial exit. Manual confirm required.")
+                events.append(
+                    {
+                        "type": "tp",
+                        "level_id": level_id,
+                        "current_price": float(current_price),
+                        "tp_price": tp_price,
+                        "exit_pct": exit_pct,
+                        "qty": _tp_qty(size, exit_pct),
+                        "position_size": size,
+                        "triggered_at": ts,
+                    }
+                )
                 new_alerted[level_id] = "fired"
 
         elif level_type == "drop":
@@ -84,9 +131,17 @@ def evaluate_levels(watch: dict, current_price: float, prev_state: dict | None) 
             pct_threshold = float(level["pct"])
             pct_from_entry = (current_price - float(entry)) / float(entry) * 100
             if pct_from_entry <= pct_threshold and alerted.get(level_id) != "fired":
-                alerts.append(
-                    f"{'🔶' if pct_threshold <= -10 else '🟡'} {_fmt_pct(pct_threshold)} from entry. "
-                    f"Current €{current_price:.2f}, entry €{float(entry):.2f}."
+                events.append(
+                    {
+                        "type": "drop",
+                        "level_id": level_id,
+                        "current_price": float(current_price),
+                        "entry_price": float(entry),
+                        "pct_from_entry": pct_from_entry,
+                        "threshold_pct": pct_threshold,
+                        "severity": "critical" if pct_threshold <= -10 else "warn",
+                        "triggered_at": ts,
+                    }
                 )
                 new_alerted[level_id] = "fired"
 
@@ -101,7 +156,15 @@ def evaluate_levels(watch: dict, current_price: float, prev_state: dict | None) 
                     and new_streak >= 2
                     and alerted.get(recovery_id) != "fired"
                 ):
-                    alerts.append(f"🟢 recovered above entry. Current €{current_price:.2f}.")
+                    events.append(
+                        {
+                            "type": "recovery",
+                            "level_id": recovery_id,
+                            "current_price": float(current_price),
+                            "entry_price": float(entry),
+                            "triggered_at": ts,
+                        }
+                    )
                     new_alerted[recovery_id] = "fired"
             else:
                 new_streak = 0
@@ -109,20 +172,37 @@ def evaluate_levels(watch: dict, current_price: float, prev_state: dict | None) 
         elif level_type == "zone":
             low = float(level["low"])
             high = float(level.get("high", float("inf")))
-            label = level.get("label", f"zone €{low:.2f}–€{high:.2f}")
+            label = level.get("label", f"zone {low:g}–{high:g}")
             emoji = level.get("emoji", "🎯")
             in_zone = low <= current_price <= high
             was_in_zone = prev_price is not None and low <= prev_price <= high
             if in_zone and not was_in_zone:
-                alerts.append(f"{emoji} {label} — {name} @ €{current_price:.2f}.")
+                events.append(
+                    {
+                        "type": "zone",
+                        "level_id": level_id,
+                        "current_price": float(current_price),
+                        "low": low,
+                        "high": high,
+                        "label": label,
+                        "emoji": emoji,
+                        "triggered_at": ts,
+                    }
+                )
                 new_alerted[level_id] = "fired"
 
         elif level_type == "invalidation":
             below = float(level["below"])
             if current_price < below and alerted.get(level_id) != "fired":
-                alerts.append(
-                    f"🔴 INVALIDATION — Thesis dead. {name} @ €{current_price:.2f}. "
-                    f"Stop loss triggered below €{below:.2f}. Do not average down."
+                events.append(
+                    {
+                        "type": "invalidation",
+                        "level_id": level_id,
+                        "current_price": float(current_price),
+                        "below_price": below,
+                        "name": name,
+                        "triggered_at": ts,
+                    }
                 )
                 new_alerted[level_id] = "fired"
 
@@ -134,7 +214,7 @@ def evaluate_levels(watch: dict, current_price: float, prev_state: dict | None) 
         "above_entry_streak": new_streak,
         "prev_price": current_price,
     }
-    return alerts, new_state
+    return events, new_state
 
 
 def evaluate_signals(
@@ -142,10 +222,18 @@ def evaluate_signals(
     l3_ideas_by_strategy: dict,
     prev_state: dict | None,
     now: _dt.datetime | None = None,
-) -> tuple[list[str], dict]:
-    """Walk signal blocks, alert on L3 strategy ideas meeting conviction + cooldown. Returns (alerts, new_state).
+) -> tuple[list[dict], dict]:
+    """Walk signal blocks, alert on L3 strategy ideas meeting conviction + cooldown.
+
+    Returns ``(events, new_state)`` where each event is a structured dict
+    (see module docstring). The ``now`` argument defaults to
+    ``datetime.now(UTC)`` and is used to stamp ``triggered_at`` and to
+    compare against the cooldown window stored in state.
 
     l3_ideas_by_strategy: {strategy_name: [TradeIdea, ...]} filtered to this watch's provider/ticker.
+    Ideas are assumed to have been built from candles on the watch's
+    configured timeframe by the caller; this function does not filter by
+    timeframe.
     """
     signals = watch.get("signals", [])
     if not signals:
@@ -154,9 +242,10 @@ def evaluate_signals(
     state = prev_state or {}
     last_alert_at: dict = state.get("last_signal_alert_at", {})
 
-    now = now or _dt.datetime.now(_dt.UTC)
+    ts = _now_iso(now)
+    now_dt = now or _dt.datetime.now(_dt.UTC)
 
-    alerts: list[str] = []
+    events: list[dict] = []
     new_last = dict(last_alert_at)
 
     for sg in signals:
@@ -182,18 +271,31 @@ def evaluate_signals(
                 if prior_ts:
                     try:
                         prior_dt = _dt.datetime.fromisoformat(prior_ts)
-                        if (now - prior_dt).total_seconds() < cooldown_hours * 3600:
+                        if (now_dt - prior_dt).total_seconds() < cooldown_hours * 3600:
                             continue
                     except ValueError:
                         pass
 
-                entry_str = f"€{entry_p:.2f}" if entry_p is not None else "n/a"
-                stop_str = f"€{stop_p:.2f}" if stop_p is not None else "n/a"
-                alerts.append(f"🎯 {strat} {direction.upper()} conv={conviction}. Entry {entry_str}, stop {stop_str}.")
-                new_last[key] = now.isoformat()
+                events.append(
+                    {
+                        "type": "signal",
+                        "strategy": strat,
+                        "direction": direction,
+                        "conviction": conviction,
+                        "entry_price": float(entry_p) if entry_p is not None else None,
+                        "entry_range": list(idea.get("entry_range") or []),
+                        "stop_loss": float(stop_p) if stop_p is not None else None,
+                        "take_profit": list(idea.get("take_profit") or []),
+                        "reasoning": str(idea.get("reasoning") or ""),
+                        "source_skills": list(idea.get("source_skills") or []),
+                        "entry_type": str(idea.get("entry_type") or "limit"),
+                        "triggered_at": ts,
+                    }
+                )
+                new_last[key] = ts
 
     new_state = {"last_signal_alert_at": new_last}
-    return alerts, new_state
+    return events, new_state
 
 
 def _level_id(level: dict) -> str:

@@ -19,6 +19,18 @@ Support and Resistance analysis from swing point clustering. Identifies key pric
 uv run skills/market-s-r/scripts/run.py AAPL --json
 ```
 
+## Flags
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `TICKER` (positional) | — | Required. Supports `provider:ticker` (e.g. `hl:LIT`, `yf:AAPL`). |
+| `--json` | human | Emit JSON to stdout. |
+| `--source=PROVIDER` | auto-detect | Force a data provider (see [README](../../README.md#data-providers)). |
+| `--interval=INTERVAL` | `1d` | `1m`/`2m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. |
+| `--period=PERIOD` | `1y` | `1d`/`5d`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. |
+
+Both timeframe flags are validated — bad values exit 2 with a friendly error. Defaults give daily candles over 1y (~250 bars) for swing-point clustering. For intraday (`--interval=1h`), bump `--period` to `6mo` or `1y`; yfinance caps hourly at ~2y and anything sub-hour at ~60d.
+
 ## What it returns
 
 - **nearest_support**, **nearest_resistance** — closest levels below/above price
@@ -41,3 +53,35 @@ uv run skills/market-s-r/scripts/run.py AAPL --json
 - Swing point window=3 for broad detection; cluster tolerance=1.5%.
 - Levels closer than 0.1% to price are reported as current_price_sits_on_level.
 - Requires 20+ candles minimum.
+
+## Extracting multiple structural levels (not just nearest)
+
+The text output only prints the nearest support/resistance (single row). For goal-price placement (TP ladders, stop clusters, position-watchdog level lists), you need **all** clustered levels above/below price with their touch counts — which tells you level strength.
+
+The `--json` output exposes this in `indicators.clustered_levels` as `[{price: float, touches: int}, ...]`. Workflow:
+
+```bash
+# Get all resistance levels above current price, sorted by price, with touch counts
+uv run skills/market-s-r/scripts/run.py ETHEUR --json \
+  | jq '.indicators.clustered_levels | map(select(.price > .[].price)) | sort_by(.price)'
+```
+
+Or via `read_file` after saving JSON to disk (per Kraken CLI pitfall — never pipe market-skills JSON to `python3 -c` for parsing):
+
+```bash
+uv run skills/market-s-r/scripts/run.py ETHEUR --json > /tmp/sr.json 2>/tmp/sr_err.txt
+```
+
+Then `read_file /tmp/sr.json` and grep `clustered_levels`.
+
+**Touch-count thresholds for structural strength:**
+- `touches >= 2` — real level, worth watching
+- `touches >= 3` — significant, strong S/R
+- `touches >= 5` — historical structural level (cycle top/bottom, multi-year consolidation)
+
+**Use cases:**
+- Building TP ladders for position-watchdog: pick TPs from levels with `touches >= 3` above current price
+- Position stops: pick stops from levels with `touches >= 3` below current price
+- Zone identification: consecutive levels within 2% of each other form a zone
+
+See `references/swing-levels-extraction.md` for the full pattern + worked examples.

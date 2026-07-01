@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """market-basis — perp market structure: funding, basis, spot-perp squeeze/RSI divergence."""
 
-import os
 import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from analysis.data import fetch_funding_rate, fetch_ohlc
 from analysis.formatting import emit_json, print_header, safe_round
@@ -16,6 +13,7 @@ from analysis.indicators import (
     compute_squeeze,
     extract_ohlcv,
 )
+from analysis.intervals import validate_timeframe
 
 
 def _analyze_one(data, label):
@@ -43,8 +41,9 @@ def _analyze_one(data, label):
     }
 
 
-def analyze(ticker, source="ccxt:binance"):
-    result = {"ticker": ticker, "source": source}
+def analyze(ticker, source="ccxt:binance", *, interval="1d", period="6mo"):
+    validate_timeframe(interval, period)
+    result = {"ticker": ticker, "source": source, "interval": interval, "period": period}
 
     # Extract base exchange from source for perp ticker
     exchange = source.split(":", 1)[1] if ":" in source else "binance"
@@ -58,7 +57,7 @@ def analyze(ticker, source="ccxt:binance"):
 
     # Spot data
     if ":" not in ticker:
-        spot_data = fetch_ohlc(ticker, interval="1d", period="6mo", source=base_source)
+        spot_data = fetch_ohlc(ticker, interval=interval, period=period, source=base_source)
         spot = _analyze_one(spot_data, "spot")
         if spot:
             result["spot"] = spot
@@ -67,13 +66,13 @@ def analyze(ticker, source="ccxt:binance"):
         spot = None
 
     # Perp data
-    perp_data = fetch_ohlc(perp_ticker, interval="1d", period="6mo", source=base_source)
+    perp_data = fetch_ohlc(perp_ticker, interval=interval, period=period, source=base_source)
     perp = _analyze_one(perp_data, "perp")
     if perp:
         result["perp"] = perp
 
     if not spot and not perp:
-        return {"ticker": ticker, "error": "no data from provider"}
+        return {"ticker": ticker, "error": "no data from provider", "interval": interval, "period": period}
 
     # Basis
     if spot and perp:
@@ -135,10 +134,16 @@ def main():
     parser = argparse.ArgumentParser(description="Perpetual swap market structure analysis")
     parser.add_argument("ticker", nargs="?", default="BTC/USDT", help="Ticker (e.g. BTC/USDT)")
     parser.add_argument("--source", default="ccxt:binance", help="CCXT provider and exchange (default: ccxt:binance)")
+    parser.add_argument("--interval", default="1d", help="Candle interval (default: 1d)")
+    parser.add_argument("--period", default="6mo", help="Candle lookback period (default: 6mo)")
     parser.add_argument("--json", action="store_true", help="JSON output")
     args = parser.parse_args()
 
-    result = analyze(args.ticker, source=args.source)
+    try:
+        result = analyze(args.ticker, source=args.source, interval=args.interval, period=args.period)
+    except ValueError as e:
+        print(f"error: {e.args[0] if e.args else e}", file=sys.stderr)
+        sys.exit(2)
 
     if args.json:
         emit_json(result)
@@ -149,7 +154,7 @@ def main():
         return
 
     print_header("PERP MARKET STRUCTURE")
-    print(f"  {args.ticker}  ({args.source})")
+    print(f"  {args.ticker}  ({args.source})  interval={args.interval} period={args.period}")
     print()
 
     funding = result.get("funding", {})

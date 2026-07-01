@@ -27,6 +27,9 @@ uv run skills/market-overview/scripts/run.py --action BUY --json
 
 # Top N only
 uv run skills/market-overview/scripts/run.py --top 5 --json
+
+# Custom timeframe (matches all other market-* skills)
+uv run skills/market-overview/scripts/run.py AAPL MSFT --interval=4h --period=6mo --json
 ```
 
 ## What it returns
@@ -44,4 +47,4 @@ The unified score weights each component and normalizes to 0-100. For details, s
 
 - Tickers with insufficient data are skipped and noted in errors.
 - The default watchlist is a suggestion — pass your own tickers for custom screening.
-- This is a screening tool, not a trading signal. Verify individual setups with `market-trend-analysis`.
+- This is a screening tool, not a trading signal. Verify individual setups with `market-trend-quality`.

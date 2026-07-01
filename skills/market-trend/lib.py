@@ -6,9 +6,42 @@ from analysis.indicators import (
     detect_crossover,
     ema_slope_pct,
     extract_ohlcv,
-    find_swing_high,
-    find_swing_low,
+    find_swing_highs,
+    find_swing_lows,
+    swing_window_for_interval,
 )
+
+
+def _detect_majority_hh_hl(highs, lows, window):
+    """Detect HH/HL using majority of swing pairs over the lookback window.
+
+    Returns (higher_high, higher_low) as True/False/None.
+    None when fewer than 2 swing points available.
+    """
+    swing_highs = find_swing_highs(highs, window)
+    swing_lows = find_swing_lows(lows, window)
+
+    higher_high = None
+    if len(swing_highs) >= 2:
+        recent = swing_highs[-1]
+        hh_count = sum(1 for older in swing_highs[:-1] if recent > older)
+        pairs = len(swing_highs) - 1
+        if hh_count / pairs >= 0.6:
+            higher_high = True
+        else:
+            higher_high = False
+
+    higher_low = None
+    if len(swing_lows) >= 2:
+        recent = swing_lows[-1]
+        hl_count = sum(1 for older in swing_lows[:-1] if recent > older)
+        pairs = len(swing_lows) - 1
+        if hl_count / pairs >= 0.6:
+            higher_low = True
+        else:
+            higher_low = False
+
+    return higher_high, higher_low
 
 
 def analyze(candles, interval="1d", period="1y"):
@@ -87,26 +120,9 @@ def analyze(candles, interval="1d", period="1y"):
     if ema_21_series and ema_50_series:
         crossover = detect_crossover(ema_21_series, ema_50_series, lookback=5)
 
-    # Swing structure — HH/HL detection
-    # Find most recent and previous swing highs/lows
-    swing_high_price, swing_high_idx = find_swing_high(candles, window=5)
-    swing_low_price, swing_low_idx = find_swing_low(candles, window=5)
-
-    # Find previous swing with same window to ensure comparable HH/HL detection
-    prev_swing_high_price, prev_swing_high_idx = (
-        find_swing_high(candles[:swing_high_idx], window=5) if swing_high_idx > 10 else (None, None)
-    )
-    prev_swing_low_price, prev_swing_low_idx = (
-        find_swing_low(candles[:swing_low_idx], window=5) if swing_low_idx > 10 else (None, None)
-    )
-
-    higher_high = None
-    if swing_high_price is not None and prev_swing_high_price is not None:
-        higher_high = swing_high_price > prev_swing_high_price
-
-    higher_low = None
-    if swing_low_price is not None and prev_swing_low_price is not None:
-        higher_low = swing_low_price > prev_swing_low_price
+    # Swing structure — multi-swing HH/HL detection (window scales with interval)
+    swing_window = swing_window_for_interval(interval)
+    higher_high, higher_low = _detect_majority_hh_hl(highs, lows, swing_window)
 
     # Score: -4 to +4
     score = 0
@@ -123,12 +139,12 @@ def analyze(candles, interval="1d", period="1y"):
     if higher_high is True:
         score += 1
     elif higher_high is False:
-        score -= 1
+        score -= 0.5
 
     if higher_low is True:
         score += 1
     elif higher_low is False:
-        score -= 1
+        score -= 0.5
 
     # Clamp to [-4, 4]
     score = max(-4, min(4, score))

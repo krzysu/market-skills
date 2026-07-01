@@ -20,6 +20,18 @@ uv run skills/strategy-liquidity-sweep/scripts/run.py BTC-USD
 uv run skills/strategy-liquidity-sweep/scripts/run.py BTC-USD --json
 ```
 
+## Flags
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `TICKER` (positional) | — | Required. Supports `provider:ticker` (e.g. `hl:LIT`, `yf:AAPL`). |
+| `--json` | human | Emit JSON to stdout. |
+| `--source=PROVIDER` | auto-detect | Force a data provider (see [README](../../README.md#data-providers)). |
+| `--interval=INTERVAL` | `1d` | `1m`/`2m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. |
+| `--period=PERIOD` | `1y` | `1d`/`5d`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. |
+
+Both timeframe flags are validated — bad values exit 2 with a friendly error. For intraday (`--interval=1h`), bump `--period` to `6mo` or `1y`; yfinance caps hourly at ~2y and anything sub-hour at ~60d.
+
 ## Composes
 
 | L2 Skill | Purpose |
@@ -38,4 +50,7 @@ uv run skills/strategy-liquidity-sweep/scripts/run.py BTC-USD --json
 ## Output
 
 - `ideas[]` — trade ideas with direction, conviction, entry/stop/target, reasoning
+  - Each idea carries `version: "v1".."v5"` derived from `conviction` via `analysis.contracts.conviction_version()`
+  - Each idea carries `take_profit_ideal` (unrounded construction) and `rr_to_tp: [rr_to_tp1, rr_to_tp2, rr_to_tp3]` (precomputed R:R to each TP via `analysis.contracts.compute_rr_to_tp()`) so consumers can read a canonical R:R without reimplementing the direction-asymmetric formula
+  - Each idea is validated against `validate_l3_tp_ladder()` (TP3 ≥ entry × 1.05 long, or ≤ entry × 0.95 short)
 - `narrative` — summary for user briefing

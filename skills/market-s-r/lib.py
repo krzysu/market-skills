@@ -47,6 +47,14 @@ def analyze(candles, interval="1d", period="1y"):
         if current_price != 0:
             resistance_dist_pct = ((nearest_r - current_price) / current_price) * 100
 
+    # no_nearby_level: True when no S/R level is within 0.5% of current price
+    # on either side (or no level at all on a side). Lets downstream L3 callers
+    # flag "open-air" setups where stop and TPs sit far from any structure to
+    # anchor the trade.
+    no_nearby_level = (support_dist_pct is None or support_dist_pct > 0.5) and (
+        resistance_dist_pct is None or resistance_dist_pct > 0.5
+    )
+
     # Find touch counts from clustered levels
     support_touches = 0
     resistance_touches = 0
@@ -82,4 +90,5 @@ def analyze(candles, interval="1d", period="1y"):
         "resistance_count": len(resistance_levels),
         "clustered_levels": clustered,
         "sits_on_level": on_level,
+        "no_nearby_level": no_nearby_level,
     }

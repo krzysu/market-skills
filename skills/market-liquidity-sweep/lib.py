@@ -115,12 +115,15 @@ def analyze(candles, interval="1d", period="1y"):
     total_weight += 0.15
 
     # --- Compute pattern ---
+    # Trigger: require at least 2 sub-signals present AND combined weight >
+    # 0.30. The pre-fix threshold ``ratio >= 0.5`` dropped the 2-sub
+    # ``swing_taken + volume`` case (wsum 0.35) into present=False with subs
+    # populated — the ghost shape.
+    n_present = sum(1 for sig in signals.values() if sig["present"])
     if total_weight > 0:
-        ratio = weighted_sum / total_weight
-        present = ratio >= 0.5
-        confidence = max(1, min(5, round(ratio * 5)))
+        confidence = max(1, min(5, round(weighted_sum * 5)))
+        present = n_present >= 2 and weighted_sum > 0.30
     else:
-        ratio = 0.0
         present = False
         confidence = 1
 

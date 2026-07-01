@@ -16,6 +16,18 @@ squeeze momentum and RSI between spot and perpetual markets.
 uv run skills/market-basis/scripts/run.py BTC/USDT --source ccxt:binance --json
 ```
 
+## Flags
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `TICKER` (positional) | `BTC/USDT` | Perp ticker (`BTC/USDT`, `ETH/USDT`, etc.). Without a `/`, treated as spot. |
+| `--source=PROVIDER` | `ccxt:binance` | CCXT provider and exchange. Other CCXT exchanges: `ccxt:bybit`, `ccxt:okx`, `ccxt:bitfinex`, etc. |
+| `--interval=INTERVAL` | `1d` | `1m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. |
+| `--period=PERIOD` | `6mo` | `1d`/`5d`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. |
+| `--json` | human | Emit JSON to stdout. |
+
+Both timeframe flags are validated — bad values exit 2 with a friendly error. Period defaults to `6mo` (vs `1y` elsewhere) because basis/funding analysis is most meaningful on the recent half-year.
+
 ## What it returns
 
 - **Funding**: current rate, 30-period average, annualized APR
@@ -39,4 +51,4 @@ uv run skills/market-basis/scripts/run.py BTC/USDT --source ccxt:binance --json
 - Funding rates only available on perp-capable exchanges (binance, bybit, okx, etc.)
 - Some exchanges update funding every 8h, others every 1h or 4h
 - Lightly traded perps may have stale or erratic funding data
-- Best paired with `market-trend-analysis` and `market-squeeze` for directional context
+- Best paired with `market-trend-quality` and `market-squeeze` for directional context

@@ -2,230 +2,154 @@
 
 ## Status
 
-This project is an **analysis layer** — L1 indicator skills and L2 pattern/composite verdict skills, plus a data-fetching layer. It does not execute trades, manage positions, or make decisions. It provides the building blocks an agent (or human, or cron) calls for market context.
+A composable technical-analysis + execution stack. L1 indicator skills,
+L2 pattern/composite verdicts, L3 strategy ideas, an advisory Risk
+layer, Kraken execution, portfolio tracking, and per-user config/notes
+— all wired via the Agent Skills spec so any LLM agent (Hermes,
+claude-code, custom chat loop) can call them as tools.
 
-The architecture below describes the **long-term domain design**, with each layer's current status marked.
+This repo does **not** own a Python orchestrator that auto-pipes
+signals to execution. The LLM is the agent brain: it reads `SKILL.md`,
+calls skills as tools, narrates results, asks the user, and (with
+explicit approval) calls the execution skill whose interactive confirm
+is the actual safety layer. Cron usage is analytics-only
+(`run-all-l3`, `position-watchdog`).
 
-## Seven domains
+## Layers
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        CONFIG                               │
-│          Schema-validated settings (tiers, budget,           │
-│          venue keys, strategy params)                       │
-│          ─── consumed by every other domain ───             │
-│          ▶ NOT BUILT — planned as analysis/config.py             │
-└─────────────────────────────────────────────────────────────┘
-       │                         │                         │
-       ▼                         ▼                         │
-┌──────────────┐      ┌──────────────────┐                 │
-│   ANALYSIS   │      │      MACRO       │                 │
-│  per-pair    │      │  cross-asset     │                 │
-│  indicators  │      │  regime context  │                 │
-│  patterns    │      │  F&G, VIX, DXY   │                 │
-│  verdicts    │      │  divergence      │                 │
-│  ▶ L1 + L2   │      │  ▶ NOT BUILT     │                 │
-│    BUILT     │      └────────┬─────────┘                 │
-└──────┬───────┘               │                           │
-       │                       │                           │
-       └───────────┬───────────┘                           │
-                   ▼                                       │
-          ┌────────────────────┐                           │
-          │  ▶ L3 STRATEGY     │                            │
-          │  turns verdicts +  │                            │
-          │  regime into ideas │                            │
-          │  ▶ NOT BUILT       │                            │
-          │  (next priority)   │                            │
-          └────────┬───────────┘                            │
-                   ▼                                       │
-          ┌────────────────────┐                            │
-          │      RISK          │                            │
-          │  sizing, policies, │                            │
-          │  budget, exposure  │                            │
-          │  → APPROVED /      │                            │
-          │    SCALED / REJECT │                            │
-          │  ▶ NOT BUILT       │                            │
-          └────────┬───────────┘                            │
-                   ▼                                       │
-          ┌────────────────────┐                  ┌─────────┴──────┐
-          │    EXECUTION       │                  │  PORTFOLIO     │
-          │  place orders on   │                  │  state, P&L,   │
-          │  venue (Kraken,    │◄────fills───────│  history,      │
-          │  Hyperliquid, etc) │                  │  stats         │
-          │  ▶ NOT BUILT       │                  │  ▶ NOT BUILT   │
-          └────────────────────┘                  └────────────────┘
-```
-
-### What's built (Analysis + Strategies)
-
-```
-┌──────────────────────────────────────────────────┐
-│  AGENT (external — Hermes, cron, human, etc.)    │
-│  Calls skills as tools. Decides what to analyze. │
-└───────┬──────────────────────────────────┬────────┘
-        │ calls                            │ calls
-        ▼                                  ▼
-┌──────────────────┐    ┌──────────────────────────────┐
-│   L3 Strategies  │    │   Batch runners              │
-│  strategy-*      │    │  run-all-l2  run-all-l3      │
-│  {ideas,         │    │  fetch once → run all skills │
-│   narrative}     │    └──────────────┬───────────────┘
-└────────┬─────────┘                   │
-         │                             │
-         └──────────┬──────────────────┘
-                    │
-┌───────────────────▼──────────────────┐
-│   L2 Skills                          │
-│  market-*  {pattern, signals, ...}   │
-└────────┬─────────────────────────────┘
+│                     AGENT BRAIN (LLM)                       │
+│  Reads SKILL.md → calls skills → narrates → user confirms   │
+└───────┬─────────────────────────────────┬───────────────────┘
+        │                                 │
+        ▼                                 ▼
+┌──────────────────┐               ┌──────────────────────┐
+│   L3 Strategies  │               │   Batch runners      │
+│  strategy-*      │               │  run-all-l2/l3       │
+│  {ideas,         │               │  run-watchlist       │
+│   narrative}     │               └──────────┬───────────┘
+└────────┬─────────┘                          │
+         │                                    │
+         └─────────────┬──────────────────────┘
+                       │
+┌──────────────────────▼─────────────────┐
+│   L2 Skills                            │
+│  market-*  {pattern, signals, ...}     │
+└────────┬───────────────────────────────┘
          │
-┌────────▼─────────────────────────────┐
-│   L1 Skills                          │
-│  market-*  {score, signal, zone}     │
-└────────┬─────────────────────────────┘
+┌────────▼───────────────────────────────┐
+│   L1 Skills                            │
+│  market-*  {score, signal, zone}       │
+└────────┬───────────────────────────────┘
          │
-┌────────▼─────────────────────────────┐
-│   analysis/indicators.py  pure math       │
-│   analysis/contracts.py   TypedDicts      │
-│   analysis/data.py        data fetch      │
-│   analysis/providers/*    exchanges       │
-└──────────────────────────────────────┘
+┌────────▼───────────────────────────────┐
+│   analysis/ package                    │
+│   indicators.py  contracts.py          │
+│   data.py        providers/*           │
+└────────────────────────────────────────┘
+
+Sidecars: Risk (advisory vet) · Execution (Kraken spot + perps)
+          · Portfolio (SQLite) · Config · Notes · Monitoring
 ```
 
-## Core principle: Event flow, not import chains
+## Event flow
 
-Every domain produces a standardised **event** consumed by the next domain.
-They never import each others' code.
+Every layer produces a typed event consumed by the next. Layers never
+import each other; the LLM bridges them by reading one event,
+reasoning, and (with user approval) calling the next skill.
 
-```
-Analysis   →  MarketVerdict{pair, rsi, trend, pattern, score, …}
-Macro      →  RegimeSignal{fng, vix, dxy, divergence, regime_note}
-Strategy   →  TradeIdea{pair, direction, entry_zone, stop, target, conviction, strategy_name}
-Risk       →  ApprovedIntent{pair, side, size, order_type, stop, target, max_slippage}
-Execution  →  FillConfirmation{txid, fill_price, volume, fee, venue, timestamp, intent_id}
-```
+- Analysis → `MarketVerdict{pair, rsi, trend, pattern, score, ...}`
+- Macro → `RegimeSignal{timestamp, inputs, regime, errors, regime_note}` — 6 inputs (F&G, VIX, DXY, US10Y, BTC.D, total mcap), 3-axis derived labels (risk_appetite / liquidity / sentiment). Lives in `analysis/macro.py` — fetches external cross-asset state.
+- Conviction calibration → `chop_score{timestamp, ideas, score, window}` — fraction of recent L3 ideas at conviction ≤ 2. Lives in `analysis/chop.py` (was `regime.py` until the Macro/Regime name collision was resolved). Reads the L3 idea history store, not external market data.
+- Strategy → `TradeIdea{pair, direction, entry_zone, stop, target, conviction, version, strategy_name}`
+- Risk → `RiskVerdict{intent_id, status, fragments[], concerns[], narrative_hint}` — advisory
+- Execution → `FillConfirmation{order_id, fill_price, volume, fee, venue, timestamp, intent_id, status}`
 
-Portfolio subscribes to FillConfirmation. It never calls Execution.
-Strategy subscribes to MarketVerdict + RegimeSignal. It never calls Analysis.
-Risk reads from Portfolio (current positions + drawdown) and Config (budget, limits).
+Strategy subscribes to MarketVerdict + RegimeSignal. Risk reads from Portfolio + Config. Portfolio subscribes to
+FillConfirmation; execution never calls Portfolio directly — fills wire through the skill wrapper.
 
-## L3 — Strategy Skills (built)
+The LLM agent brain follows the failure-mode contract documented in [`LLM-ORCHESTRATION.md`](./LLM-ORCHESTRATION.md) (per-`RiskVerdict`-status workflow, per-`FillConfirmation`-status workflow, idempotency rules for `intent_id`, the things-you-must-NEVER list). The LLM is the only layer that sees the whole picture; the skills are deterministic building blocks.
 
-L3 strategy skills follow the same pattern as L2 but output trade ideas:
+## L3 vs the agent brain
 
-```python
-# skills/strategy-trend-follow/lib.py
+| L3 Skills                            | Agent Brain                     |
+| ------------------------------------ | ------------------------------- |
+| "Here's an idea given these candles" | "Should I act on this idea?"    |
+| Pure analysis → intent               | Intent → decision → execution   |
+| Stateless or reads portfolio         | Has memory, planning, tool-use  |
+| Deterministic, testable              | Reasons about conflicting ideas |
+| One strategy per skill               | Orchestrates multiple L3s       |
 
-from analysis.skill_loader import load_skill
-
-def analyze(candles, *, ticker, interval="1d", period="1y"):
-    # Compose L2 verdicts (load_skill is @functools.cache'd internally)
-    trend_q = load_skill("market-trend-quality").analyze(candles, interval=interval, period=period)
-    accum = load_skill("market-accumulation").analyze(candles, interval=interval, period=period)
-
-    # Apply entry/exit rules
-    if trend_q["pattern"]["present"] and accum["pattern"]["present"]:
-        return {
-            "ideas": [
-                {
-                    "pair": ticker,
-                    "direction": "long",
-                    "conviction": min(trend_q["pattern"]["confidence"], accum["pattern"]["confidence"]),
-                    "entry_price": ...,
-                    "entry_range": [...],
-                    "stop_loss": ...,
-                    "take_profit": [...],
-                    "reasoning": "high-quality trend + accumulation",
-                    "source_skills": ["market-trend-quality", "market-accumulation"],
-                }
-            ],
-            "narrative": "High-quality uptrend with accumulation — long bias.",
-        }
-    return {"ideas": [], "narrative": "No setup triggered."}
-```
-
-### L3 vs agent brain
-
-| L3 Skills | Agent Brain |
-|-----------|-------------|
-| "Here's an idea given these candles" | "Should I act on this idea?" |
-| Pure analysis → intent | Intent → decision → execution |
-| Stateless or reads portfolio | Has memory, planning, tool-use |
-| Deterministic, testable | Reasons about conflicting ideas |
-| One strategy per skill | Orchestrates multiple L3s |
-
-Both exist. L3s are composable strategy building blocks. The agent brain (Hermes, cron, human with `--json`, custom loop) orchestrates them. This repo doesn't own the agent brain; it provides the skills it calls.
-
-## Provider Protocol (two interfaces)
-
-```python
-class DataProvider(Protocol):
-    """OHLC data. Used by Analysis + Macro. ▶ BUILT for HL, Kraken, YFinance, CCXT."""
-    def fetch_ohlc(self, ticker: str, interval: str, period: str) -> list[list]: ...
-    def supports(self, ticker: str) -> bool: ...
-
-class ExecutionProvider(Protocol):
-    """Order placement. ▶ NOT BUILT — planned."""
-    def place_order(self, intent: ApprovedIntent) -> FillConfirmation: ...
-    def get_balance(self) -> dict[str, float]: ...
-    def get_open_orders(self) -> list: ...
-    def cancel_order(self, order_id: str) -> bool: ...
-```
+Both exist. L3s are composable strategy building blocks. The agent
+brain orchestrates them. This repo doesn't own the agent brain; it
+provides the skills it calls.
 
 ## Domain boundaries
 
-| Domain | Input | Output | State | Status |
-|--------|-------|--------|-------|--------|
-| Analysis | OHLC candles (`DataProvider`) | `MarketVerdict` per pair | None (stateless) | **BUILT** (L1 + L2) |
-| Macro | F&G API + yfinance | `RegimeSignal` | None | Not built |
-| Strategy | `MarketVerdict[]` + `RegimeSignal` + Config | `TradeIdea[]` | Optional: last decision per pair | **BUILT** (L3 + run-all-l3) |
-| Risk | `TradeIdea` + Portfolio state + Config | `ApprovedIntent / SCALED / REJECT` | None (reads Portfolio) | Not built |
-| Execution | `ApprovedIntent` | `FillConfirmation` | Connection state | Not built |
-| Portfolio | `FillConfirmation` (any provider) | Balance, P&L, history | **SQLite** | Not built |
-| Config | YAML env files | pydantic-validated dict | File on disk | Not built |
+| Domain     | Input                                                   | Output                        | State                                                                                | Status                                                                                        |
+| ---------- | ------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Analysis   | OHLC candles                                            | `MarketVerdict` per pair      | Stateless                                                                            | **Built** (L1 + L2)                                                                           |
+| Macro      | F&G + VIX/DXY/US10Y (yfinance) + total mcap (CoinGecko) | `RegimeSignal`                | TTL cache + ring buffer (`$XDG_DATA_HOME/market-skills/macro_history.json`, 200-cap) | **Built** (6 inputs, 3-axis regime, narrate-only — `run-all-l3` attaches `macro` to envelope) |
+| Strategy   | `MarketVerdict[]` + `RegimeSignal` + Config             | `TradeIdea[]`                 | Optional                                                                             | **Built** (L3 + run-all-l3)                                                                   |
+| Risk       | `Intent` + Portfolio + Watchlist + Recent trades        | `RiskVerdict`                 | Reads Portfolio                                                                      | **Built** — advisory, not a hard gate                                                         |
+| Execution  | `Intent`                                                | `FillConfirmation`            | Connection                                                                           | **Built** for Kraken (spot + perps)                                                           |
+| Portfolio  | `FillConfirmation`                                      | Balance, P&L, history         | **SQLite**                                                                           | **Built** (multi-portfolio, FIFO, reconcile)                                                  |
+| Config     | Watchlist JSON                                          | Baskets of tickers + metadata | File on disk                                                                         | **Built** (market-watchlist + run-watchlist)                                                  |
+| Notes      | Notes JSON                                              | Per-pair thesis notes         | File on disk                                                                         | **Built** (market-notes)                                                                      |
+| Monitoring | Watches JSON + Portfolio                                | Alert events                  | Per-watch state                                                                      | **Built** (position-watchdog, manual confirm only)                                            |
 
-## Why SQLite for Portfolio
+## Key design choices
 
-- One file, zero infra. Flat file, no server, but still queryable via SQL.
-- `SELECT ticker, SUM(CASE WHEN side='buy' THEN cost ELSE 0 END) - SUM(CASE WHEN side='sell' THEN cost ELSE 0 END) AS net_deployed FROM fills WHERE timestamp > $baseline GROUP BY ticker` — replaces 200 lines of FIFO logic in `portfolio.py`.
-- Easy to export, easy to inspect, survives restarts.
-- Can add a `strategy_name` column and ask "what's my per-strategy P&L?" without restructuring.
+- **LLM-as-agent-brain** (2026-06-22 pivot). No Python orchestrator in
+  this repo. The LLM reads `SKILL.md`, calls skills as tools,
+  narrates, and asks the user. Cron is analytics-only.
+- **Risk is advisory, not a hard gate.** `risk-engine` returns a
+  `RiskVerdict` the LLM narrates; the execution skill's interactive
+  confirm is the actual safety layer that never gets bypassed.
+- **SQLite for Portfolio.** One file, zero infra, but queryable via
+  SQL — multi-portfolio, FIFO cost basis, P&L, replay, reconcile.
+- **Protocol-based providers.** `DataProvider` and `ExecutionProvider`
+  Protocols in `analysis/providers/` — add a venue by implementing one
+  and registering it. Same pattern for data and execution.
+- **No paper mode** for execution (2026-06-22 decision). `--dry-run`
+  validates against the venue without side effects; live submit always
+  prompts.
+- **L1/L2/L3 are venue-agnostic.** Indicators (RSI, EMA, MACD, squeeze,
+  etc.) and patterns (breakout, accumulation, exhaustion, sweep,
+  trend-quality) work the same on spot and perps OHLC. Perps-specific
+  data — funding rate, spot-perp basis, open interest, liquidations —
+  is a different signal class (venue-state, not price-derived) and
+  lives in the sidecar skill `market-basis` rather than a layer in the
+  L1/L2/L3 taxonomy. L3 strategies are not auto-integrated with
+  `market-basis`; the LLM runs it separately during narration so the
+  user can weigh funding drag / basis against the setup conviction.
+- **Perps risk-vet context is auto-fetched by `risk-engine`.** When the
+  intent's `venue` ends in `-perps` and `--perps-account` is set,
+  `risk-engine.build_context` shells out to `kraken futures` for open
+  positions and current funding rate; MM rate comes from the static
+  `MM_RATES` table in the perps provider. The LLM doesn't gather
+  perps state itself — the same shape as `--portfolio` for spot
+  context. CLI override flags (`--funding-rate-per-8h`,
+  `--maintenance-margin-rate`, `--open-perps-positions`) exist for
+  testing and for callers that source state elsewhere.
 
-## Hermes integration (planned)
+## Extensibility
 
-Each domain becomes one or more skills callable by a Hermes agent:
+- **New indicator** → function in `analysis/indicators.py`, optionally wrap as L1 skill.
+- **New pattern** → L2 skill in `skills/market-{name}/`. Compose L1s via the cached skill loader. Return `{pattern, signals, input_scores, narrative}`.
+- **New strategy** → L3 skill in `skills/strategy-{name}/`. Compose L2s. Return `{ideas, narrative}`.
+- **New exchange data** → implement `DataProvider`, register in the data registry.
+- **New exchange execution** → implement `ExecutionProvider`, register in the execution registry.
+- **New risk policy** → add function to `analysis/risk/spot.py` (spot
+  policies) or `analysis/risk/perps.py` (perps policies, must
+  short-circuit on spot intents), then include in the corresponding
+  `SPOT_POLICIES` or `PERPS_POLICIES` list. `vet()` picks the right
+  set per intent venue automatically.
 
-| Skill | Domain | Cron potential |
-|-------|--------|----------------|
-| `market-*` (L1/L2) | Analysis | Nightly scan, deltas |
-| `market-macro` | Macro | Pre-market context |
-| `strategy-dca` | Strategy | Run after analysis |
-| `strategy-perps` | Strategy | Run after analysis |
-| `strategy-trim` | Strategy | Run after analysis |
-| `risk-engine` | Risk | Run before execution |
-| `execution-kraken` | Execution | On demand (user confirm) |
-| `execution-hl` | Execution | On demand (user confirm) |
-| `portfolio-mgmt` | Portfolio | On demand (user query) |
-| `trading-config` | Config | Read-only from other skills |
+No file outside the new skill/module needs to change (except the relevant registry).
 
-## Extensibility model
+## Build status
 
-- **New indicator**: add function in `analysis/indicators.py`, optionally wrap as L1 skill.
-- **New pattern**: create L2 skill in `skills/market-{name}/`. Compose L1s via `_load_l1_skill()`. Return `{pattern, signals, input_scores, narrative}`.
-- **New strategy**: create L3 strategy in `skills/strategy-{name}/`. Compose L2s via `_load_l2_skill()`. Return `{ideas, narrative}`.
-- **New exchange data**: implement `DataProvider`, register in `_REGISTRY` and `_PREFIX_MAP`.
-- **New exchange execution**: implement `ExecutionProvider`, add to execution registry.
-- **New risk policy**: add function to `analysis/risk.py`, compose in `vet()`.
-
-No file outside the new skill/module needs to change (except registries for providers).
-
-## Build order
-
-- [x] **L3 strategy skills** (6 built: trend-follow, mean-reversion, breakout-confirm, accumulation-swing, exhaustion-fade, liquidity-sweep)
-- [x] **Batch runners** (`run-all-l2`, `run-all-l3`) — fetch once, run all skills in-process
-- [ ] **Portfolio** (`analysis/portfolio.py`) — standalone SQLite module. Skills and the agent brain query it for position context.
-- [ ] **Execution provider protocol** + paper mode — same pattern as data providers.
-- [ ] **Risk** (`analysis/risk.py`) — validate ideas against portfolio + config.
-- [ ] **Wire up** — L3 → risk → execution → portfolio loop the agent brain calls.
-
-Each step is independently usable. You can use L3 for analysis today, add portfolio tracking next quarter, and never touch execution.
+All domains in the table above are **Built**. The LLM-orchestration
+failure-mode contract is documented in [`LLM-ORCHESTRATION.md`](./LLM-ORCHESTRATION.md).

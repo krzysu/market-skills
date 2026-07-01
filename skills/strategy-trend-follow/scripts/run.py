@@ -1,35 +1,40 @@
 #!/usr/bin/env python3
 """strategy-trend-follow — L3 trend-following strategy."""
 
-import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
-import importlib.util
-
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, parse_args, print_header, require_ticker
+from analysis.formatting import emit_json, print_header, require_ticker, safe_parse_args
+from analysis.skill_loader import load_lib_for_script
+from analysis.watchlist import metadata_for
 
 
-def _load_lib():
-    lib_path = os.path.join(os.path.dirname(__file__), "..", "lib.py")
-    spec = importlib.util.spec_from_file_location("strategy_trend_follow_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+def _parse_asset_class(argv):
+    """Extract ``--asset-class=CLASS`` from argv.
+
+    Returns the override string if present, otherwise ``None`` so the
+    caller falls back to watchlist metadata lookup. Used by the LLM
+    brain when overriding the auto-resolved class for a one-off run.
+    """
+    for arg in argv:
+        if arg.startswith("--asset-class="):
+            return arg.split("=", 1)[1]
+    return None
 
 
 def main():
-    ticker, json_mode, source = parse_args(sys.argv[1:])
+    ticker, json_mode, source, interval, period = safe_parse_args(sys.argv[1:])
     require_ticker(ticker, json_mode)
-    candles = fetch_ohlc(ticker, source=source)
+    candles = fetch_ohlc(ticker, interval=interval, period=period, source=source)
     if not candles:
         print("no data" if not json_mode else '{"error": "no data"}')
         return
 
-    _lib = _load_lib()
-    result = _lib.analyze(candles, ticker=ticker)
+    override = _parse_asset_class(sys.argv[1:])
+    asset_class = override if override is not None else metadata_for(ticker).get("asset_class")
+
+    _lib = load_lib_for_script(__file__)
+    result = _lib.analyze(candles, ticker=ticker, interval=interval, period=period, asset_class=asset_class)
 
     if json_mode:
         emit_json(result)

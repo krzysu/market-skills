@@ -1,10 +1,18 @@
 """strategy-accumulation-swing — L3 strategy: Wyckoff accumulation in healthy trends."""
 
+from analysis.contracts import (
+    compute_rr_to_tp,
+    conviction_version,
+    enforce_min_stop_distance,
+    l2_classification,
+    validate_l3_tp_ladder,
+)
+from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
 
 
-def analyze(candles, *, ticker, interval="1d", period="1y"):
+def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
         return {"ideas": [], "narrative": f"insufficient data (need 50+ candles, got {cc})"}
@@ -16,13 +24,11 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
     accum_result = accum_mod.analyze(candles, interval=interval, period=period) if accum_mod else err
     tq_result = tq_mod.analyze(candles, interval=interval, period=period) if tq_mod else err
 
+    # l2_classification returns None if pattern didn't actually fire (invariant:
+    # present=True AND classification is not None).
+    accum_classification = l2_classification(accum_result)
+    tq_classification = l2_classification(tq_result)
     accum_pattern = accum_result.get("pattern", {})
-    accum_present = accum_pattern.get("present", False)
-    accum_classification = accum_pattern.get("classification")
-
-    tq_pattern = tq_result.get("pattern", {})
-    tq_present = tq_pattern.get("present", False)
-    tq_classification = tq_pattern.get("classification")
 
     closes = [c[4] for c in candles]
     price = closes[-1]
@@ -30,8 +36,8 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
 
     ideas = []
 
-    valid_accum = accum_present and accum_classification in ("SPRING", "REACCUMULATION")
-    valid_trend = tq_present and tq_classification in ("HEALTHY_UPTREND", "WEAKENING")
+    valid_accum = accum_classification in ("SPRING", "REACCUMULATION")
+    valid_trend = tq_classification in ("HEALTHY_UPTREND", "WEAKENING")
     improving = tq_classification == "WEAKENING"
 
     if valid_accum and valid_trend:
@@ -44,11 +50,21 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
                 "pair": ticker,
                 "direction": "long",
                 "conviction": conviction,
+                "version": conviction_version(conviction),
                 "entry_type": "limit",
-                "entry_price": round(entry, 2),
-                "entry_range": [round(entry - atr * 0.5, 2), round(entry + atr * 0.3, 2)],
-                "stop_loss": round(stop, 2),
-                "take_profit": [round(entry + risk * 2, 2), round(entry + risk * 3, 2)],
+                "entry_price": round_price(entry),
+                "entry_range": [round_price(entry - atr * 0.5), round_price(entry + atr * 0.3)],
+                "stop_loss": round_price(stop),
+                "take_profit": [
+                    round_price(entry + risk * 2),
+                    round_price(entry + risk * 3),
+                    round_price(entry + risk * 5),
+                ],
+                "take_profit_ideal": [
+                    entry + risk * 2,
+                    entry + risk * 3,
+                    entry + risk * 5,
+                ],
                 "reasoning": (
                     f"Accumulation ({accum_classification}) in {'improving' if improving else 'healthy'} trend."
                 ),
@@ -56,8 +72,26 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
             }
         )
 
+    for idea in ideas:
+        idea["rr_to_tp"] = compute_rr_to_tp(idea)
+        validate_l3_tp_ladder(idea)
+
+    # Drop sub-2% stops (noise risk in swing mode).
+    stop_2pct_rejection = None
+    if ideas:
+        filtered = []
+        for idea in ideas:
+            ok, rej = enforce_min_stop_distance(idea)
+            if ok:
+                filtered.append(idea)
+            elif stop_2pct_rejection is None:
+                stop_2pct_rejection = rej
+        ideas = filtered
+
     if ideas:
         narrative = f"Accumulation swing setup: long. {accum_result.get('narrative', '')}"
+    elif stop_2pct_rejection is not None:
+        narrative = stop_2pct_rejection
     else:
         narrative = "No accumulation swing setup — missing accumulation pattern or healthy trend."
 

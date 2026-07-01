@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# run-watchlist cron wrapper — activates the uv venv and runs the bulk runner.
+
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd "$SKILL_DIR/../.." && pwd)"
+
+cd "$PROJECT_ROOT"
+exec uv run --no-sync python "$SKILL_DIR/scripts/run.py" "$@"

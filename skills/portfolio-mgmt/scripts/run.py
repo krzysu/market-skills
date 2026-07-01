@@ -5,11 +5,9 @@ import argparse
 import json
 import os
 import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
 from datetime import UTC, datetime
 
+from analysis.skill_loader import load_lib_for_script
 from portfolio.db import (
     VALID_SIDES,
     add_portfolio,
@@ -35,7 +33,8 @@ from portfolio.db import (
     replay_fifo,
 )
 
-DB_DEFAULT = os.path.expanduser("~/.market-skills/portfolio.db")
+_lib = load_lib_for_script(__file__)
+default_db_path = _lib.default_db_path
 
 
 def _parse_price_overrides(raw: list[str] | None) -> dict[str, float]:
@@ -467,7 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
     shared.add_argument("--json", action="store_true", help="Machine-readable JSON output")
 
     parser = argparse.ArgumentParser(description="Portfolio management — SQLite-backed, FIFO cost basis.")
-    parser.add_argument("--db", default=DB_DEFAULT, help=f"Database path (default: {DB_DEFAULT})")
+    parser.add_argument("--db", default=None, help="Database path (default: $MARKET_SKILLS_PORTFOLIO_DB)")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -608,6 +607,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main():
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.db is None:
+        args.db = default_db_path()
 
     if not args.command:
         parser.print_help()
