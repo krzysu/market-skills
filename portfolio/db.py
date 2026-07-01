@@ -22,6 +22,7 @@ def init_db(db_path: str) -> None:
             name TEXT UNIQUE NOT NULL,
             base_ccy TEXT NOT NULL DEFAULT 'EUR',
             notes TEXT,
+            peak_value REAL NOT NULL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS transactions (
@@ -45,6 +46,18 @@ def init_db(db_path: str) -> None:
         CREATE INDEX IF NOT EXISTS idx_tx_asset ON transactions(asset);
         CREATE INDEX IF NOT EXISTS idx_tx_ts ON transactions(ts);
         CREATE INDEX IF NOT EXISTS idx_tx_side ON transactions(side);
+        CREATE TABLE IF NOT EXISTS decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            intent_id TEXT UNIQUE NOT NULL,
+            portfolio_id INTEGER REFERENCES portfolios(id),
+            pair TEXT NOT NULL,
+            decision_context_json TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_decisions_intent ON decisions(intent_id);
+        CREATE INDEX IF NOT EXISTS idx_decisions_pair ON decisions(pair);
+        CREATE INDEX IF NOT EXISTS idx_decisions_portfolio ON decisions(portfolio_id);
         CREATE TABLE IF NOT EXISTS price_cache (
             asset TEXT PRIMARY KEY,
             price REAL NOT NULL,
@@ -53,6 +66,12 @@ def init_db(db_path: str) -> None:
         );
     """
     )
+    # Idempotent column migrations: each branch checks for the column's
+    # existence before ALTERing. Runs on the same connection as the schema
+    # above to avoid a second connect/close round-trip.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(portfolios)").fetchall()}
+    if "peak_value" not in cols:
+        conn.execute("ALTER TABLE portfolios ADD COLUMN peak_value REAL NOT NULL DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -488,6 +507,163 @@ def get_portfolio_summary(
         "pnl": pnl,
         "positions": positions,
     }
+
+
+# ── Portfolio drawdown ───────────────────────────────────────────────────
+
+
+def compute_portfolio_drawdown(
+    db_path: str, portfolio_id: int, current_prices: dict[str, float] | None = None
+) -> float:
+    """Return portfolio drawdown as a percentage (0.0 to 100.0).
+
+    Drawdown is measured from the high-water-mark peak value of the
+    portfolio (positions + cash in base_ccy). The peak is persisted on the
+    ``portfolios.peak_value`` column and updated in place on every call to
+    ``MAX(peak, current_value)`` — first call seeds the peak from the
+    current value.
+
+    Returns 0.0 when:
+        - The portfolio has no positions and no cash
+        - The current value equals or exceeds the peak (a new high)
+        - The peak is undefined (still 0)
+
+    Cash rows (``kraken:EUR`` for an EUR portfolio) contribute their full
+    qty to current_value — cash is base_ccy by definition.
+    """
+    positions = compute_positions(db_path, portfolio_id, current_prices)
+    current_value = 0.0
+    for p in positions:
+        val = p.get("current_value")
+        if val is not None:
+            current_value += float(val)
+            continue
+        qty = p.get("qty") or 0
+        if qty:
+            # No live price for this asset — fall back to cost basis so the
+            # peak doesn't get polluted by missing-data zero.
+            current_value += float(p.get("cost_basis", 0) or 0)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT peak_value FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+        if row is None:
+            return 0.0
+        peak = float(row[0] or 0.0)
+
+        new_peak = max(peak, current_value)
+        if new_peak != peak:
+            conn.execute(
+                "UPDATE portfolios SET peak_value = ? WHERE id = ?",
+                (new_peak, portfolio_id),
+            )
+            conn.commit()
+            peak = new_peak
+    finally:
+        conn.close()
+
+    if peak <= 0:
+        return 0.0
+    if current_value >= peak:
+        return 0.0
+    return round((peak - current_value) / peak * 100, 4)
+
+
+# ── Decision CRUD ────────────────────────────────────────────────────────
+
+
+def add_decision(
+    db_path: str,
+    intent_id: str,
+    pair: str,
+    decision_context_json: str,
+    portfolio_id: int | None = None,
+    captured_at: str | None = None,
+) -> int:
+    """Record a decision trace in the decisions table.
+
+    Idempotent on ``intent_id``: a second call with the same id is a
+    no-op and returns the existing row id. This matches the
+    venue-level retry contract (see ``LLM-ORCHESTRATION.md`` §4) —
+    a retried submit with the same ``intent_id`` returns the
+    original order, and the second ``write_fill_to_portfolio`` call
+    must not crash on the decision-trace write.
+
+    The first call wins: ``decision_context_json`` / ``captured_at`` /
+    ``portfolio_id`` from the original call are preserved; a later
+    call's fields are dropped. Decisions can be recorded before a
+    portfolio exists (``portfolio_id`` may be null).
+
+    Returns the decision row id (existing or freshly inserted).
+    """
+    from datetime import UTC, datetime
+
+    conn = get_db(db_path)
+    conn.execute(
+        """INSERT OR IGNORE INTO decisions
+           (intent_id, portfolio_id, pair, decision_context_json, captured_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (
+            intent_id,
+            portfolio_id,
+            pair,
+            decision_context_json,
+            captured_at or datetime.now(UTC).isoformat(),
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT id FROM decisions WHERE intent_id = ?", (intent_id,)).fetchone()
+    conn.close()
+    return int(row["id"]) if row else 0
+
+
+def get_decision(db_path: str, intent_id: str) -> dict | None:
+    """Look up a decision by intent_id."""
+    conn = get_db(db_path)
+    row = conn.execute("SELECT * FROM decisions WHERE intent_id = ?", (intent_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_decisions(
+    db_path: str,
+    portfolio_id: int | None = None,
+    pair: str | None = None,
+    since: str | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """List decisions, optionally filtered."""
+    conn = get_db(db_path)
+    where: list[str] = []
+    params: list = []
+    if portfolio_id is not None:
+        where.append("portfolio_id = ?")
+        params.append(portfolio_id)
+    if pair is not None:
+        where.append("pair = ?")
+        params.append(pair)
+    if since is not None:
+        where.append("captured_at >= ?")
+        params.append(since)
+
+    sql = "SELECT * FROM decisions"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY captured_at DESC, id DESC"
+    if limit is not None:
+        sql += f" LIMIT {limit}"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_decision(db_path: str, decision_id: int) -> bool:
+    conn = get_db(db_path)
+    conn.execute("DELETE FROM decisions WHERE id = ?", (decision_id,))
+    conn.commit()
+    changed = conn.total_changes > 0
+    conn.close()
+    return changed
 
 
 # ── Price cache ──────────────────────────────────────────────────────────

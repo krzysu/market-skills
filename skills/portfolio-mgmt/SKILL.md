@@ -13,6 +13,8 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Track trades, holdings, and P&L across any number of user-defined portfolios. SQLite-backed with FIFO cost basis.
 
+> **LLM agent brain**: for the partial-fill recording workflow (when an `execution-kraken-*` `FillConfirmation` returns `status="partial"` and you need to write a row manually because auto-wiring was skipped), see [`LLM-ORCHESTRATION.md`](../../LLM-ORCHESTRATION.md) §3.
+
 ## Quick Start
 
 ```bash
@@ -27,7 +29,7 @@ uv run skills/portfolio-mgmt/scripts/run.py positions
 ## CLI
 
 ```
-init                                          # Create database (~/.market-skills/portfolio.db)
+init                                          # Create database ($MARKET_SKILLS_PORTFOLIO_DB)
 portfolio create --name X [--base-ccy EUR]    # Create a portfolio
 portfolio list                                # List all portfolios
 portfolio show <id|name>                      # Show one portfolio
@@ -55,7 +57,7 @@ export [--portfolio X] [--format csv|json] [--output FILE]
 ```
 
 All commands accept `--json` for machine output and `--db PATH` to override the default database location.
-`init` creates the parent directory if it doesn't exist. Default DB is `~/.market-skills/portfolio.db`.
+`init` creates the parent directory if it doesn't exist. The default DB path comes from `$MARKET_SKILLS_PORTFOLIO_DB`; the CLI raises if it is unset (no host-specific fallback).
 `view`, `positions`, `pnl`, `allocation`, `performance` automatically use cached prices from `prices refresh`. Override with `--price-override`.
 
 ## Asset format
@@ -102,6 +104,70 @@ add --notes @path/to/signal.json
 
 Shows in `list` output and `export`.
 
+### `decision_context` — structured decision trace
+
+The **decision_context** sub-object captures the *state of the world at the moment you decided to take the trade* — what signals fired, what the risk verdict said, whether you overrode anything. It's the difference between "I bought HYPE at $60.15" (current data, already captured) and "I bought HYPE at $60.15 because L3 trend-follow LONG conv 4 fired under fear-recovery regime, macro regime was supportive, and I overrode the L3 stop from $49.71 to $50.50 because ZEC was already in the same direction" (decision trace, queryable later).
+
+**System of record:** the `decisions` table in the portfolio SQLite DB (see `portfolio/db.py`). Each row is keyed by `intent_id` (unique). For backward compat with tools that read the `transactions.notes` JSON, a copy is also embedded in `notes.decision_context` — but the `decisions` table is the authoritative source.
+
+The canonical schema is the `DecisionContext` TypedDict in `analysis/decision.py` — that module is the single source of truth for field types and validation. The example below is illustrative; always refer to the TypedDict for the exact shape.
+
+**Example** (illustrative — see `analysis/decision.py::DecisionContext` for the canonical schema):
+
+```json
+{
+  "decision_context": {
+    "intent_id": "trend-follow-HYPEUSD-2026-06-22-001",
+    "source_skill": "strategy-trend-follow",
+    "l3_idea": {
+      "direction": "long",
+      "conviction": 4,
+      "summary": "EMA21 reclaim + 4h thrust; bullish retest at ascending trendline",
+      "entry_price": 60.15,
+      "stop": 49.71,
+      "tp1": 88.21, "tp2": 100.58, "tp3": 119.14,
+      "rr_to_tp2": 3.3
+    },
+    "regime": {
+      "label": "fear_recovery",
+      "fng": 22,
+      "btc_dominance": null,
+      "divergence": "accumulation"
+    },
+    "macro_signals": ["fng_extreme_fear", "btc_fair_value_narrowing"],
+    "risk_verdict": {
+      "status": "APPROVED",
+      "position_size_pct": 12.4,
+      "concerns": []
+    },
+    "override": {
+      "from_suggestion": false,
+      "field": null,
+      "reason": null
+    },
+    "captured_at": "2026-06-22T15:00:00Z"
+  }
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `intent_id` | string | recommended | Idempotency key from the execution Intent; matches `notes.intent_id` / `notes.ref` |
+| `source_skill` | string | recommended | L3 strategy that produced the idea (`strategy-trend-follow`, `strategy-breakout-confirm`, etc.); or `"manual"` if hand-built |
+| `l3_idea` | object | recommended | Compact idea summary: `direction`, `conviction` (1–5), `summary` (1-line), entry/stop/TP ladder, `rr_to_tp2` |
+| `regime` | object | optional | Macro regime label + key metrics. Use `market-macro` skill labels when available: `fear_recovery`, `risk_on`, `risk_off`, `neutral`, etc. |
+| `macro_signals` | list[string] | optional | Free-form list of macro/fundamental signals that supported the trade (e.g. `fng_extreme_fear`, `divergence_accumulation`, `btc_weekly_above_ema21`) |
+| `risk_verdict` | object | recommended | `status` (APPROVED/CONCERN/SCALE/REJECT), `position_size_pct` of portfolio, `concerns` (list of policy fragment reasons) |
+| `override` | object | recommended | `from_suggestion` (bool), `field` (what was overridden: stop/tp/volume/conviction), `reason` (1-line). Default `false/null/null` for clean system-driven trades |
+| `captured_at` | ISO timestamp | recommended | When the decision was made (NOT the fill time) |
+
+**When to populate:**
+- **Auto:** Every Kraken trade via `execution-kraken-spot` / `execution-kraken-perps`. The LLM supplies the regime snapshot, risk verdict, and override flag via `Intent.decision_decoration` (or the matching CLI flag `--decision-decoration` on those skills); the lib merges those into the auto-built `DecisionContext` and writes to both the `decisions` table and `notes.decision_context`. Idempotent on `intent_id` — a retried submit with the same id is a no-op, preserving the original trace.
+- **Manual inline:** `add --notes @/tmp/decision_ctx.json` for direct kraken trades or on-chain DEX swaps.
+- **Backfill:** Use the spec at `references/decision-context-backfill.md` for older trades missing the field.
+
+**Why this exists:** per the Foundation Capital "context graph" thesis (2026-07), the value in a decision-support system lives in *why a decision was made* (the trace), not just *what* (the data). This field makes every trade queryable by reasoning — "show me trades where I overrode the L3 stop under fear-recovery regime and what their R:R turned out to be."
+
 ## Editing transactions
 
 Only `notes` and `ref` fields are editable. To correct a trade (qty, price, side, asset, timestamp), **remove and re-add it**. This avoids silently corrupting downstream FIFO chains.
@@ -136,6 +202,41 @@ replay --portfolio 1
 ```
 
 Pass `--json` for machine-readable replay events.
+
+## On-chain DEX swap logging (defi portfolio)
+
+When the user shares a Base / Arbitrum / StarkNet / Ethereum tx link for a DEX swap that lands in the defi portfolio, the auto-log shape is the same as Kraken:
+
+1. **Capture tx data** — try `web_extract` first. If the page is JS-rendered (empty placeholders), ask the user to paste the Transaction Action line + token-transfer amounts.
+2. **Pick asset key by data feed** — a Base-chain VVV buy is logged as `hl:VVV` (HL is the price feed). Chain info goes in notes only.
+3. **Cost basis** = total input ÷ qty received. Include gas if material.
+4. **Build notes JSON** with chain-specific fields:
+   ```json
+   {
+     "tx_hash": "0x...",
+     "chain": "base",
+     "chain_id": 8453,
+     "exchange": "KyberSwap",
+     "block": 47667147,
+     "filled_at": "2026-06-22T12:06:00Z",
+     "input_token": "USDC",
+     "input_amount": 5000,
+     "output_token": "VVV",
+     "output_qty": 317.86,
+     "route_summary": "USDC->WETH->DIEM->VVV multi-hop",
+     "implied_price_per_unit_usd": 15.73,
+     "thesis": "Multi-TF spring setup",
+     "asset_class": "alt-l3",
+     "position_role": "starter",
+     "logged_by": "operator"
+   }
+   ```
+5. Use `--date ISO8601` (not `--ts`).
+6. Verify after add with `positions --portfolio 2 --no-refresh`.
+
+**No auto-log for on-chain trades yet.** Unlike Kraken, the user has not directed auto-log for on-chain swaps. Each log is an explicit instruction.
+
+**Pitfall — note-key auto-attach requires asset-key match.** Logging `hl:VVV` when existing notes use `hl:VVV` means the note auto-attaches. Logging `base:VVV` orphans the note.
 
 ## Reconcile — external balance check
 

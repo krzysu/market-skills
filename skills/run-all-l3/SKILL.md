@@ -22,7 +22,23 @@ Same reasoning as `run-all-l2/` — each L3 script's `run.py` calls `fetch_ohlc(
 ```bash
 uv run skills/run-all-l3/scripts/run.py SPY
 uv run skills/run-all-l3/scripts/run.py SPY BTC-USD AAPL --json
+
+# Custom timeframe (e.g. 4h candles for the past month)
+uv run skills/run-all-l3/scripts/run.py AAPL --interval=4h --period=1mo --json
 ```
+
+## Flags
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `TICKER`... (positional, repeatable) | — | At least one ticker required. Supports `provider:ticker`. |
+| `--json` | human | Emit JSON envelope to stdout. |
+| `--source=PROVIDER` | auto-detect | Force a data provider. |
+| `--interval=INTERVAL` | `1d` | `1m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. Passed to each L3. |
+| `--period=PERIOD` | `1y` | `1d`/`5d`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. Passed to each L3. |
+| `--include-notes` | off | Auto-load active [`market-notes`](../market-notes/) for each ticker. |
+
+Both timeframe flags are validated — bad values exit 2 with a friendly error. JSON output includes top-level `interval`/`period` so the consumed timeframe is always visible to downstream agents.
 
 ## Runs
 
@@ -37,6 +53,19 @@ uv run skills/run-all-l3/scripts/run.py SPY BTC-USD AAPL --json
 
 ## Output
 
-- `tickers[ticker].strategies[strategy_name].ideas[]` — trade ideas from each strategy
+- `tickers[ticker].strategies[strategy_name].ideas[]` — trade ideas from each strategy. Each idea includes `version: "v1".."v5"` derived from `conviction` via `analysis/contracts.conviction_version`.
 - `tickers[ticker].strategies[strategy_name].narrative` — strategy summary
 - Non-JSON mode: shows count of ideas per strategy and direction summary
+
+## Idea-state tracking (stale-idea detection)
+
+This runner does **not** maintain persistent idea state. The `--track-ideas`
+flag that previously lived here was removed — it was a workflow concern
+(persistent on-disk state plus a hardcoded "30 ticks without 50% progress =
+stale" policy) that didn't belong in a reusable analysis library.
+
+Cron workflows that need stale-idea reports should consume the JSON
+output of this runner and run their own state-tracking step. The runner's
+JSON envelope (`tickers[ticker].strategies[*].ideas[]`) is stable and
+self-describing — any consumer can read `entry_price`, `take_profit[0]`,
+and `direction` to compute progress and staleness on their own terms.

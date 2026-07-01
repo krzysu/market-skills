@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """market-overview — unified market scan across multiple tickers."""
 
-import os
 import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from analysis.data import fetch_ohlc
@@ -19,18 +15,19 @@ from analysis.indicators import (
     compute_squeeze,
     extract_ohlcv,
 )
+from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
 
 DEFAULT_WATCHLIST = ["SPY", "QQQ", "AAPL", "GOOGL", "BTC-USD", "GLD"]
 
 
-def _analyze_one(ticker, source=None):
+def _analyze_one(ticker, source=None, interval=DEFAULT_INTERVAL, period=DEFAULT_PERIOD):
     """Run composite trend analysis on a single ticker, return dict or error."""
     try:
-        candles = fetch_ohlc(ticker, period="2y", source=source)
+        candles = fetch_ohlc(ticker, interval=interval, period=period, source=source)
         if not candles:
             return {"ticker": ticker, "error": "no data"}
         if len(candles) < 220:
-            return {"ticker": ticker, "error": f"insufficient data ({len(candles)} days)"}
+            return {"ticker": ticker, "error": f"insufficient data ({len(candles)} candles on {interval})"}
 
         opens, highs, lows, closes, volumes = extract_ohlcv(candles)
         price = closes[-1]
@@ -94,12 +91,12 @@ def _analyze_one(ticker, source=None):
         return {"ticker": ticker, "error": str(e)}
 
 
-def scan(tickers, action_filter=None, top_n=None, source=None):
+def scan(tickers, action_filter=None, top_n=None, source=None, interval=DEFAULT_INTERVAL, period=DEFAULT_PERIOD):
     results = []
     errors = []
 
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {pool.submit(_analyze_one, t, source): t for t in tickers}
+        futures = {pool.submit(_analyze_one, t, source, interval, period): t for t in tickers}
         for future in as_completed(futures):
             r = future.result()
             if "error" in r:
@@ -127,14 +124,27 @@ def main():
     parser.add_argument("--top", type=int, help="Limit to top N results")
     parser.add_argument("--json", action="store_true", help="JSON output")
     parser.add_argument("--source", help="Data provider: kraken, yfinance (default: auto)")
+    parser.add_argument("--interval", default=DEFAULT_INTERVAL, help="Candle interval (default: 1d)")
+    parser.add_argument("--period", default=DEFAULT_PERIOD, help="Candle period (default: 1y)")
     parser.add_argument("--pretty", action="store_true", help="Human-readable table (default without --json)")
     args = parser.parse_args()
 
+    validate_timeframe(args.interval, args.period)
+
     tickers = args.tickers if args.tickers else DEFAULT_WATCHLIST
-    results, errors = scan(tickers, action_filter=args.action, top_n=args.top, source=args.source)
+    results, errors = scan(
+        tickers,
+        action_filter=args.action,
+        top_n=args.top,
+        source=args.source,
+        interval=args.interval,
+        period=args.period,
+    )
 
     output = {
         "tickers_scanned": len(tickers),
+        "interval": args.interval,
+        "period": args.period,
         "results": len(results),
         "errors": errors,
         "ranked": results,
@@ -145,6 +155,7 @@ def main():
         return
 
     print_header("UNIFIED MARKET OVERVIEW")
+    print(f"  interval={args.interval} period={args.period}")
     if results:
         print(f"  {'Ticker':<10} {'Price':>10} {'Trend':<16} {'RSI':>6} {'Squeeze':<16} {'Score':>6} {'Action'}")
         print(f"  {'-' * 10} {'-' * 10} {'-' * 16} {'-' * 6} {'-' * 16} {'-' * 6} {'-' * 10}")
@@ -164,4 +175,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ValueError as e:
+        print(f"error: {e.args[0] if e.args else e}", file=sys.stderr)
+        sys.exit(2)

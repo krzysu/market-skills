@@ -1,15 +1,7 @@
 """run-all-l2 — fetch candles once per ticker, run all L2 pattern skills in-process."""
 
+from analysis.registry import l2_skills
 from analysis.skill_loader import load_skill
-
-L2_SKILLS = [
-    "market-accumulation",
-    "market-breakout",
-    "market-exhaustion",
-    "market-liquidity-sweep",
-    "market-trend-analysis",
-    "market-trend-quality",
-]  # noqa: E501
 
 
 def analyze(ticker, candles, interval="1d", period="1y"):
@@ -22,7 +14,7 @@ def analyze(ticker, candles, interval="1d", period="1y"):
         }
     """
     skills_out = {}
-    for skill_name in L2_SKILLS:
+    for skill_name in l2_skills():
         mod = load_skill(skill_name)
         if mod is None:
             skills_out[skill_name] = {"error": "skill not found"}

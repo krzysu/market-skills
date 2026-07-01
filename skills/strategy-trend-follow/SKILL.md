@@ -20,21 +20,77 @@ uv run skills/strategy-trend-follow/scripts/run.py SPY
 uv run skills/strategy-trend-follow/scripts/run.py SPY --json
 ```
 
+## Flags
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `TICKER` (positional) | — | Required. Supports `provider:ticker` (e.g. `hl:LIT`, `yf:AAPL`). |
+| `--asset-class` | auto | Asset class for maturity threshold scaling (resolved from watchlist metadata; see Pattern S). |
+| `--json` | human | Emit JSON to stdout. |
+| `--source=PROVIDER` | auto-detect | Force a data provider (see [README](../../README.md#data-providers)). |
+| `--interval=INTERVAL` | `1d` | `1m`/`2m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. |
+| `--period=PERIOD` | `1y` | `1d`/`5d`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. |
+
+Both timeframe flags are validated — bad values exit 2 with a friendly error. For intraday (`--interval=1h`), bump `--period` to `6mo` or `1y`; yfinance caps hourly at ~2y and anything sub-hour at ~60d.
+
 ## Composes
 
 | L2 Skill | Purpose |
 |----------|---------|
-| market-trend-quality | Assess trend health (HEALTHY_UPTREND / HEALTHY_DOWNTREND) |
+| market-trend-quality | Assess trend health (HEALTHY_UPTREND / HEALTHY_DOWNTREND / HEALTHY_PULLBACK_UPTREND / WEAKENING) |
 | market-breakout | Detect fresh breakouts for entry timing |
 
 ## Entry Logic
 
-- **Long**: trend-quality is HEALTHY_UPTREND + breakout at resistance → limit at EMA pullback or market at breakout
+- **Long — healthy trend**: trend-quality is HEALTHY_UPTREND (or HEALTHY_PULLBACK_UPTREND) + breakout at resistance → limit at EMA pullback or market at breakout. Pullback setups get conviction −1 (less confirmation).
+- **Long — weakening with intact structure**: trend-quality is WEAKENING but the underlying HH/HL + EMA alignment from market-trend is still bullish → partial bull re-entry at current price. Conviction is confidence −1 (capped at 5, floor at 1).
 - **Short**: trend-quality is HEALTHY_DOWNTREND + breakdown at support → limit at EMA bounce or market at breakdown
 - **Stop**: below recent swing low (long) / above recent swing high (short) — approximated via ATR
 - **Targets**: 1.5R, 2.5R, 4R where R = entry - stop
 
 ## Output
 
-- `ideas[]` — trade ideas with direction, conviction, entry/stop/target, reasoning
+- `ideas[]` — trade ideas with direction, conviction, entry/stop/target, reasoning, source_skills
+  - Each idea carries `version: "v1".."v5"` derived from `conviction` via `analysis.contracts.conviction_version()`
+  - Each idea carries `move_maturity_pct` and `entry_window_validity_pct` — observational fields used by Pattern S (see below)
+  - Each idea carries `take_profit_ideal` (unrounded construction) and `rr_to_tp: [rr_to_tp1, rr_to_tp2, rr_to_tp3]` (precomputed R:R to each TP via `analysis.contracts.compute_rr_to_tp()`) so consumers can read a canonical R:R without reimplementing the direction-asymmetric formula
+  - Each idea is validated against `validate_l3_tp_ladder()` (TP3 ≥ entry × 1.05 long, or ≤ entry × 0.95 short, plus strict monotonicity + distinctness for sub-$1 ladders)
 - `narrative` — summary for user briefing
+
+## Pattern S — soft veto
+
+Inlines the swing-scan cron's down-or-info rules at L3 emit time so consumers
+running `strategy-trend-follow` standalone see the same protective downgrades.
+Catches cases like an 80%-extended LONG emitted as `conv=4` with no maturity
+signal — late chase-risk that downstream prompts would have to manually veto.
+
+When any Pattern S condition fires the idea gets `veto_reasons: list[str]` and
+conviction is downgraded:
+
+| Tag | Trigger | Conviction |
+|---|---|---|
+| `late-move` | `move_maturity_pct > 50 × mult` | −2 |
+| `mature-move` | `move_maturity_pct > 30 × mult` | −1 |
+| `chase-risk` | `entry_window_validity_pct > 2` | −1 |
+| `entry-edge` | `entry_window_validity_pct > 0.5` | (info only) |
+| `pullback-not-yet` | long: close < entry × 0.95 / short: close > entry × 1.05 | −1 |
+| `asset-class-scaled` | multiplier > 1.0 (info only) | — |
+
+The maturity thresholds scale by **asset class**. When the caller passes
+`asset_class` (typically resolved from the watchlist metadata), the default
+30%/50% floors are multiplied:
+
+| `asset_class` | Multiplier | `mature-move` | `late-move` |
+|---|---|---|---|
+| (unset / blue-chip) | 1× | 30% | 50% |
+| `perp_dex` | 6× | 180% | 300% |
+| `low_float` | 6× | 180% | 300% |
+| `ai_infra` | 2× | 60% | 100% |
+
+When `multiplier > 1.0` the tag `asset-class-scaled` is added (zero conviction
+delta) so downstream consumers can detect the scaling was active.
+
+Conviction is clamped to `[1, 5]`. Ideas never silently drop — the cron prompt
+can demote to `[INFO]` based on the `veto_reasons` tags. The reasoning field is
+appended with `Pattern S: <tags>.` so the rationale is visible in human-readable
+output.
