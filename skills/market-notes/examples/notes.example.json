@@ -1,0 +1,66 @@
+{
+  "BTCUSD": [
+    {
+      "note": "Cycle bottom thesis: wait for $45-50k or 1w structure flip out of FULL_BEAR. Mayer approaching MEAN_REVERT zone, F&G in EXTREME FEAR range supports accumulation timing. Directional long below cycle target is valid only with 4h thrust above post-break high.",
+      "added": "2026-04-13T09:38:14+00:00",
+      "expires": "2026-07-12T09:38:14+00:00",
+      "updated": null,
+      "status": "thesis",
+      "type": "thesis",
+      "state": null,
+      "active_timeframe": null,
+      "dependencies": null,
+      "price_refs": null,
+      "invalidates_on": "weekly_close_above_EMA21",
+      "tags": []
+    }
+  ],
+  "NEARUSD": [
+    {
+      "note": "OPEN: shakeout-reclaim pattern. Broke out at $2.51, surged to $3.15, fully retraced to $2.21, then reclaimed. 4h trigger fired on re-break. Stop $2.54, target $3.12 (R:R 2.0).",
+      "added": "2026-06-03T04:15:04+00:00",
+      "expires": "2026-06-17T04:15:04+00:00",
+      "updated": null,
+      "status": "open",
+      "type": "setup",
+      "state": null,
+      "active_timeframe": "4h",
+      "dependencies": null,
+      "price_refs": {
+        "stop": 2.54,
+        "target": 3.12,
+        "target_2": null,
+        "target_3": null,
+        "entry": null,
+        "invalidation_below": null,
+        "invalidation_above": null
+      },
+      "invalidates_on": null,
+      "tags": []
+    }
+  ],
+  "ZECUSD": [
+    {
+      "note": "Coiled range structure intact ($484-$502). L3 long v1 idea alive. Price-trigger invalidated (close < $490) but structure not.",
+      "added": "2026-06-20T12:00:00+00:00",
+      "expires": null,
+      "updated": null,
+      "status": "post_mortem",
+      "type": "observation",
+      "state": "coiled_range_intact",
+      "active_timeframe": "1d",
+      "dependencies": null,
+      "price_refs": {
+        "stop": null,
+        "target": null,
+        "target_2": null,
+        "target_3": null,
+        "entry": null,
+        "invalidation_below": 490,
+        "invalidation_above": null
+      },
+      "invalidates_on": "structure_break_below_484",
+      "tags": []
+    }
+  ]
+}

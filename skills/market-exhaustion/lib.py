@@ -47,46 +47,53 @@ def analyze(candles, interval="1d", period="1y"):
     total_weight = 0.0
     weighted_sum = 0.0
 
-    # 1. Volume climax (weight 0.30)
+    # Weights sum to 1.0; confidence is the absolute |weighted_sum| on this scale.
+    # Original ordering preserved: volume_climax > rsi_extreme > narrowing_range > momentum_divergence.
+
+    # 1. Volume climax (weight 0.3333)
     vol_present = False
     if "error" not in vol_result:
         vr = vol_result.get("volume_ratio")
         regime = vol_result.get("regime")
         vol_present = (vr is not None and vr >= 2.5) or regime == "CLIMAX"
-    signals["volume_climax"] = {"present": vol_present, "weight": 0.30}
-    weighted_sum += 0.30 if vol_present else 0.0
-    total_weight += 0.30
+    signals["volume_climax"] = {"present": vol_present, "weight": 0.3333}
+    weighted_sum += 0.3333 if vol_present else 0.0
+    total_weight += 0.3333
 
-    # 2. RSI extreme (weight 0.25) — computed directly
+    # 2. RSI extreme (weight 0.2778)
     rsi_extreme = rsi is not None and (rsi < 30 or rsi > 70)
-    signals["rsi_extreme"] = {"present": rsi_extreme, "weight": 0.25}
-    weighted_sum += 0.25 if rsi_extreme else 0.0
-    total_weight += 0.25
+    signals["rsi_extreme"] = {"present": rsi_extreme, "weight": 0.2778}
+    weighted_sum += 0.2778 if rsi_extreme else 0.0
+    total_weight += 0.2778
 
-    # 3. Narrowing range (weight 0.20)
+    # 3. Narrowing range (weight 0.2222)
     narrow_present = False
     if "error" not in volty_result:
         narrow_present = volty_result.get("regime") == "LOW"
-    signals["narrowing_range"] = {"present": narrow_present, "weight": 0.20}
-    weighted_sum += 0.20 if narrow_present else 0.0
-    total_weight += 0.20
+    signals["narrowing_range"] = {"present": narrow_present, "weight": 0.2222}
+    weighted_sum += 0.2222 if narrow_present else 0.0
+    total_weight += 0.2222
 
-    # 4. Momentum divergence (weight 0.15)
+    # 4. Momentum divergence (weight 0.1667)
     div_present = False
     if "error" not in macd_result:
         hf = macd_result.get("histogram_flip")
         div_present = hf in ("negative_to_positive", "positive_to_negative")
-    signals["momentum_divergence"] = {"present": div_present, "weight": 0.15}
-    weighted_sum += 0.15 if div_present else 0.0
-    total_weight += 0.15
+    signals["momentum_divergence"] = {"present": div_present, "weight": 0.1667}
+    weighted_sum += 0.1667 if div_present else 0.0
+    total_weight += 0.1667
 
     # --- Compute pattern ---
+    # Trigger: require at least 2 sub-signals present AND combined weight >
+    # 0.30. The pre-fix ``ratio >= 0.5`` threshold silently dropped 2-sub
+    # cases at wsum in (0.30, 0.50) — e.g. rsi_extreme +
+    # momentum_divergence (0.4445) and narrowing_range + momentum_divergence
+    # (0.3889).
+    n_present = sum(1 for sig in signals.values() if sig.get("present"))
     if total_weight > 0:
-        ratio = weighted_sum / total_weight
-        present = ratio >= 0.5
-        confidence = max(1, min(5, round(ratio * 5)))
+        confidence = max(1, min(5, round(weighted_sum * 5)))
+        present = n_present >= 2 and weighted_sum > 0.30
     else:
-        ratio = 0.0
         present = False
         confidence = 1
 

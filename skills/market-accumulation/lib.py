@@ -104,20 +104,34 @@ def analyze(candles, interval="1d", period="1y"):
     total_weight += 0.15
 
     # --- Compute pattern ---
+    # Trigger: require at least 2 sub-signals present AND combined weight >
+    # 0.30. The pre-fix ``ratio >= 0.4`` threshold silently dropped 2-sub
+    # cases at wsum in (0.30, 0.40) — e.g. absorption + reaccumulation,
+    # sign_of_strength + low_vol_after_distribution, absorption +
+    # low_vol_after_distribution (each wsum 0.35).
+    n_present = sum(1 for sig in signals.values() if sig.get("present"))
     if total_weight > 0:
-        ratio = weighted_sum / total_weight
-        present = ratio >= 0.5
-        confidence = max(1, min(5, round(ratio * 5)))
+        confidence = max(1, min(5, round(weighted_sum * 5)))
+        present = n_present >= 2 and weighted_sum > 0.30
     else:
-        ratio = 0.0
         present = False
         confidence = 1
+
+    # REACCUMULATION sub-shape: reaccumulation + low_vol_after_distribution
+    # both firing is the Wyckoff pullback-within-uptrend that compresses before
+    # markup. Combined weight is 0.30, below the 0.40 threshold, but two
+    # corroborating L1s are meaningful. Trust the combo and classify.
+    if not present and reaccum_present and low_vol_present:
+        present = True
+        confidence = 3  # two corroborating L1s — middle of the 1..5 range
 
     # --- Classification ---
     classification = None
     if present:
         if spring_present and absorption_present:
             classification = "SPRING"
+        elif reaccum_present and low_vol_present:
+            classification = "REACCUMULATION"
         elif reaccum_present and sos_present:
             classification = "REACCUMULATION"
         elif low_vol_present:

@@ -13,11 +13,12 @@ Provider prefixes:
 
 import logging
 
-from analysis.providers.base import Provider
-from analysis.providers.ccxt import CCXTProvider
-from analysis.providers.hyperliquid import HyperliquidProvider
-from analysis.providers.kraken import KrakenProvider
-from analysis.providers.yfinance import YFinanceProvider
+from analysis.intervals import validate_timeframe, warn_unsupported_combo
+from analysis.providers.data.base import Provider
+from analysis.providers.data.ccxt import CCXTProvider
+from analysis.providers.data.hyperliquid import HyperliquidProvider
+from analysis.providers.data.kraken import KrakenProvider
+from analysis.providers.data.yfinance import YFinanceProvider
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def _get_provider(source: str) -> Provider:
     for p in _REGISTRY:
         if p.name == source:
             return p
-    raise ValueError(f"Unknown provider: {source}")
+    raise ValueError(f"Unknown provider: {source!r}")
 
 
 def _resolve_ticker_prefix(ticker: str) -> tuple[str, str] | None:
@@ -116,17 +117,23 @@ def fetch_funding_rate(ticker: str, source: str | None = None) -> dict | None:
     return None
 
 
-def _resolve_explicit(ticker: str, interval: str, period: str) -> list[list] | None:
-    """Check if ticker uses ``provider:ticker`` format and route explicitly."""
+def _resolve_explicit(ticker: str, interval: str, period: str) -> tuple[list[list], str] | None:
+    """Check if ticker uses ``provider:ticker`` format and route explicitly.
+
+    Returns ``(candles, provider_name)`` on prefix match — including on fetch
+    failure (``candles=[]``) so the caller can still log the yfinance cap
+    warning. Returns ``None`` when no known prefix is present.
+    """
     resolved = _resolve_ticker_prefix(ticker)
     if resolved is None:
         return None
     raw_ticker, provider_name = resolved
     try:
-        return _get_provider(provider_name).fetch(raw_ticker, interval, period)
+        candles = _get_provider(provider_name).fetch(raw_ticker, interval, period)
     except Exception as e:
         logger.warning("_resolve_explicit(%s): %s", ticker, e)
-        return []
+        return [], provider_name
+    return candles, provider_name
 
 
 def fetch_spot_price(ticker: str, source: str | None = None) -> dict | None:
@@ -192,16 +199,26 @@ def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y", source: st
     Returns:
         List of candles: [[timestamp, open, high, low, close, volume], ...]
         Timestamps are Unix seconds (int). Returns [] on failure.
+
+    Raises:
+        ValueError: if ``interval`` or ``period`` is not in the supported set
+            (see ``analysis.intervals``).
     """
+    validate_timeframe(interval, period)
+
     # Try explicit `provider:ticker` routing first
     explicit = _resolve_explicit(ticker, interval, period)
     if explicit is not None:
-        return explicit
+        candles, provider_name = explicit
+        _log_provider_warn(provider_name, interval, period)
+        return candles
 
     # Legacy source argument (used by some scripts)
     if source:
         try:
-            return _get_provider(source).fetch(ticker, interval, period)
+            provider = _get_provider(source)
+            _log_provider_warn(provider.name, interval, period)
+            return provider.fetch(ticker, interval, period)
         except Exception as e:
             logger.warning("fetch_ohlc(source=%s, %s): %s", source, ticker, e)
             return []
@@ -210,9 +227,18 @@ def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y", source: st
     for p in _REGISTRY:
         if p.supports(ticker):
             try:
+                _log_provider_warn(p.name, interval, period)
                 return p.fetch(ticker, interval, period)
             except Exception as e:
                 logger.debug("fetch_ohlc(auto, %s=%s): %s", p.name, ticker, e)
                 continue
 
     return []
+
+
+def _log_provider_warn(provider_name: str, interval: str, period: str) -> None:
+    """Emit yfinance-specific cap warnings only when the resolved provider
+    actually uses those caps. Keeps the log noise-free for Kraken/CCXT/HL."""
+    warn = warn_unsupported_combo(interval, period, provider=provider_name)
+    if warn:
+        logger.warning(warn)

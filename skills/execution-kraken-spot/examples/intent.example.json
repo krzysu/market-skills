@@ -1,0 +1,18 @@
+{
+  "intent_id": "example-2026-06-22-001",
+  "venue": "kraken",
+  "pair": "HYPEUSD",
+  "side": "buy",
+  "order_type": "limit",
+  "volume": 1.5,
+  "limit_price": 60.15,
+  "time_in_force": "GTC",
+  "thesis": "Accumulate on retest of breakout level",
+  "strategy": "trend-follow",
+  "source_skills": ["market-accumulation", "market-trend"],
+  "conviction": 4,
+  "notes": {
+    "stop_loss": 49.71,
+    "take_profit": [88.21, 100.58, 119.14]
+  }
+}

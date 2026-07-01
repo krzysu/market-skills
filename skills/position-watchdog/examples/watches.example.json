@@ -1,0 +1,41 @@
+{
+  "watches": [
+    {
+      "name": "HYPE",
+      "enabled": true,
+      "monitor_provider": "kraken:HYPEUSD",
+      "interval": "4h",
+      "period": "6mo",
+      "entry_price": 60.15,
+      "position_size": 1.66,
+      "levels": [
+        {"type": "stop", "price": 49.71},
+        {"type": "tp", "price": 88.21, "exit_pct": 33},
+        {"type": "tp", "price": 100.58, "exit_pct": 33},
+        {"type": "tp", "price": 119.14, "exit_pct": 34},
+        {"type": "drop", "pct": -5},
+        {"type": "drop", "pct": -10},
+        {"type": "recovery"}
+      ],
+      "signals": [
+        {"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 2}
+      ]
+    },
+    {
+      "name": "ZEC",
+      "enabled": false,
+      "monitor_provider": "kraken:ZECUSD",
+      "interval": "4h",
+      "period": "6mo",
+      "levels": [
+        {"type": "zone", "low": 500, "high": 510, "label": "T2 limit zone", "emoji": "🟢"},
+        {"type": "zone", "low": 558, "high": 588, "label": "T3 reclaim", "emoji": "🟡"},
+        {"type": "zone", "low": 588, "high": 99999, "label": "T4 continuation", "emoji": "🟠"},
+        {"type": "invalidation", "below": 486}
+      ],
+      "signals": [
+        {"strategies": ["mean-reversion", "breakout-confirm"], "min_conviction": 4, "cooldown_hours": 4}
+      ]
+    }
+  ]
+}

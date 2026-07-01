@@ -1,0 +1,12 @@
+{
+  "intent_id": "example-2026-06-22-risk-001",
+  "venue": "kraken",
+  "pair": "HYPEUSD",
+  "side": "buy",
+  "order_type": "limit",
+  "volume": 1.5,
+  "limit_price": 60.15,
+  "thesis": "Breakout retest at ascending trendline",
+  "strategy": "trend-follow",
+  "conviction": 4
+}

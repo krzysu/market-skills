@@ -1,10 +1,17 @@
 """strategy-mean-reversion — L3 strategy: fade extremes at S/R levels."""
 
+from analysis.contracts import (
+    compute_rr_to_tp,
+    conviction_version,
+    enforce_min_stop_distance,
+    validate_l3_tp_ladder,
+)
+from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
 
 
-def analyze(candles, *, ticker, interval="1d", period="1y"):
+def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
         return {"ideas": [], "narrative": f"insufficient data (need 50+ candles, got {cc})"}
@@ -40,18 +47,31 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
         entry = price
         stop = support - atr * 1
         risk = entry - stop
-        mid = (support + (resistance or support * 1.1)) / 2
+        # Audit 2026-06-21 #5: TP3 must be ≥ entry × 1.05. If resistance is too close
+        # to entry, fall back to a 3R target instead of letting TP3 degenerate to entry.
+        far_target = resistance if (resistance is not None and resistance >= entry * 1.05) else entry + risk * 3
         conviction = 3 if low_vol else 2
         ideas.append(
             {
                 "pair": ticker,
                 "direction": "long",
                 "conviction": conviction,
+                "version": conviction_version(conviction),
                 "entry_type": "limit",
-                "entry_price": round(entry, 2),
-                "entry_range": [round(support, 2), round(entry * 1.01, 2)],
-                "stop_loss": round(stop, 2),
-                "take_profit": [round(mid, 2), round(entry + risk * 2, 2)],
+                "entry_price": round_price(entry),
+                "entry_range": [round_price(support), round_price(entry * 1.01)],
+                "stop_loss": round_price(stop),
+                # 3-TP ladder (ascending): 1R → 2R → full reversion to resistance.
+                "take_profit": [
+                    round_price(entry + risk * 1),
+                    round_price(entry + risk * 2),
+                    round_price(far_target),
+                ],
+                "take_profit_ideal": [
+                    entry + risk * 1,
+                    entry + risk * 2,
+                    far_target,
+                ],
                 "reasoning": "Oversold at support with mean-reversion setup.",
                 "source_skills": ["market-rsi", "market-s-r", "market-volatility"],
             }
@@ -61,25 +81,56 @@ def analyze(candles, *, ticker, interval="1d", period="1y"):
         entry = price
         stop = resistance + atr * 1
         risk = stop - entry
-        mid = (resistance + (support or resistance * 0.9)) / 2
+        # Audit 2026-06-21 #5: TP3 must be ≤ entry × 0.95. If support is too close,
+        # fall back to 3R target.
+        far_target = support if (support is not None and support <= entry * 0.95) else entry - risk * 3
         conviction = 3 if low_vol else 2
         ideas.append(
             {
                 "pair": ticker,
                 "direction": "short",
                 "conviction": conviction,
+                "version": conviction_version(conviction),
                 "entry_type": "limit",
-                "entry_price": round(entry, 2),
-                "entry_range": [round(entry * 0.99, 2), round(resistance, 2)],
-                "stop_loss": round(stop, 2),
-                "take_profit": [round(mid, 2), round(entry - risk * 2, 2)],
+                "entry_price": round_price(entry),
+                "entry_range": [round_price(entry * 0.99), round_price(resistance)],
+                "stop_loss": round_price(stop),
+                # 3-TP ladder (descending): 1R → 2R → full reversion to support.
+                "take_profit": [
+                    round_price(entry - risk * 1),
+                    round_price(entry - risk * 2),
+                    round_price(far_target),
+                ],
+                "take_profit_ideal": [
+                    entry - risk * 1,
+                    entry - risk * 2,
+                    far_target,
+                ],
                 "reasoning": "Overbought at resistance with mean-reversion setup.",
                 "source_skills": ["market-rsi", "market-s-r", "market-volatility"],
             }
         )
 
+    for idea in ideas:
+        idea["rr_to_tp"] = compute_rr_to_tp(idea)
+        validate_l3_tp_ladder(idea)
+
+    # Drop sub-2% stops (noise risk in swing mode).
+    stop_2pct_rejection = None
+    if ideas:
+        filtered = []
+        for idea in ideas:
+            ok, rej = enforce_min_stop_distance(idea)
+            if ok:
+                filtered.append(idea)
+            elif stop_2pct_rejection is None:
+                stop_2pct_rejection = rej
+        ideas = filtered
+
     if ideas:
         narrative = f"Mean-reversion setup: {', '.join(i['direction'] for i in ideas)}."
+    elif stop_2pct_rejection is not None:
+        narrative = stop_2pct_rejection
     else:
         narrative = "No mean-reversion setup — RSI not at extreme or price not at key level."
 

@@ -99,14 +99,27 @@ def analyze(candles, interval="1d", period="1y"):
     total_weight += 0.10
 
     # --- Compute pattern ---
+    # Trigger: require at least 2 sub-signals present AND combined weight >
+    # 0.30. The pre-fix ``ratio >= 0.40`` threshold dropped the
+    # volume_confirmation + retest_holding case (wsum 0.35) into
+    # present=False with subs populated — the ghost shape.
+    n_present = sum(1 for sig in signals.values() if sig.get("present"))
     if total_weight > 0:
-        ratio = weighted_sum / total_weight
-        present = ratio >= 0.5
-        confidence = max(1, min(5, round(ratio * 5)))
+        confidence = max(1, min(5, round(weighted_sum * 5)))
+        present = n_present >= 2 and weighted_sum > 0.30
     else:
-        ratio = 0.0
         present = False
         confidence = 1
+
+    # Post-squeeze retest sub-shape: squeeze_release + retest_holding both firing
+    # is the post-squeeze retest pattern — momentum has broken out of compression,
+    # pulled back to the breakout level, and is now holding. Combined weight is
+    # 0.25, below the 0.40 threshold, but two corroborating L1s (squeeze + S/R)
+    # plus the implied direction from squeeze are meaningful. Trust the combo
+    # and classify.
+    if not present and sqz_released and retest_holding:
+        present = True
+        confidence = 3  # two corroborating L1s — middle of the 1..5 range
 
     # --- Staleness heuristic ---
     stale = False
@@ -121,7 +134,10 @@ def analyze(candles, interval="1d", period="1y"):
     # --- Classification ---
     classification = None
     if present:
-        if signal_value == "SIDEWAYS":
+        if signal_value == "SIDEWAYS" and not (sqz_released and retest_holding):
+            # SIDEWAYS normally means the structure_break reversed and price returned
+            # to consolidation. But the post-squeeze retest sub-shape is a meaningful
+            # breakout pattern in its own right — don't downgrade it to FAILED.
             classification = "FAILED"
         elif stale:
             classification = "STALE"

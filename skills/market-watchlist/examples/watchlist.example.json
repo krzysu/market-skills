@@ -1,0 +1,37 @@
+{
+  "baskets": {
+    "crypto_majors": {
+      "BTCUSD": {"tier": 2, "source": "kraken", "label": "BTC", "comment": "Macro reference"},
+      "ETHUSD": {"tier": 2, "source": "kraken", "label": "ETH", "comment": "Macro reference"}
+    },
+    "crypto_alts": {
+      "SOLUSD": {"tier": 3, "source": "kraken", "label": "Solana"},
+      "BNBUSD": {"tier": 3, "source": "kraken", "label": "BNB"},
+      "HYPEUSD": {"tier": 1, "source": "kraken", "label": "Hyperliquid", "asset_class": "perp_dex"},
+      "ADAUSD": {"tier": 3, "source": "kraken", "label": "Cardano"},
+      "ALGOUSD": {"tier": 3, "source": "kraken", "label": "Algorand"},
+      "hl:LIT":  {"tier": 1, "source": "hyperliquid", "label": "Lighter Perp DEX", "asset_class": "perp_dex"}
+    },
+    "crypto_ai": {
+      "NEARUSD": {"tier": 1, "source": "kraken", "label": "NEAR Protocol", "asset_class": "ai_infra"},
+      "TAOUSD":  {"tier": 3, "source": "kraken", "label": "Bittensor", "asset_class": "ai_infra"},
+      "FETUSD":  {"tier": 3, "source": "kraken", "label": "Fetch.ai", "asset_class": "ai_infra"},
+      "VIRTUALUSD": {"tier": 3, "source": "kraken", "label": "Virtuals Protocol", "asset_class": "ai_infra"}
+    },
+    "defi": {
+      "AAVEUSD": {"tier": 3, "source": "kraken", "label": "Aave"},
+      "LINKUSD": {"tier": 3, "source": "kraken", "label": "Chainlink"},
+      "PENDLEUSD": {"tier": 3, "source": "kraken", "label": "Pendle"}
+    },
+    "precious_metals": {
+      "PAXGUSD": {"tier": 2, "source": "kraken", "label": "Pax Gold"}
+    },
+    "macro_refs": {
+      "SPYUSD": {"source": "yfinance", "yfinance_ticker": "SPY", "tracking_only": true, "sector": "stocks", "label": "S&P 500"},
+      "QQQUSD": {"source": "yfinance", "yfinance_ticker": "QQQ", "tracking_only": true, "sector": "stocks", "label": "Nasdaq 100"},
+      "TLTUSD": {"source": "yfinance", "yfinance_ticker": "TLT", "tracking_only": true, "sector": "stocks", "label": "20yr Treasuries"},
+      "GLDUSD": {"source": "yfinance", "yfinance_ticker": "GLD", "tracking_only": true, "sector": "commodities", "label": "Gold ETF (PAXG proxy)"},
+      "IWMUSD": {"source": "yfinance", "yfinance_ticker": "IWM", "tracking_only": true, "sector": "stocks", "label": "Russell 2000", "hl_proxy": "km:SMALL2000", "hl_proxy_weight": 1.0, "hl_proxy_note": "Russell 2000 perp on Kinetiq HIP-3 — direct proxy"}
+    }
+  }
+}

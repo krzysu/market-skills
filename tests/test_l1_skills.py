@@ -206,6 +206,14 @@ class TestMarketSR:
         if "error" not in result:
             assert result["nearest_support"] < result["nearest_resistance"]
 
+    def test_no_nearby_level_field_present(self, candles):
+        """market-s-r surfaces no_nearby_level so L3 callers
+        can flag open-air setups (HYPE-style) where stop sits 15%+ from entry."""
+        mod = _load_skill("market-s-r")
+        result = mod.analyze(candles)
+        assert "no_nearby_level" in result
+        assert isinstance(result["no_nearby_level"], bool)
+
 
 class TestMarketTrend:
     def test_analyze_returns_dict(self, candles):

@@ -20,6 +20,18 @@ uv run skills/market-exhaustion/scripts/run.py SPY
 uv run skills/market-exhaustion/scripts/run.py SPY --json
 ```
 
+## Flags
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `TICKER` (positional) | — | Required. Supports `provider:ticker` (e.g. `hl:LIT`, `yf:AAPL`). |
+| `--json` | human | Emit JSON to stdout. |
+| `--source=PROVIDER` | auto-detect | Force a data provider (see [README](../../README.md#data-providers)). |
+| `--interval=INTERVAL` | `1d` | `1m`/`2m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. |
+| `--period=PERIOD` | `1y` | `1d`/`5d`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. |
+
+Both timeframe flags are validated — bad values exit 2 with a friendly error. For intraday (`--interval=1h`), bump `--period` to `6mo` or `1y`; yfinance caps hourly at ~2y and anything sub-hour at ~60d.
+
 ## Sub-Signals
 
 | Sub-signal | Weight | Source L1 |
@@ -36,6 +48,17 @@ uv run skills/market-exhaustion/scripts/run.py SPY --json
 - **BLOWOFF_TOP**: RSI overbought + volume climax
 - **IMPULSE_EXHAUSTION**: momentum divergence detected
 - **PULLBACK_EXHAUSTED**: general exhaustion pattern present
+
+## Trigger
+
+`pattern.present` is True when at least 2 sub-signals are present AND their
+combined weight exceeds 0.30. The previous `weighted_sum / total_weight >= 0.5`
+threshold silently dropped 2-sub combinations at `weighted_sum` in
+(0.30, 0.50) — e.g. `rsi_extreme + momentum_divergence` (0.4445) and
+`narrowing_range + momentum_divergence` (0.3889) — into `present=False`
+while the sub-signals were populated.
+
+`confidence` is `round(weighted_sum * 5)`, clamped to `[1, 5]`.
 
 ## Output
 

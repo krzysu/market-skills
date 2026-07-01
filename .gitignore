@@ -6,8 +6,8 @@ __pycache__/
 dist/
 *.egg-info/
 
-# Per-watch runtime state files
+# Per-skill user data (gitignored for all skills — runtime state, config, notes).
+# Conventions: each skill stores its data under skills/<name>/data/ and ships
+# checked-in samples under skills/<name>/examples/.
 skills/*/data/
-
-# Position-watchdog user config (contains personal position data, keep local)
-skills/*/watches.json
+.worktrees/

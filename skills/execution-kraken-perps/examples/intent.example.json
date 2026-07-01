@@ -1,0 +1,21 @@
+{
+  "intent_id": "trend-follow-SOLUSD-2026-06-22-001",
+  "venue": "kraken-perps",
+  "pair": "SOLUSD",
+  "side": "sell",
+  "order_type": "market",
+  "volume": 11.5,
+  "leverage": 2,
+  "bracket": {
+    "stop_loss": 76.66,
+    "take_profit": 58.07
+  },
+  "extras": {
+    "position_value": 800.0,
+    "reference_entry": 69.22
+  },
+  "thesis": "Breakdown retest at ascending trendline",
+  "strategy": "trend-follow",
+  "source_skills": ["market-accumulation", "market-trend"],
+  "conviction": 4
+}

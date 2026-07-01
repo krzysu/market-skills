@@ -8,19 +8,23 @@ from unittest.mock import patch
 import pytest
 
 from portfolio.db import (
+    add_decision,
     add_portfolio,
     add_transaction,
     compute_fifo,
     compute_lots,
     compute_pnl,
     compute_positions,
+    delete_decision,
     delete_portfolio,
     edit_transaction,
     get_cached_prices,
+    get_decision,
     get_portfolio,
     get_portfolio_summary,
     get_transaction,
     init_db,
+    list_decisions,
     list_portfolios,
     list_transactions,
     reconcile,
@@ -538,7 +542,7 @@ def test_refresh_prices_uses_live_spot_not_ohlc_close(db_path, capsys):
             return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
         return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
 
-    with patch("analysis.providers.kraken.subprocess.run", side_effect=fake_run):
+    with patch("analysis.providers.data.kraken.subprocess.run", side_effect=fake_run):
         prices = refresh_prices(db_path)
 
     assert prices["kraken:HYPEEUR"] == 60.31  # live last, NOT 62.46
@@ -573,7 +577,7 @@ def test_refresh_prices_falls_back_to_ohlc_when_spot_unavailable(db_path, capsys
             return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
         return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
 
-    with patch("analysis.providers.kraken.subprocess.run", side_effect=fake_run):
+    with patch("analysis.providers.data.kraken.subprocess.run", side_effect=fake_run):
         prices = refresh_prices(db_path)
 
     assert prices["kraken:HYPEEUR"] == 62.46
@@ -602,7 +606,7 @@ def test_refresh_prices_tracks_source_in_cache(db_path):
             return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
         return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
 
-    with patch("analysis.providers.kraken.subprocess.run", side_effect=fake_run):
+    with patch("analysis.providers.data.kraken.subprocess.run", side_effect=fake_run):
         refresh_prices(db_path)
 
     from portfolio.db import get_db
@@ -634,7 +638,7 @@ def test_refresh_prices_skips_assets_without_provider_prefix(db_path):
             return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
         return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
 
-    with patch("analysis.providers.kraken.subprocess.run", side_effect=fake_run):
+    with patch("analysis.providers.data.kraken.subprocess.run", side_effect=fake_run):
         prices = refresh_prices(db_path)
 
     assert "BTC" not in prices
@@ -646,11 +650,11 @@ def test_refresh_prices_skips_assets_without_provider_prefix(db_path):
 
 class TestKrakenProviderSpotPrice:
     def test_parses_last_trade(self):
-        from analysis.providers.kraken import KrakenProvider
+        from analysis.providers.data.kraken import KrakenProvider
 
         payload = _kraken_ticker_json("HYPEEUR", last=60.31, bid=60.10, ask=60.14)
         with patch(
-            "analysis.providers.kraken.subprocess.run",
+            "analysis.providers.data.kraken.subprocess.run",
             return_value=_completed(payload),
         ):
             result = KrakenProvider().fetch_spot_price("HYPEEUR")
@@ -663,11 +667,11 @@ class TestKrakenProviderSpotPrice:
         assert result["source"] == "kraken:ticker"
 
     def test_normalises_dash_and_slash(self):
-        from analysis.providers.kraken import KrakenProvider
+        from analysis.providers.data.kraken import KrakenProvider
 
         payload = _kraken_ticker_json("BTCEUR", last=50000.0, bid=49999.0, ask=50001.0)
         with patch(
-            "analysis.providers.kraken.subprocess.run",
+            "analysis.providers.data.kraken.subprocess.run",
             return_value=_completed(payload),
         ) as run:
             KrakenProvider().fetch_spot_price("BTC-EUR")
@@ -676,11 +680,11 @@ class TestKrakenProviderSpotPrice:
         assert cmd == ["kraken", "ticker", "BTCEUR", "-o", "json"]
 
     def test_falls_back_to_bid_when_last_missing(self):
-        from analysis.providers.kraken import KrakenProvider
+        from analysis.providers.data.kraken import KrakenProvider
 
         payload = json.dumps({"BTCEUR": {"b": ["49999.0", "1", "1.000"], "a": ["50001.0", "1", "1.000"]}})
         with patch(
-            "analysis.providers.kraken.subprocess.run",
+            "analysis.providers.data.kraken.subprocess.run",
             return_value=_completed(payload),
         ):
             result = KrakenProvider().fetch_spot_price("BTCEUR")
@@ -692,10 +696,10 @@ class TestKrakenProviderSpotPrice:
     def test_returns_none_on_cli_failure(self):
         from subprocess import CompletedProcess
 
-        from analysis.providers.kraken import KrakenProvider
+        from analysis.providers.data.kraken import KrakenProvider
 
         with patch(
-            "analysis.providers.kraken.subprocess.run",
+            "analysis.providers.data.kraken.subprocess.run",
             return_value=CompletedProcess(["kraken"], 1, stdout="", stderr="rate limited"),
         ):
             assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
@@ -703,23 +707,147 @@ class TestKrakenProviderSpotPrice:
     def test_returns_none_on_bad_json(self):
         from subprocess import CompletedProcess
 
-        from analysis.providers.kraken import KrakenProvider
+        from analysis.providers.data.kraken import KrakenProvider
 
         with patch(
-            "analysis.providers.kraken.subprocess.run",
+            "analysis.providers.data.kraken.subprocess.run",
             return_value=CompletedProcess(["kraken"], 0, stdout="not json", stderr=""),
         ):
             assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
 
     def test_returns_none_when_no_price_fields(self):
-        from analysis.providers.kraken import KrakenProvider
+        from analysis.providers.data.kraken import KrakenProvider
 
         payload = json.dumps({"HYPEEUR": {"o": "60.0"}})
         with patch(
-            "analysis.providers.kraken.subprocess.run",
+            "analysis.providers.data.kraken.subprocess.run",
             return_value=_completed(payload),
         ):
             assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
+
+
+# ── Decisions table CRUD ────────────────────────────────────────────────
+
+
+class TestDecisionsCRUD:
+    def test_add_and_get_decision(self):
+        db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        db.close()
+        init_db(db.name)
+        dc_json = json.dumps({"intent_id": "t-001", "source_skill": "test", "captured_at": "2026-01-01T00:00:00Z"})
+        row_id = add_decision(db.name, "t-001", "TESTUSD", dc_json)
+        assert row_id > 0
+
+        row = get_decision(db.name, "t-001")
+        assert row is not None
+        assert row["intent_id"] == "t-001"
+        assert row["pair"] == "TESTUSD"
+        os.unlink(db.name)
+
+    def test_add_decision_with_portfolio(self):
+        db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        db.close()
+        init_db(db.name)
+        pid = add_portfolio(db.name, "test-pf")
+        dc_json = json.dumps({"intent_id": "t-002", "source_skill": "test"})
+        row_id = add_decision(db.name, "t-002", "BTCUSD", dc_json, portfolio_id=pid)
+        assert row_id > 0
+
+        row = get_decision(db.name, "t-002")
+        assert row is not None
+        assert row["portfolio_id"] == pid
+        os.unlink(db.name)
+
+    def test_add_decision_duplicate_intent_id_is_idempotent(self):
+        """A retried submit with the same intent_id (see LLM-ORCHESTRATION.md §4)
+        must not raise — the second call returns the existing row id and the
+        original decision_context_json is preserved (first call wins)."""
+        db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        db.close()
+        init_db(db.name)
+        original_json = json.dumps(
+            {"intent_id": "t-003", "source_skill": "test", "captured_at": "2026-01-01T00:00:00Z"}
+        )
+        first_id = add_decision(db.name, "t-003", "ETHUSD", original_json)
+        # Retry with the same intent_id but a different payload — must NOT
+        # raise, must return the same id, and must keep the original payload
+        # (first call wins, mirrors venue-level retry dedup).
+        retry_json = json.dumps({"intent_id": "t-003", "source_skill": "test", "captured_at": "9999-99-99T99:99:99Z"})
+        second_id = add_decision(db.name, "t-003", "ETHUSD", retry_json)
+        assert first_id == second_id
+        row = get_decision(db.name, "t-003")
+        assert row is not None
+        assert row["decision_context_json"] == original_json
+        os.unlink(db.name)
+
+    def test_add_decision_retry_does_not_break_write_fill(self):
+        """End-to-end: the second write_fill_to_portfolio call with the same
+        intent_id (the retry path) records a second transaction row but
+        does not raise on the decisions table write. The decision trace
+        from the first fill is preserved."""
+        db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        db.close()
+        init_db(db.name)
+        pid = add_portfolio(db.name, "retry-pf")
+        dc_json = json.dumps({"intent_id": "retry-1", "source_skill": "test"})
+        first_id = add_decision(db.name, "retry-1", "ETHUSD", dc_json, portfolio_id=pid)
+        # Second add_decision with same intent_id must succeed.
+        second_id = add_decision(db.name, "retry-1", "ETHUSD", dc_json, portfolio_id=pid)
+        assert first_id == second_id
+        # And the decisions table has exactly one row for that intent_id.
+        rows = list_decisions(db.name, portfolio_id=pid)
+        assert len(rows) == 1
+        os.unlink(db.name)
+
+    def test_list_decisions(self):
+        db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        db.close()
+        init_db(db.name)
+
+        pid = add_portfolio(db.name, "list-pf")
+        for i in range(3):
+            dc_json = json.dumps({"intent_id": f"l-{i:03d}", "source_skill": "test"})
+            add_decision(db.name, f"l-{i:03d}", "TESTUSD", dc_json, portfolio_id=pid)
+
+        all_d = list_decisions(db.name)
+        assert len(all_d) == 3
+
+        filtered = list_decisions(db.name, pair="TESTUSD")
+        assert len(filtered) == 3
+
+        filtered2 = list_decisions(db.name, pair="NONEXIST")
+        assert len(filtered2) == 0
+
+        since = list_decisions(db.name, since="2099-01-01")
+        assert len(since) == 0
+
+        limited = list_decisions(db.name, limit=1)
+        assert len(limited) == 1
+        os.unlink(db.name)
+
+    def test_delete_decision(self):
+        db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        db.close()
+        init_db(db.name)
+        dc_json = json.dumps({"intent_id": "d-001", "source_skill": "test"})
+        row_id = add_decision(db.name, "d-001", "TESTUSD", dc_json)
+        assert delete_decision(db.name, row_id) is True
+        assert get_decision(db.name, "d-001") is None
+        os.unlink(db.name)
+
+    def test_decisions_table_created_by_init_db(self):
+        """The decisions table is created by init_db alongside the other schema."""
+        db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        db.close()
+        init_db(db.name)
+
+        from portfolio.db import get_db
+
+        conn = get_db(db.name)
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        conn.close()
+        assert "decisions" in tables
+        os.unlink(db.name)
 
 
 def _completed(stdout: str):

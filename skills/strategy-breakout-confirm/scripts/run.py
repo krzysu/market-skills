@@ -1,35 +1,23 @@
 #!/usr/bin/env python3
 """strategy-breakout-confirm — L3 breakout momentum strategy."""
 
-import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
-import importlib.util
-
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, parse_args, print_header, require_ticker
-
-
-def _load_lib():
-    lib_path = os.path.join(os.path.dirname(__file__), "..", "lib.py")
-    spec = importlib.util.spec_from_file_location("strategy_breakout_confirm_lib", lib_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from analysis.formatting import emit_json, print_header, require_ticker, safe_parse_args
+from analysis.skill_loader import load_lib_for_script
 
 
 def main():
-    ticker, json_mode, source = parse_args(sys.argv[1:])
+    ticker, json_mode, source, interval, period = safe_parse_args(sys.argv[1:])
     require_ticker(ticker, json_mode)
-    candles = fetch_ohlc(ticker, source=source)
+    candles = fetch_ohlc(ticker, interval=interval, period=period, source=source)
     if not candles:
         print("no data" if not json_mode else '{"error": "no data"}')
         return
 
-    _lib = _load_lib()
-    result = _lib.analyze(candles, ticker=ticker)
+    _lib = load_lib_for_script(__file__)
+    result = _lib.analyze(candles, ticker=ticker, interval=interval, period=period)
 
     if json_mode:
         emit_json(result)
