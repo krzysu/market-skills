@@ -12,6 +12,16 @@ uv run pytest tests/test_X.py -v # single file
 
 ## Architecture
 
+- **`docs/adr/` holds dated architecture decision records.** Read the
+  index at `docs/adr/README.md` before proposing new abstractions,
+  refactors, or new shared modules — past "we considered X, chose not
+  to" decisions live there. When you make a new design decision, add a
+  new ADR with the next number (`0004-...`), link it from the index,
+  and reference it from `ARCHITECTURE.md` if it's load-bearing. ADRs
+  are append-only; to reverse one, write a new ADR with
+  `Status: supersedes NNNN`. `ARCHITECTURE.md` is the descriptive
+  "what the system is" doc; ADRs are the "why we built it this way"
+  record.
 - **L1/L2/L3 skills.** L1 = pure-math indicators (`skills/market-*/lib.py`, no I/O). L2 = pattern detectors that compose L1s and return `{pattern, signals, input_scores, narrative}`. L3 = strategies that compose L2s and return `{ideas, narrative}` — each idea carries `version: "v1".."v5"` via `conviction_version()` and is validated by `validate_l3_tp_ladder()` before return. Read each skill's `SKILL.md` for CLI flags and `When to use / NOT to use` boundaries.
 - **Batch runners** (`run-all-l2`, `run-all-l3`, `run-watchlist`): fetch candles once per ticker, then run all skills in-process.
 - **`analysis/registry.py`** — single source of truth for L2/L3 skill lists (`l2_skills()`, `l3_strategies()`). New skills go here once and all runners pick them up.
