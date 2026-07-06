@@ -1,5 +1,9 @@
 # Market Skills — Architecture
 
+> Dated design decisions live in [`docs/adr/`](./docs/adr/README.md).
+> This document describes **what the system is**. ADRs describe
+> **why we built it this way**.
+
 ## Status
 
 A composable technical-analysis + execution stack. L1 indicator skills,
@@ -8,12 +12,11 @@ layer, Kraken execution, portfolio tracking, and per-user config/notes
 — all wired via the Agent Skills spec so any LLM agent (Hermes,
 claude-code, custom chat loop) can call them as tools.
 
-This repo does **not** own a Python orchestrator that auto-pipes
-signals to execution. The LLM is the agent brain: it reads `SKILL.md`,
-calls skills as tools, narrates results, asks the user, and (with
-explicit approval) calls the execution skill whose interactive confirm
-is the actual safety layer. Cron usage is analytics-only
-(`run-all-l3`, `position-watchdog`).
+The LLM is the agent brain (see [ADR-0002](./docs/adr/0002-llm-as-agent-brain.md)):
+it reads `SKILL.md`, calls skills as tools, narrates results, asks the
+user, and (with explicit approval) calls the execution skill whose
+interactive confirm is the actual safety layer. Cron usage is
+analytics-only (`run-all-l3`, `position-watchdog`).
 
 ## Layers
 
@@ -101,20 +104,19 @@ provides the skills it calls.
 
 ## Key design choices
 
-- **LLM-as-agent-brain** (2026-06-22 pivot). No Python orchestrator in
-  this repo. The LLM reads `SKILL.md`, calls skills as tools,
-  narrates, and asks the user. Cron is analytics-only.
-- **Risk is advisory, not a hard gate.** `risk-engine` returns a
-  `RiskVerdict` the LLM narrates; the execution skill's interactive
-  confirm is the actual safety layer that never gets bypassed.
-- **SQLite for Portfolio.** One file, zero infra, but queryable via
+Dated decisions are tracked as ADRs ([`docs/adr/`](./docs/adr/README.md)).
+The bullets below are descriptive of how the system is built, not
+"we chose X" — they read as the current state of the codebase.
+
+- **Risk is advisory.** `risk-engine` returns a `RiskVerdict` the LLM
+  narrates; the execution skill's interactive confirm is the safety
+  layer that is never bypassed silently.
+- **Portfolio is SQLite.** One file, zero infra, but queryable via
   SQL — multi-portfolio, FIFO cost basis, P&L, replay, reconcile.
-- **Protocol-based providers.** `DataProvider` and `ExecutionProvider`
-  Protocols in `analysis/providers/` — add a venue by implementing one
-  and registering it. Same pattern for data and execution.
-- **No paper mode** for execution (2026-06-22 decision). `--dry-run`
-  validates against the venue without side effects; live submit always
-  prompts.
+- **Providers are protocol-based.** `DataProvider` and
+  `ExecutionProvider` Protocols in `analysis/providers/` — add a venue
+  by implementing one and registering it. Same pattern for data and
+  execution.
 - **L1/L2/L3 are venue-agnostic.** Indicators (RSI, EMA, MACD, squeeze,
   etc.) and patterns (breakout, accumulation, exhaustion, sweep,
   trend-quality) work the same on spot and perps OHLC. Perps-specific
