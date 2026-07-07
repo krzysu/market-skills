@@ -36,7 +36,7 @@ uv run pytest tests/test_X.py -v # single file
 
 ## LLM is the agent brain
 
-This repo does NOT own a Python orchestrator that auto-pipes signals to execution. The LLM (Hermes, claude-code, custom chat loop) reads `SKILL.md`, calls skills as tools, narrates, asks the user to confirm, and (with explicit approval) calls `execution-kraken-spot` or `execution-kraken-perps`. Cron is analytics-only (`run-all-l3`, `position-watchdog`).
+This repo does NOT own a Python orchestrator that auto-pipes signals to execution. The LLM agent reads `SKILL.md`, calls skills as tools, narrates, asks the user to confirm, and (with explicit approval) calls `execution-kraken-spot` or `execution-kraken-perps`. Cron is analytics-only (`run-all-l3`, `position-watchdog`).
 
 **Safety invariant**: `execution-kraken-spot submit` / `execution-kraken-perps submit` always prompts for confirmation unless `--yes` is passed. That prompt is the safety layer — never bypassed silently. The LLM owns `intent_id` uniqueness within a session (`--cl-ord-id` plumbs the id to the venue for retry dedup).
 

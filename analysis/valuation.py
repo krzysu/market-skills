@@ -224,8 +224,6 @@ def fetch_valuation(
     if ttl_seconds > 0:
         cached = _cache_get(cache_key, ttl_seconds)
         if cached is not None:
-            if write_history:
-                _safe_append_tick(cached)
             return cached
 
     cape, cape_err = _fetch_shiller_cape()

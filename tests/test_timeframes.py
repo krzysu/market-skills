@@ -342,3 +342,101 @@ class TestCLIInvocation:
         assert proc.returncode == 0
         assert "interval=4h" in proc.stdout
         assert "period=6mo" in proc.stdout
+
+
+class TestSpaceSeparatedFlags:
+    """``parse_args`` must accept ``--flag value`` (space-separated) in
+    addition to ``--flag=value`` (equals). Pre-fix, the manual parser
+    treated every non-flag arg as a ticker, so ``BTCUSD --period 3mo``
+    silently set ``ticker="3mo"`` and tried to fetch ticker "3MO" from
+    yfinance (returned 404, downstream "no data" error).
+    """
+
+    def test_period_space_separated(self):
+        ticker, _json, _src, _iv, period = parse_args(["BTCUSD", "--period", "3mo"])
+        assert ticker == "BTCUSD"
+        assert period == "3mo"
+
+    def test_interval_space_separated(self):
+        ticker, _json, _src, interval, _pd = parse_args(["BTCUSD", "--interval", "4h"])
+        assert ticker == "BTCUSD"
+        assert interval == "4h"
+
+    def test_source_space_separated(self):
+        ticker, _json, source, _iv, _pd = parse_args(["BTCUSD", "--source", "kraken"])
+        assert ticker == "BTCUSD"
+        assert source == "kraken"
+
+    def test_all_flags_space_separated(self):
+        """End-to-end repro of the original failing invocation:
+        ``BTCUSD --interval 4h --period 3mo --json`` must NOT 404 on
+        ticker "3MO" (the value got misread as a ticker)."""
+        ticker, json_mode, source, interval, period = parse_args(
+            ["BTCUSD", "--interval", "4h", "--period", "3mo", "--json"]
+        )
+        assert ticker == "BTCUSD"
+        assert json_mode is True
+        assert source is None
+        assert interval == "4h"
+        assert period == "3mo"
+
+    def test_flag_without_value_raises(self):
+        """``--period`` with no value must raise (not silently fall back to default)."""
+        with pytest.raises(ValueError, match="--period requires a value"):
+            parse_args(["BTCUSD", "--period"])
+
+    def test_flag_at_end_without_value_raises(self):
+        """Trailing ``--period`` (no value after) must raise."""
+        with pytest.raises(ValueError, match="--period requires a value"):
+            parse_args(["BTCUSD", "--interval", "4h", "--period"])
+
+    def test_invalid_period_space_separated_errors(self):
+        """``--period 2mo`` (invalid) must raise via the timeframe validator."""
+        with pytest.raises(ValueError, match="invalid period"):
+            parse_args(["BTCUSD", "--period", "2mo"])
+
+    def test_invalid_interval_space_separated_errors(self):
+        """``--interval 99x`` (invalid) must raise via the timeframe validator."""
+        with pytest.raises(ValueError, match="invalid interval"):
+            parse_args(["BTCUSD", "--interval", "99x"])
+
+    def test_unrecognized_flag_raises(self):
+        """Unknown ``--foo`` (not in the recognized flag set) must raise
+        rather than silently being treated as a ticker."""
+        with pytest.raises(ValueError, match="unrecognized flag"):
+            parse_args(["BTCUSD", "--bogus", "value"])
+
+    def test_safe_parse_args_period_space_exits_2(self, capsys):
+        """End-to-end: ``safe_parse_args`` exits 2 with a friendly error
+        for ``--period 2mo`` (invalid value, space-separated form)."""
+        with pytest.raises(SystemExit) as ei:
+            safe_parse_args(["BTCUSD", "--period", "2mo"])
+        assert ei.value.code == 2
+        assert "invalid period" in capsys.readouterr().err
+
+    def test_cli_period_space_form_works(self):
+        """End-to-end CLI: ``BTCUSD --interval 4h --period 3mo --json``
+        must NOT 404 on ticker "3MO". (Pre-fix: ``period=1y`` defaulted
+        and yfinance returned 404 for ticker "3MO".)"""
+        proc = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(REPO_ROOT, "skills/strategy-trend-follow/scripts/run.py"),
+                "BTCUSD",
+                "--interval",
+                "4h",
+                "--period",
+                "3mo",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        # The actual fetch may fail (no data) for BTCUSD, but the error
+        # must NOT be "Quote not found for symbol: 3MO" — that was the
+        # bug: "3mo" was being read as a ticker.
+        combined = proc.stdout + proc.stderr
+        assert "Quote not found for symbol: 3MO" not in combined, (
+            f"--period was read as a ticker (regression): {combined}"
+        )

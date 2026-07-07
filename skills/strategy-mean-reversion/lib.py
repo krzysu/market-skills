@@ -37,8 +37,10 @@ def _apply_cape_valuation_tag(idea: dict, valuation: dict | None) -> None:
     else:
         return
     idea.setdefault("veto_reasons", []).append(tag)
+    if "market-valuation" not in idea.setdefault("source_skills", []):
+        idea["source_skills"].append("market-valuation")
     existing = idea.get("reasoning", "")
-    if tag not in existing:
+    if "[valuation:" not in existing:
         idea["reasoning"] = f"{existing} [valuation: {regime.lower()} z={zscore:+.2f}]"
 
 

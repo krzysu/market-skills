@@ -332,3 +332,217 @@ class TestRunAllL3DoesNotSwallowTypeErrors:
         assert "error: data feed down" in strat_result["narrative"], (
             f"RuntimeError should produce soft error narrative, got {strat_result}"
         )
+
+
+class TestRunAllL3EnvelopeNormalization:
+    """Every idea in the run-all-l3 envelope must expose both the canonical
+    fields (``stop_loss`` / ``take_profit[]`` / ``rr_to_tp[]``) AND the flat
+    fields consumers expect (``stop`` / ``tp1`` / ``tp2`` / ``tp3`` / ``rr_tp1``
+    / ``tp1_pct``). Without the flat fields, a consumer reading
+    ``run-all-l3 --json`` directly gets zeros/nulls for every bracket value
+    and the bar evaluation silently fails.
+
+    The normalization happens in ``run-all-l3/lib.py::_normalize_idea`` and is
+    applied to every idea before the envelope is returned. Strategies that
+    already emit the flat fields keep them; strategies that only emit the
+    canonical fields get the flat ones derived.
+    """
+
+    def test_idea_with_only_canonical_fields_gets_flat_fields(self, monkeypatch):
+        """An idea with ``stop_loss`` + ``take_profit[]`` + ``rr_to_tp[]`` only
+        must have ``stop`` + ``tp1``/``tp2``/``tp3`` + ``rr_tp1`` derived."""
+        import analysis.skill_loader as sl
+
+        def _canonical_analyze(c, *, ticker, interval="1d", period="1y"):
+            return {
+                "ideas": [
+                    {
+                        "ticker": ticker,
+                        "direction": "long",
+                        "conviction": 3,
+                        "version": "v3",
+                        "entry_price": 100.0,
+                        "stop_loss": 95.0,
+                        "take_profit": [107.5, 112.5, 120.0],
+                        "take_profit_ideal": [107.5, 112.5, 120.0],
+                        "rr_to_tp": [1.5, 2.5, 4.0],
+                        "reasoning": "test",
+                        "source_skills": ["market-trend-quality"],
+                    }
+                ],
+                "narrative": "ok",
+            }
+
+        canonical_mod = type("Canonical", (), {"analyze": staticmethod(_canonical_analyze)})()
+        canned = {"strategy-trend-follow": canonical_mod}
+        monkeypatch.setattr(sl, "load_skill", lambda name: canned.get(name))
+
+        ral3 = _load("run-all-l3")
+        out = ral3.analyze("TEST", _make_candles(), interval="1d", period="1y")
+        idea = out["strategies"]["strategy-trend-follow"]["ideas"][0]
+
+        # Canonical fields preserved
+        assert idea["stop_loss"] == 95.0
+        assert idea["take_profit"] == [107.5, 112.5, 120.0]
+        assert idea["rr_to_tp"] == [1.5, 2.5, 4.0]
+
+        # Flat fields derived
+        assert idea["stop"] == 95.0
+        assert idea["tp1"] == 107.5
+        assert idea["tp2"] == 112.5
+        assert idea["tp3"] == 120.0
+        assert idea["rr_tp1"] == 1.5
+        assert idea["rr_tp2"] == 2.5
+        assert idea["rr_tp3"] == 4.0
+        # tp1_pct = |107.5 - 100| / 100 * 100 = 7.5
+        assert abs(idea["tp1_pct"] - 7.5) < 0.01
+
+    def test_idea_with_flat_fields_already_present_unchanged(self, monkeypatch):
+        """An idea that already has ``stop``/``tp1``/``rr_tp1`` must keep
+        them unchanged. Consumer-supplied flat fields win over canonical
+        derived ones (avoids stomping a manually-built envelope)."""
+        import analysis.skill_loader as sl
+
+        def _flat_analyze(c, *, ticker, interval="1d", period="1y"):
+            return {
+                "ideas": [
+                    {
+                        "ticker": ticker,
+                        "direction": "short",
+                        "conviction": 4,
+                        "version": "v4",
+                        "entry_price": 200.0,
+                        "stop_loss": 210.0,
+                        "take_profit": [185.0, 175.0, 160.0],
+                        # Flat fields already present — must NOT be overwritten
+                        "stop": 209.0,  # different from stop_loss
+                        "tp1": 186.0,  # different from take_profit[0]
+                        "rr_tp1": 1.43,
+                    }
+                ],
+                "narrative": "ok",
+            }
+
+        flat_mod = type("Flat", (), {"analyze": staticmethod(_flat_analyze)})()
+        canned = {"strategy-trend-follow": flat_mod}
+        monkeypatch.setattr(sl, "load_skill", lambda name: canned.get(name))
+
+        ral3 = _load("run-all-l3")
+        out = ral3.analyze("TEST", _make_candles(), interval="1d", period="1y")
+        idea = out["strategies"]["strategy-trend-follow"]["ideas"][0]
+
+        # Flat fields preserved
+        assert idea["stop"] == 209.0
+        assert idea["tp1"] == 186.0
+        assert idea["rr_tp1"] == 1.43
+        # Canonical fields preserved too
+        assert idea["stop_loss"] == 210.0
+        assert idea["take_profit"] == [185.0, 175.0, 160.0]
+        # Flat fields that the strategy didn't provide get derived from canonical
+        assert idea["tp2"] == 175.0
+        assert idea["tp3"] == 160.0
+        # rr_tp2/rr_tp3 are NOT fabricated when the strategy provides no
+        # rr_to_tp[] and no individual rr_tp*. Consistent with the stop
+        # handler which also skips fabrication when stop_loss is None.
+        assert "rr_tp2" not in idea
+        assert "rr_tp3" not in idea
+        # tp1_pct = |186 - 200| / 200 * 100 = 7.0
+        assert abs(idea["tp1_pct"] - 7.0) < 0.01
+
+    def test_mixed_forms_in_same_batch(self, monkeypatch):
+        """One strategy emitting canonical-only, another emitting flat-only.
+        Both forms must normalize correctly within the same batch."""
+        import analysis.skill_loader as sl
+
+        def _canonical_only(c, *, ticker, interval="1d", period="1y"):
+            return {
+                "ideas": [
+                    {
+                        "ticker": ticker,
+                        "direction": "long",
+                        "entry_price": 100.0,
+                        "stop_loss": 95.0,
+                        "take_profit": [110.0, 115.0, 125.0],
+                        "rr_to_tp": [2.0, 3.0, 5.0],
+                    }
+                ],
+                "narrative": "canonical",
+            }
+
+        def _flat_only(c, *, ticker, interval="1d", period="1y"):
+            return {
+                "ideas": [
+                    {
+                        "ticker": ticker,
+                        "direction": "short",
+                        "entry_price": 500.0,
+                        "stop_loss": 520.0,
+                        "take_profit": [480.0, 460.0, 430.0],
+                        "rr_to_tp": [1.0, 2.0, 3.5],
+                        "stop": 519.0,  # different from stop_loss (520)
+                        "tp1": 481.0,  # different from take_profit[0] (480)
+                    }
+                ],
+                "narrative": "flat",
+            }
+
+        canned = {
+            "strategy-trend-follow": type("C", (), {"analyze": staticmethod(_canonical_only)})(),
+            "strategy-mean-reversion": type("F", (), {"analyze": staticmethod(_flat_only)})(),
+        }
+        monkeypatch.setattr(sl, "load_skill", lambda name: canned.get(name))
+
+        ral3 = _load("run-all-l3")
+        out = ral3.analyze("TEST", _make_candles(), interval="1d", period="1y")
+
+        canon_idea = out["strategies"]["strategy-trend-follow"]["ideas"][0]
+        flat_idea = out["strategies"]["strategy-mean-reversion"]["ideas"][0]
+
+        # Canonical-only strategy: flat fields derived from canonical
+        assert canon_idea["stop"] == 95.0
+        assert canon_idea["tp1"] == 110.0
+        assert canon_idea["rr_tp1"] == 2.0
+        assert abs(canon_idea["tp1_pct"] - 10.0) < 0.01
+
+        # Flat-only strategy: flat fields preserved, missing ones derived
+        assert flat_idea["stop"] == 519.0  # preserved (different from stop_loss=520)
+        assert flat_idea["tp1"] == 481.0  # preserved (different from take_profit[0]=480)
+        assert flat_idea["stop_loss"] == 520.0  # canonical preserved
+        assert flat_idea["tp2"] == 460.0  # derived
+        assert flat_idea["tp3"] == 430.0  # derived
+        assert abs(flat_idea["tp1_pct"] - 3.8) < 0.01  # |481-500|/500*100
+
+    def test_idea_with_no_bracket_data_passes_through(self, monkeypatch):
+        """An idea with neither stop nor TPs (e.g. a structure-only
+        pattern) must not be fabricated with zeros — passes through."""
+        import analysis.skill_loader as sl
+
+        def _bare_analyze(c, *, ticker, interval="1d", period="1y"):
+            return {
+                "ideas": [
+                    {
+                        "ticker": ticker,
+                        "direction": "long",
+                        "conviction": 2,
+                        "reasoning": "structure-only, no bracket",
+                    }
+                ],
+                "narrative": "bare",
+            }
+
+        bare_mod = type("Bare", (), {"analyze": staticmethod(_bare_analyze)})()
+        canned = {"strategy-trend-follow": bare_mod}
+        monkeypatch.setattr(sl, "load_skill", lambda name: canned.get(name))
+
+        ral3 = _load("run-all-l3")
+        out = ral3.analyze("TEST", _make_candles(), interval="1d", period="1y")
+        idea = out["strategies"]["strategy-trend-follow"]["ideas"][0]
+
+        # No bracket fields fabricated
+        assert "stop" not in idea
+        assert "tp1" not in idea
+        assert "rr_tp1" not in idea
+        assert "tp1_pct" not in idea
+        # Original idea fields preserved
+        assert idea["direction"] == "long"
+        assert idea["reasoning"] == "structure-only, no bracket"

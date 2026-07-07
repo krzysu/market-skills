@@ -14,11 +14,11 @@ bypassing the user's actual judgment.
 ## Decision
 
 This repo owns the **analysis + execution primitives**. The LLM
-(Hermes, claude-code, a custom chat loop) is the **agent brain**: it
-reads `SKILL.md`, calls skills as tools, narrates, asks the user to
-confirm, and — with explicit approval — calls `execution-kraken-spot`
-or `execution-kraken-perps`. Cron is analytics-only
-(`run-all-l3`, `position-watchdog`); it never places orders.
+agent is the **agent brain**: it reads `SKILL.md`, calls skills as
+tools, narrates, asks the user to confirm, and — with explicit
+approval — calls `execution-kraken-spot` or `execution-kraken-perps`.
+Cron is analytics-only (`run-all-l3`, `position-watchdog`); it never
+places orders.
 
 The interactive confirm at the execution layer is the actual safety
 gate. The LLM may override an advisory `REJECT` from `risk-engine`,

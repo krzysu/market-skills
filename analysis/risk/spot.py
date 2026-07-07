@@ -430,7 +430,7 @@ def regime_consistency_policy(intent: Intent, ctx: RiskContext) -> RiskVerdictFr
     #   RISK_ON        | ok         | counter-macro (CONCERN)
     #   NEUTRAL        | ok         | counter-macro (CONCERN)
     #                   # NEUTRAL SHORT is the canonical counter-macro shape
-    #                   # called out in LAST_WEEK_BUGS_SPEC.md BUG-WEEK-5.
+    #                   # the consistency policy guards against silent pass-through.
     #   RISK_OFF       | counter    | ok
     #   CRISIS         | counter    | ok
     #   UNKNOWN        | counter    | counter

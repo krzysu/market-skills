@@ -11,7 +11,7 @@ compatibility: "Requires Python 3.12+ and uv"
 
 # run-all-l3
 
-Fetches candles once per ticker, then runs all L3 strategy skills on the cached data. Use this from cron jobs or agents that need to evaluate trade ideas across all strategies.
+Fetches candles once per ticker, then runs all L3 strategy skills on the cached data. Use this from batch runners or agents that need to evaluate trade ideas across all strategies.
 
 ## Why
 
@@ -64,7 +64,7 @@ flag that previously lived here was removed — it was a workflow concern
 (persistent on-disk state plus a hardcoded "30 ticks without 50% progress =
 stale" policy) that didn't belong in a reusable analysis library.
 
-Cron workflows that need stale-idea reports should consume the JSON
+Workflows that need stale-idea reports should consume the JSON
 output of this runner and run their own state-tracking step. The runner's
 JSON envelope (`tickers[ticker].strategies[*].ideas[]`) is stable and
 self-describing — any consumer can read `entry_price`, `take_profit[0]`,

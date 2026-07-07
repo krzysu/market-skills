@@ -66,12 +66,15 @@ def parse_args(argv):
         --interval=INTERVAL          candle interval (default: 1d)
         --period=PERIOD              lookback period (default: 1y)
 
-    Returns ``(ticker, json_mode, source, interval, period)``. The ticker
-    defaults to ``None``; callers that require one should validate via
-    :func:`require_ticker`. ``interval`` and ``period`` are validated against
+    Both ``--flag value`` (space-separated) and ``--flag=value`` (equals) styles
+    are accepted. ``interval`` and ``period`` are validated against
     ``analysis.intervals.VALID_INTERVALS`` / ``VALID_PERIODS`` — a bad value
     raises ``ValueError`` which the CLI boundary catches and prints as a
     friendly usage error.
+
+    Returns ``(ticker, json_mode, source, interval, period)``. The ticker
+    defaults to ``None``; callers that require one should validate via
+    :func:`require_ticker`.
     """
     ticker = None
     json_mode = False
@@ -79,17 +82,46 @@ def parse_args(argv):
     out_interval = DEFAULT_INTERVAL
     out_period = DEFAULT_PERIOD
 
-    for arg in argv:
+    _value_flags = {
+        "--source": "source",
+        "--interval": "interval",
+        "--period": "period",
+    }
+
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
         if arg == "--json":
             json_mode = True
+            i += 1
+        elif arg in ("--help", "-h", "--usage"):
+            print("usage: run.py TICKER [--json] [--source=PROVIDER] [--interval=INTERVAL] [--period=PERIOD]")
+            sys.exit(0)
+        elif arg in _value_flags:
+            if i + 1 >= len(argv):
+                raise ValueError(f"{arg} requires a value")
+            target = _value_flags[arg]
+            if target == "source":
+                source = argv[i + 1]
+            elif target == "interval":
+                out_interval = argv[i + 1]
+            else:
+                out_period = argv[i + 1]
+            i += 2
         elif arg.startswith("--source="):
             source = arg.split("=", 1)[1]
+            i += 1
         elif arg.startswith("--interval="):
             out_interval = arg.split("=", 1)[1]
+            i += 1
         elif arg.startswith("--period="):
             out_period = arg.split("=", 1)[1]
+            i += 1
         elif not arg.startswith("--"):
             ticker = arg
+            i += 1
+        else:
+            raise ValueError(f"unrecognized flag: {arg}")
 
     validate_timeframe(out_interval, out_period)
     return ticker, json_mode, source, out_interval, out_period

@@ -11,7 +11,7 @@ compatibility: "Requires Python 3.12+ and uv"
 
 # run-all-l2
 
-Fetches candles once per ticker, then runs all L2 pattern skills on the cached data. Use this from cron jobs or agents that need to evaluate multiple tickers across all L2s.
+Fetches candles once per ticker, then runs all L2 pattern skills on the cached data. Use this from batch runners or agents that need to evaluate multiple tickers across all L2s.
 
 ## Why
 

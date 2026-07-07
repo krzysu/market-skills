@@ -7,10 +7,10 @@ the suite runs offline. The retry/backoff path is exercised by overriding
 Per-fix fixtures:
 
   test_429_triggers_retry_then_degrades
-      BUG-WEEK-4 from LAST_WEEK_BUGS_SPEC.md. CoinGecko returns 429 on
-      the gainers/losers endpoint; the skill retries 3 times with
-      exponential backoff (1s/2s/4s), then escalates: ``gainers=[]``,
-      ``losers=[]``, ``rate_limited=True``, and ``note`` carries the
+      CoinGecko returns 429 on the gainers/losers endpoint; the skill
+      retries 3 times with exponential backoff (1s/2s/4s), then
+      escalates: ``gainers=[]``, ``losers=[]``, ``rate_limited=True``,
+      and ``note`` carries the
       ``[MOVERS API RATE-LIMITED — gainers/losers unavailable this run]``
       marker the morning-brief prompt reads. Trending stays populated
       because it's a separate path with a higher quota.
@@ -182,9 +182,9 @@ class TestFetchMovers:
         assert payload["tradable_filter"] is True
 
     def test_429_triggers_retry_then_degrades(self):
-        """Per-fix fixture: BUG-WEEK-4 from LAST_WEEK_BUGS_SPEC.md.
+        """Per-fix fixture: 429 on the gainers/losers endpoint.
 
-        The morning-brief cron called ``/coins/markets`` for
+        The morning-brief workflow called ``/coins/markets`` for
         gainers/losers/trending; on 429 the brief was delivered without
         the movers section — silently, no alert, no retry, no logging.
         With the fix: 3 retries (1s/2s/4s backoffs) → final 429 →

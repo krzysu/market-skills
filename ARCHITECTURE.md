@@ -9,8 +9,8 @@
 A composable technical-analysis + execution stack. L1 indicator skills,
 L2 pattern/composite verdicts, L3 strategy ideas, an advisory Risk
 layer, Kraken execution, portfolio tracking, and per-user config/notes
-— all wired via the Agent Skills spec so any LLM agent (Hermes,
-claude-code, custom chat loop) can call them as tools.
+— all wired via the Agent Skills spec so any LLM agent can call them
+as tools.
 
 The LLM is the agent brain (see [ADR-0002](./docs/adr/0002-llm-as-agent-brain.md)):
 it reads `SKILL.md`, calls skills as tools, narrates results, asks the
