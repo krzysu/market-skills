@@ -126,7 +126,7 @@ def _cmd_add(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    from analysis.output import emit_envelope_json
+    from analysis.output import cache_run_result, emit_envelope_json
 
     data = load_raw(args.config)
     now = now_utc()
@@ -154,8 +154,13 @@ def _cmd_list(args: argparse.Namespace) -> int:
                     continue
                 out_pairs[p] = [notes[i] for i in active_idx]
         total_notes = sum(len(v) for v in out_pairs.values())
+        out = {
+            "pairs": out_pairs,
+            "summary": f"{total_notes} active note(s) across {len(out_pairs)} pair(s)",
+        }
+        cache_run_result(__file__, out)
         emit_envelope_json(
-            {"pairs": out_pairs},
+            out,
             count=total_notes,
             help=[
                 "Run `market-notes add <PAIR> <TEXT>` to append a new note",

@@ -152,6 +152,19 @@ It adds a `cached_at` ISO timestamp and skips silently when
 `result` is `None` or contains an `"error"` key (errors are not
 state).
 
+## 7b. Session-start dashboard (market-state)
+
+[`market-state`](../../skills/market-state/SKILL.md) is a meta-skill
+that reads the per-skill caches and composes a single dashboard
+intended for the LLM's first call at session start. It composes 6
+sources: `market-macro`, `market-valuation`, `market-movers`,
+`run-watchlist`, `l3-conviction-scan`, `market-notes`. Each source
+contributes a slim view (a `summary` one-liner plus a handful of
+headline fields) and a `cached_at` ISO timestamp; a top-level
+`freshness` map reports the age of each source so the LLM can
+decide which to refresh before acting. No I/O at runtime — every
+field is a read from a JSON cache.
+
 ## 8. Errors
 
 Errors flow through the `errors` list, not as a `data` field:
@@ -178,8 +191,7 @@ exits `0` with `count: 0` — "no results" is not a failure.
 | Batch pilot (`run-all-l3`) | phase 1 | Top-level envelope + `--top=N --fields=` |
 | Sweep (remaining L1/L2/L3/specialized) | phase 2 | Per-skill, gated on pilot exit criteria |
 | Home view (no-arg mode) | **shipped (phase 3)** | `maybe_render_home_view` + `cache_run_result` in 27 skills |
-| Home view + contextual disclosure | phase 3 | No-arg mode shipped skill-by-skill |
-| Session-start dashboard | phase 4 | New `scripts/session-start.py` |
+| Session-start dashboard | **shipped (phase 4)** | `market-state` skill (SKILL.md + lib.py + scripts/run.py + tests) — meta-skill pattern, not a single script |
 | TOON default flip | phase 5 | Gated on a measured >30% token saving |
 
 ## 10. What this doc is NOT
