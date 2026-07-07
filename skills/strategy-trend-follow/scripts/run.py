@@ -4,10 +4,12 @@
 import sys
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, require_ticker, safe_parse_args
+from analysis.formatting import print_header, safe_parse_args
 from analysis.output import (
+    cache_run_result,
     emit_envelope_json,
     empty_state,
+    maybe_render_home_view,
     parse_axi_flags,
     print_envelope,
     project_fields,
@@ -72,7 +74,8 @@ def _help_lines(ticker: str, has_ideas: bool) -> list[str]:
 def main():
     fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
     ticker, json_mode, source, interval, period = safe_parse_args(filtered_argv)
-    require_ticker(ticker, json_mode)
+    if maybe_render_home_view(__file__, ticker, json_mode):
+        return
     override = _parse_asset_class(sys.argv[1:])
     result = analyze(
         ticker,
@@ -81,6 +84,7 @@ def main():
         period=period,
         asset_class=override,
     )
+    cache_run_result(__file__, result)
 
     if json_mode:
         ideas = result.get("ideas", [])

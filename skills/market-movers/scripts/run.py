@@ -46,7 +46,13 @@ import argparse
 import json
 import sys
 
-from analysis.output import emit_envelope_json, parse_axi_flags, resolve_fields
+from analysis.output import (
+    cache_run_result,
+    emit_envelope_json,
+    maybe_render_home_view,
+    parse_axi_flags,
+    resolve_fields,
+)
 from analysis.skill_loader import load_lib_for_script
 
 
@@ -161,6 +167,10 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Emit JSON to stdout")
     args = parser.parse_args()
 
+    if len(sys.argv) == 1:
+        if maybe_render_home_view(__file__, None, args.json):
+            return 0
+
     fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
 
     lib = load_lib_for_script(__file__)
@@ -179,6 +189,8 @@ def main() -> int:
             full=full,
             default=["gainers", "losers", "trending", "fetched_at"],
         )
+        payload = {**payload, "summary": f"{panel_count} panels fetched"}
+        cache_run_result(__file__, payload)
         emit_envelope_json(
             payload,
             count=panel_count,

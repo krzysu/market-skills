@@ -247,10 +247,16 @@ def main() -> int:
     ideas = load_ideas(journal)
     if args.json:
         if not ideas:
-            print(json.dumps(empty_state(help=[
-                "Add entries to the journal first",
-                "Pass --full for the full payload or --fields=<csv> to project",
-            ])))
+            print(
+                json.dumps(
+                    empty_state(
+                        help=[
+                            "Add entries to the journal first",
+                            "Pass --full for the full payload or --fields=<csv> to project",
+                        ]
+                    )
+                )
+            )
             return 0
         payload = render_json(ideas)
         emit_envelope_json(

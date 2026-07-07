@@ -17,7 +17,15 @@ Three input modes:
 import sys
 
 from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
-from analysis.output import emit_envelope_json, empty_state, parse_axi_flags, print_envelope, resolve_fields
+from analysis.output import (
+    cache_run_result,
+    emit_envelope_json,
+    empty_state,
+    maybe_render_home_view,
+    parse_axi_flags,
+    print_envelope,
+    resolve_fields,
+)
 from analysis.skill_loader import load_lib_for_script
 
 
@@ -79,6 +87,8 @@ def main() -> int:
     args["fields"] = fields_arg
     args["full"] = full
     if not args["from_state"] and not args["from_json"] and not args["tickers"]:
+        if maybe_render_home_view(__file__, None, args["json_mode"]):
+            return 0
         print(
             "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
             "[--interval=INTERVALS] [--period=PERIODS] "
@@ -149,6 +159,7 @@ def main() -> int:
             full=args["full"],
             default=["findings", "scan_summary", "tickers_scanned"],
         )
+        cache_run_result(__file__, envelope)
         emit_envelope_json(
             envelope,
             count=len(findings),

@@ -8,10 +8,10 @@ from analysis.formatting import parse_cli_error, print_header, render_notes
 from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
 from analysis.notes import load_active as load_notes
 from analysis.output import (
+    cache_run_result,
     emit_envelope_json,
-    empty_state,
+    maybe_render_home_view,
     parse_axi_flags,
-    print_envelope,
     resolve_fields,
     truncate,
 )
@@ -29,6 +29,13 @@ def _parse_argv(argv):
     for a in argv:
         if a == "--json":
             json_mode = True
+        elif a in ("--help", "-h"):
+            print(
+                "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
+                "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
+                "[--fired-only] [--fields=<csv>] [--full]"
+            )
+            sys.exit(0)
         elif a.startswith("--source="):
             source = a.split("=", 1)[1]
         elif a.startswith("--interval="):
@@ -54,19 +61,14 @@ def main():
     fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
     tickers, json_mode, source, interval, period, include_notes, fired_only = _parse_argv(filtered_argv)
     if not tickers:
-        if json_mode:
-            print_envelope(
-                empty_state(
-                    errors=["at least one ticker required"],
-                    help=["Run `run-all-l2 HYPEUSD SOLUSD --json` to scan a pair"],
-                )
-            )
-        else:
-            print(
-                "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
-                "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
-                "[--fired-only] [--fields=<csv>] [--full]"
-            )
+        if maybe_render_home_view(__file__, None, json_mode):
+            return
+        print(
+            "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
+            "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
+            "[--fired-only] [--fields=<csv>] [--full]",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     _lib = load_lib_for_script(__file__)
@@ -99,6 +101,8 @@ def main():
             out["tickers"][t] = entry
             total_fired += tick_fired
         out["fired_skills_total"] = total_fired
+        out["summary"] = f"{len(tickers)} ticker(s), {total_fired} L2 skill(s) fired"
+        cache_run_result(__file__, out)
         fields = resolve_fields(fields_arg, full=full)
         emit_envelope_json(
             out,

@@ -24,6 +24,7 @@ from analysis.data import fetch_ohlc
 from analysis.formatting import emit_json, parse_cli_error, print_header, render_notes
 from analysis.intervals import validate_timeframe
 from analysis.notes import load_active
+from analysis.output import cache_run_result, maybe_render_home_view
 from analysis.skill_loader import load_lib_for_script
 from analysis.watchlist import (
     all_tickers,
@@ -81,6 +82,10 @@ def main():
         print("error: --l2-only and --l3-only are mutually exclusive", file=sys.stderr)
         sys.exit(2)
 
+    if not args.basket and not args.tickers:
+        if maybe_render_home_view(__file__, None, args.json):
+            return
+
     validate_timeframe(args.interval, args.period)
 
     wl_path = args.watchlist
@@ -120,6 +125,8 @@ def main():
                 interval=args.interval,
                 period=args.period,
             )
+        out["summary"] = f"{scope_label}: {len(tickers)} ticker(s)"
+        cache_run_result(__file__, out)
         emit_json(out)
         return
 

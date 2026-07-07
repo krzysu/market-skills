@@ -15,8 +15,10 @@ from analysis.indicators import (
 )
 from analysis.intervals import validate_timeframe
 from analysis.output import (
+    cache_run_result,
     emit_envelope_json,
     empty_state,
+    maybe_render_home_view,
     parse_axi_flags,
     print_envelope,
     resolve_fields,
@@ -146,6 +148,10 @@ def main():
     parser.add_argument("--json", action="store_true", help="JSON output")
     args = parser.parse_args()
 
+    if len(sys.argv) == 1:
+        if maybe_render_home_view(__file__, None, args.json):
+            return
+
     fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
 
     try:
@@ -156,16 +162,22 @@ def main():
 
     if args.json:
         if "error" in result:
-            print_envelope(empty_state(errors=[result["error"]], help=[
-                "Try a different --source (ccxt:binance, ccxt:bybit, etc.)",
-                "Pass --full for the full payload or --fields=<csv> to project",
-            ]))
+            print_envelope(
+                empty_state(
+                    errors=[result["error"]],
+                    help=[
+                        "Try a different --source (ccxt:binance, ccxt:bybit, etc.)",
+                        "Pass --full for the full payload or --fields=<csv> to project",
+                    ],
+                )
+            )
             return
         fields = resolve_fields(
             fields_arg,
             full=full,
             default=["ticker", "interval", "funding", "basis", "divergences"],
         )
+        cache_run_result(__file__, result)
         emit_envelope_json(
             result,
             count=1,

@@ -178,3 +178,12 @@ the CoinGecko rate-limit log.
 ## Output envelope (AXI)
 
 `--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.
+
+## Home view (no-arg mode)
+
+Running this skill with no args prints the home view (last cached
+state from `$XDG_DATA_HOME/market-skills/<skill>_last.json`) instead
+of a usage error. `render_home_view()` is the underlying helper;
+`cache_run_result(__file__, result)` writes the cache after every
+successful run. Errors (`"error"` key in the result) are NOT
+cached — the home view always reflects the last healthy run.

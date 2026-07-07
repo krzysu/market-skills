@@ -39,8 +39,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     cats = categories(args.config)
     if args.json:
         baskets_data = {
-            c: {"members": list(basket(c, args.config).keys()), "count": len(basket(c, args.config))}
-            for c in cats
+            c: {"members": list(basket(c, args.config).keys()), "count": len(basket(c, args.config))} for c in cats
         }
         emit_envelope_json(
             {"baskets": baskets_data, "total_tickers": len(all_tickers(args.config))},
@@ -69,9 +68,14 @@ def _cmd_show(args: argparse.Namespace) -> int:
     b = basket(args.basket, args.config)
     if not b:
         if args.json:
-            print_envelope(empty_state(errors=[f"basket {args.basket!r} not found"], help=[
-                "Run `market-watchlist list --json` to see available baskets",
-            ]))
+            print_envelope(
+                empty_state(
+                    errors=[f"basket {args.basket!r} not found"],
+                    help=[
+                        "Run `market-watchlist list --json` to see available baskets",
+                    ],
+                )
+            )
         else:
             print(f"error: basket {args.basket!r} not found", file=sys.stderr)
         return 1
@@ -129,9 +133,14 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         result = resolve(args.alias, args.config)
     except ValueError as e:
         if args.json:
-            print_envelope(empty_state(errors=[str(e)], help=[
-                "Run `market-watchlist tickers --json` for the full ticker list",
-            ]))
+            print_envelope(
+                empty_state(
+                    errors=[str(e)],
+                    help=[
+                        "Run `market-watchlist tickers --json` for the full ticker list",
+                    ],
+                )
+            )
         else:
             print(f"error: {e}", file=sys.stderr)
         return 1

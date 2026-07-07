@@ -17,8 +17,10 @@ from analysis.indicators import (
 )
 from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
 from analysis.output import (
+    cache_run_result,
     emit_envelope_json,
     empty_state,
+    maybe_render_home_view,
     parse_axi_flags,
     print_envelope,
     project_fields,
@@ -137,6 +139,10 @@ def main():
     parser.add_argument("--pretty", action="store_true", help="Human-readable table (default without --json)")
     args = parser.parse_args()
 
+    if len(sys.argv) == 1:
+        if maybe_render_home_view(__file__, None, args.json):
+            return
+
     fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
 
     validate_timeframe(args.interval, args.period)
@@ -180,15 +186,18 @@ def main():
             default=["ticker", "price", "unified_score", "action"],
         )
         projected_results = [project_fields(r, fields) for r in results]
+        out = {
+            "tickers_scanned": len(tickers),
+            "interval": args.interval,
+            "period": args.period,
+            "results": len(projected_results),
+            "errors": errors,
+            "ranked": projected_results,
+            "summary": f"{len(tickers)} tickers scanned, {len(projected_results)} matched",
+        }
+        cache_run_result(__file__, out)
         emit_envelope_json(
-            {
-                "tickers_scanned": len(tickers),
-                "interval": args.interval,
-                "period": args.period,
-                "results": len(projected_results),
-                "errors": errors,
-                "ranked": projected_results,
-            },
+            out,
             count=len(projected_results),
             help=[
                 f"Pass --action={results[0]['action'] if results else 'BUY'} to filter the panel",

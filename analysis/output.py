@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Iterable
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 DEFAULT_TRUNCATE_LIMIT = 80
@@ -30,6 +33,38 @@ _HOME_VIEW_FALLBACK = "no cached state yet - run `{cmd}` to populate this view, 
 def _state_cache_path(skill_name: str) -> str:
     base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
     return os.path.join(base, _HOME_VIEW_DIRNAME, f"{skill_name}{_HOME_VIEW_SUFFIX}")
+
+
+def skill_name_from_file(file_path: str) -> str:
+    """Derive the skill name from a ``skills/<name>/scripts/<file>.py`` path.
+
+    Falls back to the file stem when the path does not live under a
+    ``skills/`` tree so non-skill helpers can still call the
+    home-view utilities without crashing.
+    """
+    parts = Path(file_path).parts
+    for i, p in enumerate(parts):
+        if p == "skills" and i + 2 < len(parts) and parts[i + 2] == "scripts":
+            return parts[i + 1]
+    return Path(file_path).stem
+
+
+def _age_human(iso_ts: str) -> str:
+    try:
+        then = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return ""
+    delta = datetime.now(UTC) - then
+    secs = int(delta.total_seconds())
+    if secs < 0:
+        return "just now"
+    if secs < 60:
+        return "just now"
+    if secs < 3600:
+        return f"{secs // 60}m ago"
+    if secs < 86400:
+        return f"{secs // 3600}h ago"
+    return f"{secs // 86400}d ago"
 
 
 def project_fields(d: Any, fields: Iterable[str] | str | None) -> Any:
@@ -155,9 +190,25 @@ def render_home_view(skill_name: str, *, command_hint: str | None = None) -> str
     hint = command_hint or f"{skill_name} --json"
     if not state:
         return _HOME_VIEW_FALLBACK.format(cmd=hint)
-    summary = state.get("summary") or state.get("narrative") or state.get("ticker")
-    ts = state.get("timestamp") or state.get("last_run") or "unknown time"
-    body = f"last cached: {summary} on {ts}" if summary else f"last cached state on {ts}"
+    summary = (
+        state.get("summary")
+        or state.get("narrative")
+        or state.get("ticker")
+        or state.get("regime")
+    )
+    ts = (
+        state.get("cached_at")
+        or state.get("timestamp")
+        or state.get("last_run")
+    )
+    body = "last cached state"
+    if summary:
+        body += f": {summary}"
+    if ts:
+        body += f" on {ts}"
+        age = _age_human(ts)
+        if age:
+            body += f" ({age})"
     return f"{body}\n  try: `{hint}`"
 
 
@@ -175,6 +226,71 @@ def write_state_cache(skill_name: str, payload: dict[str, Any]) -> None:
             json.dump(payload, f, indent=2, default=str)
     except OSError:
         return
+
+
+def cache_run_result(script_file: str, result: dict[str, Any] | None) -> None:
+    """Cache a skill's run result for the home view.
+
+    Adds a ``cached_at`` ISO timestamp and writes via
+    :func:`write_state_cache`. Skips silently when ``result`` is
+    ``None`` or contains an ``"error"`` key (errors are not state).
+    The skill name is derived from ``script_file`` via
+    :func:`skill_name_from_file`; pass an explicit skill name as
+    the first positional if you need to override.
+    """
+    if script_file and "/" not in script_file and "\\" not in script_file:
+        skill_name = script_file
+        payload = result
+    else:
+        skill_name = skill_name_from_file(script_file)
+        payload = result
+    if not payload or "error" in payload:
+        return
+    stamped = {"cached_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), **payload}
+    write_state_cache(skill_name, stamped)
+
+
+def maybe_render_home_view(
+    script_file: str,
+    ticker: str | None,
+    json_mode: bool,
+) -> bool:
+    """Render the per-skill home view when no ticker (or no positional) was given.
+
+    Returns ``True`` when the home view was emitted and the caller
+    should ``return`` from ``main()``; returns ``False`` when a
+    ticker was given (caller proceeds with the normal analyze path).
+
+    Behaviour by mode:
+
+    - **ticker present** -> return False (do not render).
+    - **JSON mode + no ticker** -> emit an :func:`empty_state` envelope
+      (one ``error``, one ``help`` line pointing at the next command)
+      and return True. The LLM gets a structured response it can
+      branch on without a usage-exit fork.
+    - **text mode + no ticker** -> emit :func:`render_home_view`
+      (last-cached state, or the standard "no cached state" fallback)
+      and return True.
+
+    The skill name is derived from ``script_file`` via
+    :func:`skill_name_from_file`.
+    """
+    if ticker:
+        return False
+    skill_name = skill_name_from_file(script_file)
+    if json_mode:
+        print_envelope(
+            empty_state(
+                errors=[f"no ticker provided for {skill_name}"],
+                help=[
+                    f"Run `{skill_name} <TICKER> --json` to populate this view",
+                    f"Run `{skill_name} --help` for full usage",
+                ],
+            )
+        )
+        return True
+    print(render_home_view(skill_name), file=sys.stdout)
+    return True
 
 
 def empty_state(*, help: Iterable[str] | None = None, errors: Iterable[str] | None = None) -> dict[str, Any]:

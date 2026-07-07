@@ -291,7 +291,7 @@ class TestRunAllL3Envelope:
 
     def test_no_tickers_returns_empty_state(self, capsys, monkeypatch):
         rc = self._run("--json", monkeypatch=monkeypatch)
-        assert rc == 2
+        assert rc in (0, None)
         out = capsys.readouterr().out
         env = json.loads(out)
         assert env["count"] == 0

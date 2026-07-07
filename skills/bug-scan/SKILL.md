@@ -110,3 +110,12 @@ Use `--json` to get the full list unsorted.
 ## Output envelope (AXI)
 
 `--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count (findings for `bug-scan`, ranked ideas for `l3-conviction-scan`, total journal entries for `daily-trade-pick`), `help[]` is contextual next-step command templates.
+
+## Home view (no-arg mode)
+
+Running this skill with no args prints the home view (last cached
+state from `$XDG_DATA_HOME/market-skills/<skill>_last.json`) instead
+of a usage error. `render_home_view()` is the underlying helper;
+`cache_run_result(__file__, result)` writes the cache after every
+successful run. Errors (`"error"` key in the result) are NOT
+cached — the home view always reflects the last healthy run.
