@@ -126,12 +126,18 @@ def _cmd_add(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
+    from analysis.output import emit_envelope_json
+
     data = load_raw(args.config)
     now = now_utc()
     pairs = [args.pair] if args.pair else sorted(data.keys())
     if not args.pair and not pairs:
         if args.json:
-            print(json.dumps({"pairs": {}}))
+            emit_envelope_json(
+                {"pairs": {}},
+                count=0,
+                help=["Add a note with `market-notes add <PAIR> <TEXT>`"],
+            )
         else:
             print("(no notes)")
         return 0
@@ -147,7 +153,15 @@ def _cmd_list(args: argparse.Namespace) -> int:
                 if not active_idx:
                     continue
                 out_pairs[p] = [notes[i] for i in active_idx]
-        print(json.dumps({"pairs": out_pairs}))
+        total_notes = sum(len(v) for v in out_pairs.values())
+        emit_envelope_json(
+            {"pairs": out_pairs},
+            count=total_notes,
+            help=[
+                "Run `market-notes add <PAIR> <TEXT>` to append a new note",
+                "Pass --all to include expired notes",
+            ],
+        )
         return 0
 
     any_shown = False

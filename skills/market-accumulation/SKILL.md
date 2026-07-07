@@ -76,3 +76,7 @@ corroborating L1s are meaningful.
 ## Output
 
 Returns pattern presence, confidence (1-5), classification, sub-signal states, input scores from each L1, and a one-sentence narrative.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

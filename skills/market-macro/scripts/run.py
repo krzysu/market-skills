@@ -3,8 +3,12 @@
 
 import sys
 
-from analysis.formatting import emit_json, print_header
 from analysis.macro import clear_cache, fetch_regime
+from analysis.output import (
+    emit_envelope_json,
+    parse_axi_flags,
+    resolve_fields,
+)
 
 
 def _parse_argv(argv):
@@ -27,27 +31,43 @@ def _parse_argv(argv):
         else:
             print(f"error: unknown flag {a!r}", file=sys.stderr)
             print(
-                "usage: run.py [--json] [--ttl=SECONDS] [--no-cache] [--no-history]",
+                "usage: run.py [--json] [--ttl=SECONDS] [--no-cache] [--no-history] [--fields=<csv>] [--full]",
                 file=sys.stderr,
             )
             sys.exit(2)
     return json_mode, ttl, write_history
 
 
+def _help_lines() -> list[str]:
+    return [
+        "Run `run-all-l3 <TICKERS> --json` to attach the latest regime to L3 batch output",
+        "Run `market-valuation --json` for the SP500 valuation complement",
+        "Pass --full for the full payload or --fields=<csv> to project",
+    ]
+
+
 def main():
+    fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
     json_mode, ttl, write_history = _parse_argv(sys.argv[1:])
     if ttl is None:
-        clear_cache()  # ensure fresh on direct CLI invocation
+        clear_cache()
         kwargs = {"write_history": write_history}
     else:
         kwargs = {"ttl_seconds": ttl, "write_history": write_history}
     signal = fetch_regime(**kwargs)
 
     if json_mode:
-        emit_json(signal)
+        fields = resolve_fields(fields_arg, full=full, default=["regime", "regime_note", "incomplete"])
+        emit_envelope_json(
+            signal,
+            count=None,
+            help=_help_lines(),
+            errors=signal.get("errors") or [],
+            fields=fields,
+        )
         return
 
-    print_header("MACRO REGIME")
+    print("\n")
     inputs = signal.get("inputs", {})
     regime = signal.get("regime", {})
     print(f"  timestamp:  {signal.get('timestamp', '?')}")
@@ -69,11 +89,11 @@ def main():
     print(f"  Total mcap: {inputs.get('total_mcap_usd')}")
     print()
     print(f"  note: {signal.get('regime_note', '')}")
-    errors = signal.get("errors") or []
-    if errors:
+    errs = signal.get("errors") or []
+    if errs:
         print()
         print("  source errors:")
-        for e in errors:
+        for e in errs:
             print(f"    - {e}")
     print()
 

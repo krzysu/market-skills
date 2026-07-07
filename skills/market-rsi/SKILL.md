@@ -54,3 +54,7 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
 - RSI can remain oversold in strong downtrends — don't buy blindly.
 - Requires 30+ days of data minimum.
 - RSI is a single oscillator — use `market-trend-quality` for a full picture.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

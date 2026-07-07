@@ -5,8 +5,19 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, print_header, require_ticker, safe_parse_args
+from analysis.formatting import print_header, require_ticker, safe_parse_args
+from analysis.output import (
+    emit_envelope_json,
+    empty_state,
+    parse_axi_flags,
+    print_envelope,
+    resolve_fields,
+    truncate,
+)
 from analysis.skill_loader import load_lib_for_script
+
+DEFAULT_FIELDS = ["ticker", "rsi_14", "signal", "score"]
+NARRATIVE_LIMIT = 80
 
 
 def analyze(ticker, *, source=None, interval="1d", period="1y"):
@@ -30,40 +41,73 @@ def analyze(ticker, *, source=None, interval="1d", period="1y"):
         "interval": interval,
         "period": period,
         "candles_used": len(candles),
-        "indicators": result,
-        "score": result.get("score"),
+        "current_price": result.get("current_price"),
+        "rsi_14": result.get("rsi_14"),
+        "rsi_7d_ago": result.get("rsi_7d_ago"),
+        "rsi_delta_7d": result.get("rsi_delta_7d"),
         "signal": result.get("signal"),
+        "score": result.get("score"),
         "zone": result.get("zone"),
+        "trend": result.get("trend"),
+        "summary": _summary_line(ticker, result),
     }
 
 
+def _summary_line(ticker: str, result: dict) -> str:
+    rsi = result.get("rsi_14")
+    signal = result.get("signal") or "N/A"
+    if rsi is None:
+        return f"{ticker} rsi=NA {signal}"
+    return f"{ticker} rsi={rsi:g} {signal}"
+
+
+def _help_lines(ticker: str) -> list[str]:
+    return [
+        f"Run `market-ema {ticker} --json` for trend context",
+        f"Run `market-trend-quality {ticker} --json` for the L2 verdict",
+        "Pass --full for the full payload or --fields=<csv> to project",
+    ]
+
+
 def main():
-    ticker, json_mode, source, interval, period = safe_parse_args(sys.argv[1:])
+    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    ticker, json_mode, source, interval, period = safe_parse_args(filtered_argv)
     require_ticker(ticker, json_mode)
     result = analyze(ticker, source=source, interval=interval, period=period)
 
     if json_mode:
-        emit_json(result)
+        if "error" in result:
+            print_envelope(empty_state(errors=[result["error"]], help=_help_lines(ticker or "TICKER")))
+            return
+        fields = resolve_fields(fields_arg, full=full, default=DEFAULT_FIELDS)
+        emit_envelope_json(
+            result,
+            count=1,
+            help=_help_lines(ticker),
+            fields=fields,
+        )
         return
 
     if "error" in result:
         print(f"  {ticker}: {result['error']}")
         return
 
-    ind = result["indicators"]
-    print_header("RSI MOMENTUM")
-    bar_pos = max(0, min(40, round(ind.get("rsi_14", 50) / 100 * 40)))
+    rsi = result.get("rsi_14", 50) or 50
+    bar_pos = max(0, min(40, round(rsi / 100 * 40)))
     bar = "\u2591" * bar_pos + "\u2588" + "\u2591" * (40 - bar_pos)
     os_marker = " " * 12 + "\u219130"
     ob_marker = " " * 28 + "\u219170"
 
-    print(f"  {ticker}  (price: {ind.get('current_price', 0):,.2f})")
-    print(f"    RSI(14):   {ind.get('rsi_14', 'N/A')}")
-    if ind.get("rsi_delta_7d") is not None:
-        print(f"    7d change: {ind['rsi_delta_7d']:+.2f} ({ind.get('trend', 'N/A')})")
+    print_header("RSI MOMENTUM")
+    print(f"  {ticker}  (price: {result.get('current_price', 0):,.2f})")
+    print(f"    RSI(14):   {result.get('rsi_14', 'N/A')}")
+    if result.get("rsi_delta_7d") is not None:
+        print(f"    7d change: {result['rsi_delta_7d']:+.2f} ({result.get('trend', 'N/A')})")
     print(f"    Position:  [{bar}]")
     print(f"               {os_marker}    {ob_marker}")
-    print(f"    Signal:    {ind.get('signal', 'N/A')}")
+    print(f"    Signal:    {result.get('signal', 'N/A')}")
+    print()
+    print(f"  {truncate(_summary_line(ticker, result), limit=NARRATIVE_LIMIT)}")
     print()
 
 

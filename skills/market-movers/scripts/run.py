@@ -46,6 +46,7 @@ import argparse
 import json
 import sys
 
+from analysis.output import emit_envelope_json, parse_axi_flags, resolve_fields
 from analysis.skill_loader import load_lib_for_script
 
 
@@ -160,6 +161,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Emit JSON to stdout")
     args = parser.parse_args()
 
+    fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
+
     lib = load_lib_for_script(__file__)
     payload = lib.fetch_movers(
         top_n=args.top_n,
@@ -170,7 +173,21 @@ def main() -> int:
     )
 
     if args.json:
-        _emit_json(payload)
+        panel_count = sum(1 for k in ("gainers", "losers", "trending", "categories") if payload.get(k))
+        fields = resolve_fields(
+            fields_arg,
+            full=full,
+            default=["gainers", "losers", "trending", "fetched_at"],
+        )
+        emit_envelope_json(
+            payload,
+            count=panel_count,
+            help=[
+                "Pass --top-n=N to cap each panel",
+                "Pass --full for the full payload or --fields=<csv> to project",
+            ],
+            fields=fields,
+        )
         return 0
 
     print("MARKET MOVERS")

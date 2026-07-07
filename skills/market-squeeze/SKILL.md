@@ -56,3 +56,7 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
 - Squeeze fires are strongest when confirmed by volume — use with OBV analysis.
 - Requires 50+ days of data for reliable BB/KC calculation.
 - Best used as a timing overlay on trend direction from `market-ema` or `market-trend-quality`.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

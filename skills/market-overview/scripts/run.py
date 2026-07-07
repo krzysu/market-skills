@@ -5,7 +5,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, print_header, safe_round
+from analysis.formatting import print_header, safe_round
 from analysis.indicators import (
     classify_ema_trend,
     classify_squeeze,
@@ -16,6 +16,14 @@ from analysis.indicators import (
     extract_ohlcv,
 )
 from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
+from analysis.output import (
+    emit_envelope_json,
+    empty_state,
+    parse_axi_flags,
+    print_envelope,
+    project_fields,
+    resolve_fields,
+)
 
 DEFAULT_WATCHLIST = ["SPY", "QQQ", "AAPL", "GOOGL", "BTC-USD", "GLD"]
 
@@ -129,6 +137,8 @@ def main():
     parser.add_argument("--pretty", action="store_true", help="Human-readable table (default without --json)")
     args = parser.parse_args()
 
+    fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
+
     validate_timeframe(args.interval, args.period)
 
     tickers = args.tickers if args.tickers else DEFAULT_WATCHLIST
@@ -149,9 +159,44 @@ def main():
         "errors": errors,
         "ranked": results,
     }
+    del output
 
     if args.json:
-        emit_json(output)
+        if not results and errors:
+            print_envelope(
+                empty_state(
+                    errors=[e.get("error", "unknown") for e in errors],
+                    help=[
+                        "Try a longer --period",
+                        "Pass --source to force a provider",
+                        "Pass --full for the full payload or --fields=<csv> to project",
+                    ],
+                )
+            )
+            return
+        fields = resolve_fields(
+            fields_arg,
+            full=full,
+            default=["ticker", "price", "unified_score", "action"],
+        )
+        projected_results = [project_fields(r, fields) for r in results]
+        emit_envelope_json(
+            {
+                "tickers_scanned": len(tickers),
+                "interval": args.interval,
+                "period": args.period,
+                "results": len(projected_results),
+                "errors": errors,
+                "ranked": projected_results,
+            },
+            count=len(projected_results),
+            help=[
+                f"Pass --action={results[0]['action'] if results else 'BUY'} to filter the panel",
+                "Pass --top=N to limit the panel size",
+                "Pass --full for the full payload or --fields=<csv> to project",
+            ],
+            errors=[e.get("error", "unknown") for e in errors],
+        )
         return
 
     print_header("UNIFIED MARKET OVERVIEW")

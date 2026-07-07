@@ -254,6 +254,37 @@ Cross-cutting:
   market-snapshot           Supertrend + RSI + MA alignment (chart-visual sanity)
 ```
 
+## Output envelope (AXI)
+
+Every analysis skill's `--json` output follows the canonical
+[AXI envelope](https://github.com/kunchenguid/axi)
+([ADR-0004](./docs/adr/0004-axi-adoption.md),
+[`docs/AXI-REFERENCE.md`](./docs/AXI-REFERENCE.md)):
+
+```json
+{"data": <payload>, "count": N, "errors": [], "help": ["..."]}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `data` | skill-defined | Default 3-6 fields per item (AXI principle 2). Pass `--fields=<csv>` to project or `--full` for the full payload. |
+| `count` | int \| null | Canonical item count. Singleton skills use `1`; lists use `len(data)`; null when count is undefined (e.g. macro regime). |
+| `errors` | list[str] | Always a list. Empty when no errors. Replaces the bare `{"error": "..."}` pattern. |
+| `help` | list[str] | Always a list. Next-step command templates the LLM can drop into narration (AXI principle 9). |
+
+Constructed via `analysis.output.envelope()` / `emit_envelope_json()`. The
+lib.py contracts (`L1Result`, `L2Result`, `L3Result`, `L3Idea`,
+`RegimeSignal`) are unchanged — the envelope wraps them at the
+`scripts/run.py` boundary. TOON ships as opt-in behind `--toon`; the
+default is indent-2 JSON.
+
+The `market-*` (L1/L2/specialized) and `strategy-*` (L3) skills, plus
+`run-all-l2` / `run-all-l3` and the per-user `list` / `show` /
+`tickers` / `resolve` subcommands all emit this envelope. `risk-engine`,
+`execution-kraken-*`, `portfolio-mgmt`, and `position-watchdog` are
+deliberately out of scope — their consumers and tests pin specific
+shapes and the LLM-orchestration contract binds to them.
+
 ## Data Providers
 
 | Provider | Covers | `--source=` | Prefix |
@@ -302,6 +333,7 @@ uv run skills/market-ema/scripts/run.py yf:AAPL --json
 - Data providers in `analysis/providers/` implement the `Provider` protocol; execution providers implement the `ExecutionProvider` protocol. Add a new venue by implementing the protocol and registering it.
 - Skill return shapes (`L1Result`, `L2Result`, `L3Result`, `L3Idea`) and L2/L3 invariants (present/classification coupling, TP-ladder monotonicity, conviction `version`, soft-veto reasons) are defined in `analysis/contracts.py` and enforced by the strategies at emit time.
 - Per-user data (`market-watchlist`, `market-notes`, `position-watchdog`, `portfolio-mgmt`) lives under `skills/<name>/data/` and is gitignored; checked-in samples ship under `skills/<name>/examples/`.
+- All analysis scripts emit the [AXI output envelope](#output-envelope-axi) on `--json` (default 3-6 fields, `--fields=<csv>` for projection, `--full` for the full payload, `count` + `help[]` on every output). `--toon` is opt-in. The envelope is constructed via `analysis.output.envelope()`; lib.py return shapes (`L1Result`, `L2Result`, `L3Result`, `L3Idea`, `RegimeSignal`) are unchanged.
 
 ## Timeframes
 

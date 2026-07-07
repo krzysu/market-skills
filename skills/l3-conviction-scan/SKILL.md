@@ -138,3 +138,7 @@ Read them, don't strip them.
 - Asset-class-scaled conviction (perp_dex floor 3) means `conv < 3` is
   not a defect, just a veto signal in the swing-scan playbook. This skill
   surfaces everything; downstream agents decide what to act on.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count (findings for `bug-scan`, ranked ideas for `l3-conviction-scan`, total journal entries for `daily-trade-pick`), `help[]` is contextual next-step command templates.

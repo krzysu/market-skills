@@ -56,3 +56,7 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
   - Each idea is validated against `validate_l3_tp_ladder()` (TP3 ≥ entry × 1.05 long, or ≤ entry × 0.95 short). Mean-reversion explicitly guards against degenerate TP3 when `resistance ≈ entry` (falls back to 3R target).
   - When SP500 CAPE valuation disagrees with the trade direction, each idea carries a soft `veto_reasons` tag (`sp500_cape_overextended_z{X.XX}` for longs during OVEREXTENDED regimes, `sp500_cape_oversold_z{X.XX}` for shorts during OVERSOLD regimes). The tag is informational; conviction is not auto-downgraded. The LLM agent brain reads the tag and decides.
 - `narrative` — summary for user briefing
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

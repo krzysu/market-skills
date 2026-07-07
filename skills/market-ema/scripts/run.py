@@ -5,8 +5,17 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, print_header, require_ticker, safe_parse_args
+from analysis.formatting import print_header, require_ticker, safe_parse_args
+from analysis.output import (
+    emit_envelope_json,
+    empty_state,
+    parse_axi_flags,
+    print_envelope,
+    resolve_fields,
+)
 from analysis.skill_loader import load_lib_for_script
+
+DEFAULT_FIELDS = ["ticker", "alignment", "signal", "score"]
 
 
 def analyze(ticker, *, source=None, interval="1d", period="1y"):
@@ -30,27 +39,54 @@ def analyze(ticker, *, source=None, interval="1d", period="1y"):
         "interval": interval,
         "period": period,
         "candles_used": len(candles),
-        "indicators": result,
+        "current_price": result.get("current_price"),
+        "ema_21": result.get("ema_21"),
+        "ema_50": result.get("ema_50"),
+        "ema_100": result.get("ema_100"),
+        "ema_200": result.get("ema_200"),
+        "alignment": result.get("alignment"),
+        "price_above_emas": result.get("price_above_emas"),
+        "slope_21_pct": result.get("slope_21_pct"),
+        "slope_50_pct": result.get("slope_50_pct"),
+        "crossover": result.get("crossover"),
         "score": result.get("score"),
         "signal": result.get("signal"),
         "zone": result.get("zone"),
     }
 
 
+def _help_lines(ticker: str) -> list[str]:
+    return [
+        f"Run `market-trend {ticker} --json` for the L1 trend score",
+        f"Run `market-trend-quality {ticker} --json` for the L2 verdict",
+        "Pass --full for the full payload or --fields=<csv> to project",
+    ]
+
+
 def main():
-    ticker, json_mode, source, interval, period = safe_parse_args(sys.argv[1:])
+    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    ticker, json_mode, source, interval, period = safe_parse_args(filtered_argv)
     require_ticker(ticker, json_mode)
     result = analyze(ticker, source=source, interval=interval, period=period)
 
     if json_mode:
-        emit_json(result)
+        if "error" in result:
+            print_envelope(empty_state(errors=[result["error"]], help=_help_lines(ticker or "TICKER")))
+            return
+        fields = resolve_fields(fields_arg, full=full, default=DEFAULT_FIELDS)
+        emit_envelope_json(
+            result,
+            count=1,
+            help=_help_lines(ticker),
+            fields=fields,
+        )
         return
 
     if "error" in result:
         print(f"  {ticker}: {result['error']}")
         return
 
-    ind = result["indicators"]
+    ind = result
     print_header("EMA TREND STRUCTURE")
     print(f"  {ticker}  (price: {ind.get('current_price', 0):,.2f})")
     print()
@@ -74,7 +110,7 @@ def main():
     if ind.get("crossover"):
         note = "bullish reversal" if ind["crossover"] == "golden_cross" else "bearish reversal"
         print(f"    Crossover:  {ind['crossover']} \u2014 {note}")
-    print(f"    Signal:     {result.get('signal', 'N/A')} (score: {result.get('score', 'N/A')})")
+    print(f"    Signal:     {ind.get('signal', 'N/A')} (score: {ind.get('score', 'N/A')})")
     print()
 
 

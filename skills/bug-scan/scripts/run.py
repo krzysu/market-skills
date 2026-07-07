@@ -16,8 +16,8 @@ Three input modes:
 
 import sys
 
-from analysis.formatting import emit_json
 from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
+from analysis.output import emit_envelope_json, empty_state, parse_axi_flags, print_envelope, resolve_fields
 from analysis.skill_loader import load_lib_for_script
 
 
@@ -74,13 +74,16 @@ def _parse_argv(argv: list[str]) -> dict:
 
 
 def main() -> int:
-    args = _parse_argv(sys.argv[1:])
+    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    args = _parse_argv(filtered_argv)
+    args["fields"] = fields_arg
+    args["full"] = full
     if not args["from_state"] and not args["from_json"] and not args["tickers"]:
         print(
             "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
             "[--interval=INTERVALS] [--period=PERIODS] "
             "[--from-state[=PATH]] [--from-json[=PATH]] "
-            "[--with-chop-score]",
+            "[--with-chop-score] [--fields=<csv>] [--full]",
             file=sys.stderr,
         )
         return 2
@@ -129,17 +132,43 @@ def main() -> int:
     )
 
     if args["json_mode"]:
-        emit_json(envelope)
-    else:
         findings = envelope.get("findings") or []
         if envelope.get("ok") is False:
-            print(f"  error: {envelope.get('error', 'unknown')}")
+            print_envelope(
+                empty_state(
+                    errors=[envelope.get("error", "unknown")],
+                    help=[
+                        "Run with explicit tickers to debug",
+                        "Pass --full for the full payload or --fields=<csv> to project",
+                    ],
+                )
+            )
             return 1
-        print(f"  bug-scan findings: {len(findings)}")
-        if findings:
-            print()
-            print(lib.format_for_terminal(envelope))
+        fields = resolve_fields(
+            args["fields"],
+            full=args["full"],
+            default=["findings", "scan_summary", "tickers_scanned"],
+        )
+        emit_envelope_json(
+            envelope,
+            count=len(findings),
+            help=[
+                "Run `bug-scan HYPEUSD SOLUSD --json` for a fresh scan on a pair",
+                "Pass --full for the full payload or --fields=<csv> to project",
+            ],
+            fields=fields,
+        )
+        return 0
+
+    findings = envelope.get("findings") or []
+    if envelope.get("ok") is False:
+        print(f"  error: {envelope.get('error', 'unknown')}")
+        return 1
+    print(f"  bug-scan findings: {len(findings)}")
+    if findings:
         print()
+        print(lib.format_for_terminal(envelope))
+    print()
     return 0
 
 

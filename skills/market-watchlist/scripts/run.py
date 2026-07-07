@@ -21,6 +21,7 @@ import argparse
 import json
 import sys
 
+from analysis.output import emit_envelope_json, empty_state, print_envelope
 from analysis.watchlist import (
     all_tickers,
     basket,
@@ -37,13 +38,18 @@ from analysis.watchlist import (
 def _cmd_list(args: argparse.Namespace) -> int:
     cats = categories(args.config)
     if args.json:
-        out = {
-            "baskets": {
-                c: {"members": list(basket(c, args.config).keys()), "count": len(basket(c, args.config))} for c in cats
-            },
-            "total_tickers": len(all_tickers(args.config)),
+        baskets_data = {
+            c: {"members": list(basket(c, args.config).keys()), "count": len(basket(c, args.config))}
+            for c in cats
         }
-        print(json.dumps(out, indent=2))
+        emit_envelope_json(
+            {"baskets": baskets_data, "total_tickers": len(all_tickers(args.config))},
+            count=len(cats),
+            help=[
+                "Run `market-watchlist show <basket> --json` to see one basket's metadata",
+                "Run `market-watchlist tickers --json` for a flat ticker list",
+            ],
+        )
         return 0
     if not cats:
         print("(no baskets defined)")
@@ -63,12 +69,20 @@ def _cmd_show(args: argparse.Namespace) -> int:
     b = basket(args.basket, args.config)
     if not b:
         if args.json:
-            print(json.dumps({"error": f"basket {args.basket!r} not found"}))
+            print_envelope(empty_state(errors=[f"basket {args.basket!r} not found"], help=[
+                "Run `market-watchlist list --json` to see available baskets",
+            ]))
         else:
             print(f"error: basket {args.basket!r} not found", file=sys.stderr)
         return 1
     if args.json:
-        print(json.dumps({args.basket: b}, indent=2))
+        emit_envelope_json(
+            {args.basket: b},
+            count=len(b),
+            help=[
+                f"Run `run-watchlist {args.basket} --json` to scan this basket",
+            ],
+        )
         return 0
     print(f"Basket: {args.basket} ({len(b)} members)")
     print()
@@ -97,7 +111,13 @@ def _cmd_tickers(args: argparse.Namespace) -> int:
     else:
         out = all_tickers(args.config)
     if args.json:
-        print(json.dumps(out))
+        emit_envelope_json(
+            out,
+            count=len(out),
+            help=[
+                "Pipe into `run-watchlist` or `run-all-l2` for the bulk analysis",
+            ],
+        )
     else:
         for t in out:
             print(t)
@@ -109,20 +129,26 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         result = resolve(args.alias, args.config)
     except ValueError as e:
         if args.json:
-            print(json.dumps({"error": str(e)}))
+            print_envelope(empty_state(errors=[str(e)], help=[
+                "Run `market-watchlist tickers --json` for the full ticker list",
+            ]))
         else:
             print(f"error: {e}", file=sys.stderr)
         return 1
     if result is None:
         if args.json:
-            print(json.dumps({"alias": args.alias, "resolved": None}))
+            print_envelope({"data": {"alias": args.alias, "resolved": None}, "count": 0, "errors": [], "help": []})
         else:
             print(f"(no match for {args.alias!r})")
         return 0
     if args.json:
         meta = metadata_for(result, args.config)
         prov = provider_for(result, args.config)
-        print(json.dumps({"alias": args.alias, "resolved": result, "metadata": meta, "provider": prov}))
+        emit_envelope_json(
+            {"alias": args.alias, "resolved": result, "metadata": meta, "provider": prov},
+            count=1,
+            help=[f"Run `run-watchlist {prov or 'yf'}:{result} --json` to scan it"],
+        )
     else:
         print(result)
     return 0
