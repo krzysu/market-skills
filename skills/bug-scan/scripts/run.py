@@ -82,7 +82,7 @@ def _parse_argv(argv: list[str]) -> dict:
 
 
 def main() -> int:
-    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
     args = _parse_argv(filtered_argv)
     args["fields"] = fields_arg
     args["full"] = full
@@ -167,8 +167,7 @@ def main() -> int:
                 "Run `bug-scan HYPEUSD SOLUSD --json` for a fresh scan on a pair",
                 "Pass --full for the full payload or --fields=<csv> to project",
             ],
-            fields=fields,
-        )
+            fields=fields, toon=toon,)
         return 0
 
     findings = envelope.get("findings") or []

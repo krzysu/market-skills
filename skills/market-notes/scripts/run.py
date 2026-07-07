@@ -126,8 +126,9 @@ def _cmd_add(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    from analysis.output import cache_run_result, emit_envelope_json
+    from analysis.output import cache_run_result, emit_envelope_json, parse_axi_flags
 
+    fields_arg, full, toon, _filtered = parse_axi_flags(sys.argv[1:])
     data = load_raw(args.config)
     now = now_utc()
     pairs = [args.pair] if args.pair else sorted(data.keys())
@@ -137,6 +138,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
                 {"pairs": {}},
                 count=0,
                 help=["Add a note with `market-notes add <PAIR> <TEXT>`"],
+                toon=toon,
             )
         else:
             print("(no notes)")
@@ -166,6 +168,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
                 "Run `market-notes add <PAIR> <TEXT>` to append a new note",
                 "Pass --all to include expired notes",
             ],
+            toon=toon,
         )
         return 0
 

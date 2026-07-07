@@ -75,6 +75,7 @@ This repo does NOT own a Python orchestrator that auto-pipes signals to executio
 - Never use `l` as a variable name — ambiguous with `1`, triggers E741.
 - **No backward compatibility.** When you change a public name, signature, or path, update every caller in the same commit. Do not add re-export shims, deprecation aliases, or `*_legacy` modules. The repo is consumed by an LLM that reads fresh `SKILL.md` on every call — there is no installed-base to protect.
 - Commit messages: single line, semantic prefix (`feat:` / `fix:` / `docs:` / `refactor:` / `test:` / `chore:` / `perf:` / `style:` / `build:` / `ci:`). Format: `<prefix>: <imperative summary, lowercase after the prefix>`. Good: `fix: use live Kraken ticker instead of stale daily OHLC close`. Bad: `Fix: address HYPE price issue`, `fix(portfolio): ...\n\nLong body...`.
+- **Bundle post-hoc fixups into the original commit.** A `docs:` or `fix:` patch that lands immediately after a `feat:` commit and only touches what that commit introduced belongs in the original commit, not as a follow-up. Hold the follow-up only when (a) it's independent of the original or (b) there's enough material for a real standalone change. Avoid the "feat + immediate docs fixup" two-step.
 
 ### Per-fix test fixtures are required
 

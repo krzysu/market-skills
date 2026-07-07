@@ -40,7 +40,7 @@ def _help_lines() -> list[str]:
 
 
 def main():
-    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
 
     if len(sys.argv) == 1:
         if maybe_render_home_view(__file__, None, False):
@@ -72,8 +72,7 @@ def main():
             for label, age in state["freshness"].items()
             if age == "no cache"
         ],
-        fields=fields,
-    )
+        fields=fields, toon=toon,)
 
 
 if __name__ == "__main__":

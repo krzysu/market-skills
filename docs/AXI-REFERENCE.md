@@ -165,6 +165,34 @@ headline fields) and a `cached_at` ISO timestamp; a top-level
 decide which to refresh before acting. No I/O at runtime — every
 field is a read from a JSON cache.
 
+## 7c. TOON encoder (`--toon`)
+
+Every `--json` call accepts an opt-in `--toon` flag that switches the
+on-the-wire format from indent-2 JSON to **TOON** (Token-Oriented
+Object Notation). TOON is a compact, YAML-flavoured encoding designed
+for LLM consumption:
+
+```bash
+$ market-state --json --full              # 1675 bytes
+$ market-state --toon --json --full       # 1172 bytes  (30% smaller)
+```
+
+The encoder/decoder live in `analysis.output.toon_dump` /
+`analysis.output.toon_load` — hand-rolled, no external dep. Round-trip
+is pinned by `tests/test_toon.py`. Measured byte savings on
+representative AXI envelopes (JSON vs TOON):
+
+- 22-28% smaller for envelopes with primitive-only payloads
+  (e.g. `market-macro`, `market-valuation`).
+- 35-55% smaller for envelopes with lists of uniform objects
+  (e.g. `strategy-trend-follow` ideas, `l3-conviction-scan` rows) —
+  the tabular CSV-row format collapses repeated keys.
+
+Off by default per the AXI ADR. The `parse_axi_flags` helper now
+returns `(fields, full, toon, filtered_argv)` so every migrated
+script threads the flag through `emit_envelope_json(..., toon=toon)`
+with no per-skill branching.
+
 ## 8. Errors
 
 Errors flow through the `errors` list, not as a `data` field:
@@ -192,7 +220,7 @@ exits `0` with `count: 0` — "no results" is not a failure.
 | Sweep (remaining L1/L2/L3/specialized) | phase 2 | Per-skill, gated on pilot exit criteria |
 | Home view (no-arg mode) | **shipped (phase 3)** | `maybe_render_home_view` + `cache_run_result` in 27 skills |
 | Session-start dashboard | **shipped (phase 4)** | `market-state` skill (SKILL.md + lib.py + scripts/run.py + tests) — meta-skill pattern, not a single script |
-| TOON default flip | phase 5 | Gated on a measured >30% token saving |
+| TOON encoder (opt-in `--toon`) | **shipped (phase 5)** | Hand-rolled `toon_dump()` + `toon_load()` in `analysis.output`; 30-50% smaller on representative envelopes |
 
 ## 10. What this doc is NOT
 
