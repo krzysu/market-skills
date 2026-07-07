@@ -11,7 +11,7 @@ compatibility: "Requires Python 3.12+ and uv"
 
 # position-watchdog
 
-Two kinds of watchdogs: **position protection** (downside alerts for open positions) and **entry zone** (buy-zone monitoring). Both are `no_agent` crons — zero LLM tokens per tick, only print on state changes.
+Two kinds of watchdogs: **position protection** (downside alerts for open positions) and **entry zone** (buy-zone monitoring). Both run as `no_agent` ticks — zero LLM tokens per evaluation, only print on state changes.
 
 ### Position protection watchdog
 
@@ -26,14 +26,14 @@ Monitors open positions with silent hourly checks, fires only on threshold cross
 
 Notifies when a target asset enters a defined buy zone. Tracks previous state via `.json` state file so it fires only on state changes.
 
-One skill, one config (`watches.json`), one cron — watches any number of assets against three logical rule types expressed in two config arrays:
+One skill, one config (`watches.json`), one scheduled evaluation — watches any number of assets against three logical rule types expressed in two config arrays:
 
-> **LLM agent brain**: this skill is the hand-off target when an `execution-kraken-*` `FillConfirmation` returns `status="submitted"` (market accepted, no fill in `--wait-timeout`) or `status="open"` (limit on the book). Do not keep retrying the execution skill — the watchdog detects fills on its own cron. See [`LLM-ORCHESTRATION.md`](../../LLM-ORCHESTRATION.md) §3.
+> **LLM agent brain**: this skill is the hand-off target when an `execution-kraken-*` `FillConfirmation` returns `status="submitted"` (market accepted, no fill in `--wait-timeout`) or `status="open"` (limit on the book). Do not keep retrying the execution skill — the watchdog detects fills on its own tick. See [`LLM-ORCHESTRATION.md`](../../LLM-ORCHESTRATION.md) §3.
 
 - `levels` — price-driven rules covering **position monitoring** (stop, TP ladder, drop warnings, recovery) and **entry-zone tracking** (price-band zones, invalidation floor)
 - `signals` — market-skills L3 strategy evaluation (trend-follow, mean-reversion, etc.) with conviction threshold and cooldown
 
-Per-watch state is persisted across cron ticks. Alerts fire only on state changes (silent on normal ticks). Manual confirmation language preserved — script NEVER executes orders.
+Per-watch state is persisted across evaluation ticks. Alerts fire only on state changes (silent on normal ticks). Manual confirmation language preserved — script NEVER executes orders.
 
 ### Cost-basis gate (MUST-PASS rule)
 
@@ -93,7 +93,7 @@ watch that doesn't pin its own `format_style`.
 | Style | Shape | Use case |
 |-------|-------|----------|
 | `compact` | One-liner, legacy output | Existing pipelines / minimal log noise |
-| `default` | Richer multi-line. Signal events show R-multiples, R:R, entry type + risk% | Open-positions cron, human-readable alerts |
+| `default` | Richer multi-line. Signal events show R-multiples, R:R, entry type + risk% | Open-positions, human-readable alerts |
 | `verbose` | `default` + reasoning + source_skills lines for signal events | Audit / debug / on-call handoff |
 
 Defaults are filename-driven: `open-positions.json` → `default`, every
@@ -271,7 +271,7 @@ Stale state (>24h old) is treated as fresh on the first tick — no alerts fire,
 **Add a new position:**
 1. Open position on the exchange (manual, exchange UI)
 2. Edit `watches.json`: copy the HYPE template, set `enabled: true`, fill `monitor_provider` / `entry_price` / `position_size` / levels
-3. Next `:08`/`:38` tick picks it up
+3. Next evaluation tick picks it up
 
 **Close a position:**
 1. Sell on the exchange
@@ -283,11 +283,9 @@ Stale state (>24h old) is treated as fresh on the first tick — no alerts fire,
 2. Edit `watches.json`: flip `enabled: true`, update fills if needed
 3. Done
 
-## Cron integration
+## Scheduled integration
 
-Run as a `no_agent=true` script-style cron job. Suggested schedule: `8,38 * * * *` (twice per hour, offset from `:00`/`:30` to avoid minute-boundary congestion with other crons).
-
-The wrapper `scripts/run.sh` handles `cd market-skills && uv run python` invocation so the cron can reference it directly. Pass `--config` and `--state-dir` to decouple config and state from the market-skills checkout:
+The skill is designed to be invoked on a recurring schedule (e.g. twice per hour via the host's task scheduler) — `scripts/run.sh` handles the `cd market-skills && uv run python` invocation so any scheduler can reference it directly. Pass `--config` and `--state-dir` to decouple config and state from the market-skills checkout:
 
 ```bash
 bash skills/position-watchdog/scripts/run.sh \

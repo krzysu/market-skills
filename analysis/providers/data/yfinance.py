@@ -3,7 +3,7 @@ import math
 
 import yfinance as yf
 
-from analysis.providers.data._retry import TRANSIENT_EXCEPTIONS, with_retry
+from analysis.providers.data._retry import TRANSIENT_NETWORK, with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class YFinanceProvider:
         try:
             df = with_retry(
                 _do,
-                transient=TRANSIENT_EXCEPTIONS,
+                transient=TRANSIENT_NETWORK,
                 label=f"yfinance.download({ticker})",
                 logger=logger,
             )

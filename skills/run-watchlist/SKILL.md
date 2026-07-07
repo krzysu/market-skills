@@ -1,6 +1,6 @@
 ---
 name: run-watchlist
-description: "Bulk-run L2 + L3 skills + notes across every ticker in a watchlist basket. Fetches candles once per ticker, runs all patterns + strategies in-process, returns aggregated JSON. Use for morning briefs, cron scans, or basket triage."
+description: "Bulk-run L2 + L3 skills + notes across every ticker in a watchlist basket. Fetches candles once per ticker, runs all patterns + strategies in-process, returns aggregated JSON. Use for morning briefs, batch scans, or basket triage."
 version: 0.1.0
 metadata:
   hermes:
@@ -110,7 +110,9 @@ Both `--interval` and `--period` are validated against the supported sets in `an
 
 Precedence: `--tickers` > `basket` positional > all baskets.
 
-## Cron integration
+## Scheduled integration
+
+The skill is designed to be invoked on a recurring schedule (e.g. via the host's task scheduler) — `scripts/run.sh` handles the `cd market-skills && uv run python` invocation so any scheduler can reference it directly:
 
 ```bash
 # Morning brief at 7am

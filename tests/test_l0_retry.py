@@ -13,7 +13,7 @@ import pytest
 from analysis.providers.data._retry import (
     DEFAULT_BASE_DELAY_S,
     DEFAULT_JITTER_S,
-    TRANSIENT_EXCEPTIONS,
+    TRANSIENT_NETWORK,
     with_retry,
 )
 
@@ -163,7 +163,7 @@ def test_does_not_sleep_after_last_attempt():
         with pytest.raises(subprocess.TimeoutExpired):
             with_retry(
                 fn,
-                transient=TRANSIENT_EXCEPTIONS + (subprocess.TimeoutExpired,),
+                transient=TRANSIENT_NETWORK + (subprocess.TimeoutExpired,),
                 attempts=3,
                 label="t",
             )

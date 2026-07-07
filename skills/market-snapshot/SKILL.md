@@ -11,15 +11,15 @@ compatibility: "Requires Python 3.12+ and uv. Sources: same providers as other m
 
 # market-snapshot
 
-Lean chart-visual cross-check designed for the cron pipeline. Returns the three
+Lean chart-visual cross-check designed for batch evaluation. Returns the three
 signals a chart-watcher checks before pulling the trigger: **Supertrend direction**,
 **RSI position**, and **EMA alignment**. The `agrees_with_idea` field summarizes
-whether all three agree on direction — the cron agent uses this to downgrade
-1d L3 ideas that contradict the 4h chart structure.
+whether all three agree on direction — the LLM agent brain uses this to
+downgrade 1d L3 ideas that contradict the 4h chart structure.
 
 ## When to use
 
-- After a 1d L3 idea fires (swing-scan / cron), before flagging `[OPPORTUNITY] ENTRY`
+- After a 1d L3 idea fires (swing-scan / batch), before flagging `[OPPORTUNITY] ENTRY`
 - When cross-TF disagreement (Pattern D) is detected — fetch this on the lower TF
   to determine whether the higher-TF idea is real or noise
 

@@ -24,7 +24,7 @@ venue:
 ## Quick start
 
 ```bash
-# JSON for LLM tool-use (preferred for cron + morning brief)
+# JSON for LLM tool-use (preferred for batch + morning brief)
 uv run skills/market-movers/scripts/run.py --json
 
 # Human-readable
@@ -65,12 +65,12 @@ invoked directly via `subprocess.run` — no Python adapter layer.
 | `--categories-top-n` | 10 | Categories panel size. 0 to skip the panel entirely. |
 | `--retries` | 3 | Per-panel retry count. Final 429 after N attempts → rate-limit escalation for that panel. |
 | `--no-tradable-filter` | off | Skip the `kraken pairs` lookup. Use in CI without the `kraken` CLI on PATH, or when brief size matters and the cross-ref isn't needed. |
-| `--kraken-pairs-ttl-s` | 600 | In-process cache TTL for the AssetPairs response. The brief cron makes at most one subprocess call per day at this default. |
+| `--kraken-pairs-ttl-s` | 600 | In-process cache TTL for the AssetPairs response. A daily brief makes at most one subprocess call per day at this default. |
 | `--json` | off | Emit JSON to stdout (LLM tool-use). |
 
 Exit code is 0 on success and degrade alike — a rate-limited or
-CLI-missing run is a *known-degraded* outcome, not an error. Cron jobs
-can disable the rate-limit log line via
+CLI-missing run is a *known-degraded* outcome, not an error. Scheduled
+runs can disable the rate-limit log line via
 `MARKET_SKILLS_NO_RATE_LIMIT_LOG=1` if needed.
 
 ## Output shape (JSON)

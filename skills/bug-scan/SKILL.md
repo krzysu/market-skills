@@ -1,28 +1,28 @@
 ---
 name: bug-scan
-description: "Classifier-anomaly detector for the swing-scan, morning-brief, and external-scanner crons. Detects Pattern B shapes (absent-with-subs, silent, ghost), sub-signal weight drift, L3 calibration skew, and cross-TF classification contradictions. Audit 2026-06-23 #2."
+description: "Classifier-anomaly detector for swing-scan, morning-brief, and external-scanner workflows. Detects Pattern B shapes (absent-with-subs, silent, ghost), sub-signal weight drift, L3 calibration skew, and cross-TF classification contradictions. Audit 2026-06-23 #2."
 version: 0.1.0
 metadata:
   hermes:
     tags: [market, anomaly, classifier, bug, drift, scan]
     category: markets
-compatibility: "Requires Python 3.12+ and uv. Reads from analysis.contracts helpers (l2_fired, l2_classification). Cron-friendly: --from-state runs offline."
+compatibility: "Requires Python 3.12+ and uv. Reads from analysis.contracts helpers (l2_fired, l2_classification). `--from-state` runs offline against a pre-computed state file."
 ---
 
 # bug-scan
 
 Single source of truth for the classifier-anomaly rules the swing-scan
-cron has been hunting since 2026-06-21. Designed for cron + LLM-agent
-surfacing so morning briefs and external scanners stop missing the same
-anomalies that swing-scan catches.
+workflow has been hunting since 2026-06-21. Designed for both
+automated-tick surfacing and LLM-agent surface so morning briefs and
+external scanners stop missing the same anomalies that swing-scan catches.
 
 ## When to use
 
 - After running `run-all-l2` or `run-all-l3` — pipe the envelope through
   `--from-json` to surface bugs the brief would otherwise miss.
-- From a cron tick (no network): `--from-state` reads the existing
-  swing-scan state tracker and translates its open_findings into the
-  bug-scan envelope.
+- Offline (no network): `--from-state` reads the existing swing-scan
+  state tracker and translates its open_findings into the bug-scan
+  envelope.
 - Standalone for a fresh scan on ad-hoc tickers (does the fetch + run +
   detect all in one call).
 

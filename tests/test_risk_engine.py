@@ -507,7 +507,7 @@ class TestVetComposition:
 
 
 class TestRegimeConsistencyPolicy:
-    """BUG-WEEK-5 per-fix fixtures from LAST_WEEK_BUGS_SPEC.md.
+    """Per-fix regression fixtures for the regime consistency policy.
 
     The policy is intentionally CONCERN-only (never REJECT — risk-engine
     stays advisory; the execution skill's interactive confirm is the real
@@ -631,8 +631,7 @@ class TestRegimeConsistencyPolicy:
     def test_policy_registered_in_spot_policies(self):
         """The policy must be in SPOT_POLICIES so vet() runs it by default.
         Without this, callers would have to opt in via ``policies=`` and the
-        consistency check would silently never fire — the same shape as
-        the original BUG-WEEK-5 silent-pass bug.
+        consistency check would silently never fire.
         """
         from analysis.risk.spot import SPOT_POLICIES
 

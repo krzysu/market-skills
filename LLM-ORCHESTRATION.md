@@ -1,6 +1,6 @@
 # LLM Orchestration
 
-> **Audience**: the LLM agent brain (Hermes, claude-code, custom chat loop).
+> **Audience**: the LLM agent brain.
 > Consumers reading the code do not need this file.
 
 The repo does not own a Python orchestrator. You (the LLM) are the

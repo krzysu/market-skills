@@ -25,12 +25,14 @@ DEFAULT_ATTEMPTS = 3
 DEFAULT_BASE_DELAY_S = 1.0
 DEFAULT_JITTER_S = 0.3
 
-# Exceptions every provider treats as transient. FileNotFoundError is
-# intentionally excluded — a missing CLI binary won't materialise on retry.
-TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
+# Transient exceptions for HTTP / network-based providers (yfinance,
+# ccxt‑via‑requests, etc.).  Excludes OSError because FileNotFoundError
+# (a subclass) is a structural error (missing binary), not a transient
+# network glitch.  Subprocess‑based providers (kraken CLI) should pass
+# their own narrow tuple like (subprocess.TimeoutExpired,).
+TRANSIENT_NETWORK: tuple[type[BaseException], ...] = (
     ConnectionError,  # requests / httpx / ccxt network layer
     TimeoutError,  # built-in timeout
-    OSError,  # subprocess / socket layer
 )
 
 
@@ -47,7 +49,7 @@ def with_retry[T](
     attempts: int = DEFAULT_ATTEMPTS,
     base_delay: float = DEFAULT_BASE_DELAY_S,
     jitter: float = DEFAULT_JITTER_S,
-    transient: tuple[type[BaseException], ...] = TRANSIENT_EXCEPTIONS,
+    transient: tuple[type[BaseException], ...] = TRANSIENT_NETWORK,
     logger: logging.Logger | None = None,
     label: str = "fetch",
 ) -> T:
@@ -58,6 +60,8 @@ def with_retry[T](
     immediately (no retry on schema / JSON / HTTP 4xx errors).
     """
     last_exc: BaseException | None = None
+    if attempts < 1:
+        raise ValueError(f"attempts must be >= 1, got {attempts}")
     for i in range(attempts):
         try:
             return fn()

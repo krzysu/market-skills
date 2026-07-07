@@ -473,10 +473,10 @@ class TestFetchRegimeErrorIsolation:
     def test_yfinance_one_ticker_down_partial(self):
         """If VIX fetch fails (yfinance raises), DXY/US10Y/BTC mcap still work.
 
-        With the BUG-WEEK-2 fix, ``errors`` is non-empty so ``risk_appetite``
-        is downgraded to UNKNOWN (see ``test_missing_input_marks_incomplete``
-        for the canonical fix-shape fixture). Liquidity + sentiment keep
-        their best-effort labels so the LLM can still narrate them.
+        ``errors`` is non-empty so ``risk_appetite`` is downgraded to
+        UNKNOWN (see ``test_missing_input_marks_incomplete`` for the
+        canonical fix-shape fixture). Liquidity + sentiment keep their
+        best-effort labels so the LLM can still narrate them.
         """
         with patch("analysis.macro.requests.get") as mock_get:
             mock_get.side_effect = [
@@ -568,7 +568,7 @@ class TestFetchRegimeErrorIsolation:
         assert sig["regime_note"].startswith("Macro: ")
 
     def test_missing_input_marks_incomplete(self):
-        """Per-fix fixture for BUG-WEEK-2 from LAST_WEEK_BUGS_SPEC.md:
+        """Per-fix fixture for the missing-input-marks-incomplete shape:
 
         when one input source returns None (provider outage, rate-limit,
         schema change), ``regime.incomplete`` must be True and
