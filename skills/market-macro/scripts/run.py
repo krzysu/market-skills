@@ -5,7 +5,9 @@ import sys
 
 from analysis.macro import clear_cache, fetch_regime
 from analysis.output import (
+    cache_run_result,
     emit_envelope_json,
+    maybe_render_home_view,
     parse_axi_flags,
     resolve_fields,
 )
@@ -49,6 +51,9 @@ def _help_lines() -> list[str]:
 def main():
     fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
     json_mode, ttl, write_history = _parse_argv(sys.argv[1:])
+    if len(sys.argv) == 1:
+        if maybe_render_home_view(__file__, None, json_mode):
+            return
     if ttl is None:
         clear_cache()
         kwargs = {"write_history": write_history}
@@ -58,6 +63,7 @@ def main():
 
     if json_mode:
         fields = resolve_fields(fields_arg, full=full, default=["regime", "regime_note", "incomplete"])
+        cache_run_result(__file__, signal)
         emit_envelope_json(
             signal,
             count=None,

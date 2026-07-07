@@ -124,7 +124,7 @@ one-line summary plus a `try:` hint:
 
 ```
 $ uv run skills/market-rsi/scripts/run.py
-last cached: AAPL rsi=42 NEUTRAL on 2026-07-07T14:30:00Z
+last cached: AAPL rsi=42 NEUTRAL on 2026-07-07T14:30:00Z (3h ago)
   try: `market-rsi AAPL --json`
 ```
 
@@ -139,6 +139,18 @@ or pass `--help` to see usage.
 `render_home_view(skill_name, *, command_hint=None)` is the
 constructor. Storage is best-effort — a read failure falls back to
 the hint message; a write failure is silent.
+
+`maybe_render_home_view(script_file, ticker, json_mode)` is the
+main() entry point. Returns `True` when the home view was emitted
+(so the caller should `return`); returns `False` when a ticker was
+given (caller proceeds with the normal analyze path). The
+`script_file` arg is `__file__` — the helper derives the skill
+name from the path.
+
+`cache_run_result(script_file, result)` writes the per-skill state.
+It adds a `cached_at` ISO timestamp and skips silently when
+`result` is `None` or contains an `"error"` key (errors are not
+state).
 
 ## 8. Errors
 
@@ -165,6 +177,7 @@ exits `0` with `count: 0` — "no results" is not a failure.
 | L3 pilots (`strategy-trend-follow`) | phase 1 | `count: N` over `ideas[]` |
 | Batch pilot (`run-all-l3`) | phase 1 | Top-level envelope + `--top=N --fields=` |
 | Sweep (remaining L1/L2/L3/specialized) | phase 2 | Per-skill, gated on pilot exit criteria |
+| Home view (no-arg mode) | **shipped (phase 3)** | `maybe_render_home_view` + `cache_run_result` in 27 skills |
 | Home view + contextual disclosure | phase 3 | No-arg mode shipped skill-by-skill |
 | Session-start dashboard | phase 4 | New `scripts/session-start.py` |
 | TOON default flip | phase 5 | Gated on a measured >30% token saving |

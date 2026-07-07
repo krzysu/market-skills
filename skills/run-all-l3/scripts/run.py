@@ -9,10 +9,10 @@ from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timefr
 from analysis.macro import fetch_regime
 from analysis.notes import load_active as load_notes
 from analysis.output import (
+    cache_run_result,
     emit_envelope_json,
-    empty_state,
+    maybe_render_home_view,
     parse_axi_flags,
-    print_envelope,
     project_fields,
     resolve_fields,
     truncate,
@@ -33,6 +33,13 @@ def _parse_argv(argv):
     for a in argv:
         if a == "--json":
             json_mode = True
+        elif a in ("--help", "-h"):
+            print(
+                "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
+                "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
+                "[--top=N] [--fired-only] [--fields=<csv>] [--full]"
+            )
+            sys.exit(0)
         elif a.startswith("--source="):
             source = a.split("=", 1)[1]
         elif a.startswith("--interval="):
@@ -78,19 +85,14 @@ def main():
     fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
     tickers, json_mode, source, interval, period, include_notes, top, fired_only = _parse_argv(filtered_argv)
     if not tickers:
-        if json_mode:
-            print_envelope(
-                empty_state(
-                    errors=["at least one ticker required"],
-                    help=["Run `run-all-l3 HYPEUSD SOLUSD --json` to scan a pair"],
-                )
-            )
-        else:
-            print(
-                "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
-                "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
-                "[--top=N] [--fired-only] [--fields=<csv>] [--full]"
-            )
+        if maybe_render_home_view(__file__, None, json_mode):
+            return
+        print(
+            "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
+            "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
+            "[--top=N] [--fired-only] [--fields=<csv>] [--full]",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     _lib = load_lib_for_script(__file__)
@@ -146,6 +148,8 @@ def main():
             total_fired_strategies += tick_fired
         out["ideas_count"] = total_ideas
         out["fired_strategies"] = total_fired_strategies
+        out["summary"] = f"{len(tickers)} ticker(s), {total_ideas} L3 idea(s), {total_fired_strategies} strategy/strategies fired"
+        cache_run_result(__file__, out)
         help_lines = [
             "Pass --top=N to cap ideas per ticker (sorted by conviction)",
             "Pass --fired-only to drop strategies that emitted no ideas",

@@ -19,8 +19,10 @@ import sys
 from analysis.formatting import parse_cli_error
 from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
 from analysis.output import (
+    cache_run_result,
     emit_envelope_json,
     empty_state,
+    maybe_render_home_view,
     parse_axi_flags,
     print_envelope,
     resolve_fields,
@@ -49,6 +51,9 @@ def main() -> int:
     p.add_argument("--json", action="store_true", help="Emit JSON envelope to stdout")
 
     fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    if len(sys.argv) == 1:
+        if maybe_render_home_view(__file__, None, False):
+            return 0
     args = p.parse_args(filtered_argv)
 
     try:
@@ -90,6 +95,7 @@ def main() -> int:
                 )
             )
             return 0
+        cache_run_result(__file__, payload)
         emit_envelope_json(
             payload,
             count=len(ideas),
