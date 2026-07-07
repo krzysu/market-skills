@@ -344,13 +344,17 @@ def toon_load(text: str) -> Any:
             return False
         if s.startswith('"') and s.endswith('"'):
             inner = s[1:-1]
-            return (
-                inner.replace("\\n", "\n")
-                .replace("\\r", "\r")
-                .replace("\\t", "\t")
-                .replace('\\"', '"')
-                .replace("\\\\", "\\")
-            )
+            i = 0
+            res = []
+            while i < len(inner):
+                if inner[i] == "\\" and i + 1 < len(inner):
+                    c = inner[i + 1]
+                    res.append({"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}.get(c, c))
+                    i += 2
+                else:
+                    res.append(inner[i])
+                    i += 1
+            return "".join(res)
         if s == "{}":
             return {}
         if s == "[]":
@@ -495,17 +499,8 @@ def render_home_view(skill_name: str, *, command_hint: str | None = None) -> str
     hint = command_hint or f"{skill_name} --json"
     if not state:
         return _HOME_VIEW_FALLBACK.format(cmd=hint)
-    summary = (
-        state.get("summary")
-        or state.get("narrative")
-        or state.get("ticker")
-        or state.get("regime")
-    )
-    ts = (
-        state.get("cached_at")
-        or state.get("timestamp")
-        or state.get("last_run")
-    )
+    summary = state.get("summary") or state.get("narrative") or state.get("ticker") or state.get("regime")
+    ts = state.get("cached_at") or state.get("timestamp") or state.get("last_run")
     body = "last cached state"
     if summary:
         body += f": {summary}"

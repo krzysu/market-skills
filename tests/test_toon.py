@@ -119,6 +119,15 @@ class TestToonRoundTrip:
         env = {"data": {"text": 'He said "hi" and used \\ backslash'}, "count": 0, "errors": [], "help": []}
         assert toon_load(toon_dump(env)) == env
 
+    def test_string_with_literal_escape_sequences(self):
+        env = {
+            "data": {"text": "line1\\nline2\\rline3\\tend"},
+            "count": 0,
+            "errors": [],
+            "help": [],
+        }
+        assert toon_load(toon_dump(env)) == env
+
 
 class TestToonSize:
     def test_dashboard_default_smaller_than_json(self):
