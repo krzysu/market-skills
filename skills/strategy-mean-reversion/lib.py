@@ -11,6 +11,37 @@ from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
 
 
+def _apply_cape_valuation_tag(idea: dict, valuation: dict | None) -> None:
+    """Attach a soft ``veto_reasons`` tag when SP500 CAPE valuation disagrees with the trade.
+
+    Following ADR-0002: the strategy never hard-vetoes. The tag is
+    informational — the LLM agent brain reads the z-score and decides.
+    Conviction is *not* auto-downgraded here; that's the LLM's call.
+
+    Rules:
+      - long  + regime=OVEREXTENDED (z >= 2.0) → "sp500_cape_overextended_z{X.XX}"
+      - short + regime=OVERSOLD     (z <= -2.0) → "sp500_cape_oversold_z{X.XX}"
+      - any other regime (FAIR / ELEVATED / DEPRESSED / UNKNOWN) → no tag
+    """
+    if not valuation or not isinstance(valuation, dict):
+        return
+    regime = (valuation.get("regime") or {}).get("regime")
+    zscore = (valuation.get("regime") or {}).get("cape_zscore")
+    if regime is None or zscore is None:
+        return
+    direction = idea.get("direction")
+    if direction == "long" and regime == "OVEREXTENDED":
+        tag = f"sp500_cape_overextended_z{zscore:.2f}"
+    elif direction == "short" and regime == "OVERSOLD":
+        tag = f"sp500_cape_oversold_z{zscore:.2f}"
+    else:
+        return
+    idea.setdefault("veto_reasons", []).append(tag)
+    existing = idea.get("reasoning", "")
+    if tag not in existing:
+        idea["reasoning"] = f"{existing} [valuation: {regime.lower()} z={zscore:+.2f}]"
+
+
 def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
@@ -19,11 +50,13 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     rsi_mod = load_skill("market-rsi")
     sr_mod = load_skill("market-s-r")
     volty_mod = load_skill("market-volatility")
+    val_mod = load_skill("market-valuation")
 
     err = {"error": "unavailable"}
     rsi_result = rsi_mod.analyze(candles, interval=interval, period=period) if rsi_mod else err
     sr_result = sr_mod.analyze(candles, interval=interval, period=period) if sr_mod else err
     volty_result = volty_mod.analyze(candles, interval=interval, period=period) if volty_mod else err
+    valuation = val_mod.analyze() if val_mod else None
 
     closes = [c[4] for c in candles]
     price = closes[-1]
@@ -112,6 +145,7 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         )
 
     for idea in ideas:
+        _apply_cape_valuation_tag(idea, valuation)
         idea["rr_to_tp"] = compute_rr_to_tp(idea)
         validate_l3_tp_ladder(idea)
 

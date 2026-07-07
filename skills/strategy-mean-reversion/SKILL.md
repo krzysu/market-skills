@@ -39,6 +39,7 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
 | market-rsi | Detect oversold/overbought conditions (L1, composed by L3 directly) |
 | market-s-r | Identify nearest support/resistance levels |
 | market-volatility | Confirm low vol for tighter reversal (L1, composed by L3 directly) |
+| market-valuation | SP500 CAPE z-score — soft `veto_reasons` tag when valuation disagrees with the trade |
 
 ## Entry Logic
 
@@ -53,4 +54,5 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
   - Each idea carries `version: "v1".."v5"` derived from `conviction` via `analysis.contracts.conviction_version()`
   - Each idea carries `take_profit_ideal` (unrounded construction) and `rr_to_tp: [rr_to_tp1, rr_to_tp2, rr_to_tp3]` (precomputed R:R to each TP via `analysis.contracts.compute_rr_to_tp()`) so consumers can read a canonical R:R without reimplementing the direction-asymmetric formula
   - Each idea is validated against `validate_l3_tp_ladder()` (TP3 ≥ entry × 1.05 long, or ≤ entry × 0.95 short). Mean-reversion explicitly guards against degenerate TP3 when `resistance ≈ entry` (falls back to 3R target).
+  - When SP500 CAPE valuation disagrees with the trade direction, each idea carries a soft `veto_reasons` tag (`sp500_cape_overextended_z{X.XX}` for longs during OVEREXTENDED regimes, `sp500_cape_oversold_z{X.XX}` for shorts during OVERSOLD regimes). The tag is informational; conviction is not auto-downgraded. The LLM agent brain reads the tag and decides.
 - `narrative` — summary for user briefing
