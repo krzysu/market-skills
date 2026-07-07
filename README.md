@@ -74,6 +74,7 @@ Live alongside the indicator / data layer. Used by L3 strategies and the cron pi
 | [analysis/contracts.py](./analysis/contracts.py) | TypedDict shapes (`L1Result`, `L2Result`, `L2Pattern`, `L3Result`, `L3Idea`, `RegimeSignal`) + sanity helpers `l2_fired()`, `l2_classification()`, `validate_l3_tp_ladder()`, `conviction_version()` |
 | [analysis/chop.py](./analysis/chop.py) | L3 idea history + `chop_score` conviction-calibration indicator (fraction of recent ideas at conviction ≤ 2). JSON store at `$XDG_DATA_HOME/market-skills/l3_idea_history.json`. Consumed by `bug-scan` to surface the "transition zone" signal |
 | [analysis/macro.py](./analysis/macro.py) | Cross-asset macro fetcher + classifier. `fetch_regime()` returns a `RegimeSignal` (F&G, VIX, DXY, US10Y, BTC.D, total mcap → 3-axis `regime` labels + `regime_note`). In-process TTL cache (300s) and ring buffer at `$XDG_DATA_HOME/market-skills/macro_history.json` (200-entry cap). Best-effort + error-isolated: a single source failure records into `errors[]` and the rest of the signal still returns. |
+| [analysis/valuation.py](./analysis/valuation.py) | SP500 Shiller CAPE z-score fetcher. `fetch_valuation()` returns a `ValuationSignal` (Shiller CAPE + z-score → 5-band `regime` + `regime_note`). In-process TTL cache (3600s) and ring buffer at `$XDG_DATA_HOME/market-skills/valuation_history.json` (200-entry cap). Same best-effort + error-isolated contract as macro. Narrate-only; consumed as a soft `veto_reasons` tag by `strategy-mean-reversion`. |
 | [analysis/decision.py](./analysis/decision.py) | Decision tracing — `DecisionContext` TypedDict (L3 idea, regime, risk verdict, override) + pure-function builder + validator. Records one decision per `intent_id` in the `decisions` table (system of record). |
 
 ### Specialised analysis skills
@@ -95,6 +96,7 @@ Ticker-agnostic environment context for the LLM agent brain — answers "is the 
 | Skill | Purpose |
 |-------|---------|
 | [market-macro](./skills/market-macro/SKILL.md) | Cross-asset macro regime. Ticker-agnostic CLI: `uv run skills/market-macro/scripts/run.py --json`. Returns a `RegimeSignal` with raw inputs (F&G, VIX, DXY, US10Y, BTC.D, total mcap) and derived labels. `--ttl=N` overrides the in-process cache (default 300s); `--no-history` skips the ring-buffer append. |
+| [market-valuation](./skills/market-valuation/SKILL.md) | SP500 Shiller CAPE z-score. Ticker-agnostic CLI: `uv run skills/market-valuation/scripts/run.py --json`. Returns a `ValuationSignal` with raw inputs (SP500, Shiller CAPE, 50y mean/std) and a 5-band `regime` (OVEREXTENDED / ELEVATED / FAIR / DEPRESSED / OVERSOLD). `--ttl=N` overrides the in-process cache (default 3600s — slower-moving than price). Narrate-only; `strategy-mean-reversion` reads it and attaches a soft `veto_reasons` tag when CAPE disagrees with the trade direction. |
 
 ### Diagnostics
 
@@ -156,6 +158,9 @@ uv run skills/market-snapshot/scripts/run.py VVVUSD --interval=4h --period=6mo -
 
 # Macro context (ticker-agnostic) — singleton RegimeSignal for the whole portfolio
 uv run skills/market-macro/scripts/run.py --json
+
+# SP500 valuation context (ticker-agnostic) — singleton ValuationSignal
+uv run skills/market-valuation/scripts/run.py --json
 
 # Stale-idea tracking on cron runs
 uv run skills/run-all-l3/scripts/run.py HYPEUSD SOLUSD --interval=4h --period=6mo --track-ideas --json
@@ -238,6 +243,10 @@ Cross-asset environment (singleton context, runs alongside per-ticker stack):
         │
   analysis/macro.py         fetch_regime (TTL-cached) + classify_regime + history store
 
+  market-valuation          SP500 + Shiller CAPE → ValuationSignal (z-score + regime)
+        │
+  analysis/valuation.py     fetch_valuation (TTL-cached) + classify_regime + history store
+
 Cross-cutting:
   analysis/contracts.py     TypedDicts (L1/L2/L3 + RegimeSignal) + l2_fired / l2_classification / validate_l3_tp_ladder / conviction_version
   analysis/chop.py          chop_score (L3 idea history → conviction-calibration indicator)
@@ -276,6 +285,13 @@ uv run skills/market-ema/scripts/run.py yf:AAPL --json
 | Alternative.me `/fng/` | F&G value + label | Free, no key. Soft-fails on non-200 / parse error. |
 | yfinance `fast_info` (`^VIX`, `DX-Y.NYB`, `^TNX`, `BTC-USD`) | VIX, DXY, US10Y, BTC mcap | Reuses the existing yfinance dep. BTC mcap is sometimes `None` for crypto — the fetcher falls back to CoinGecko's pre-computed `market_cap_percentage.btc`. |
 | CoinGecko `/global` | Total crypto mcap + BTC.D fallback | Free, no key, ~10-30 req/min on the public tier. Sent with a `User-Agent` header. |
+
+`analysis/valuation.py` reads two endpoints for SP500 valuation context:
+
+| Source | Used for | Notes |
+|--------|----------|-------|
+| multpl.com `/shiller-pe` meta tag | Current Shiller CAPE | Free, no key, single HTML scrape (no JS). Regex parses the meta-description tag. Implausibility guard rejects cape > 100 or non-numeric. |
+| yfinance `fast_info` (`^GSPC`) | SP500 spot | Reuses the existing yfinance dep. Labels the CAPE reading with a contemporaneous price for narration. |
 
 ## Conventions
 
