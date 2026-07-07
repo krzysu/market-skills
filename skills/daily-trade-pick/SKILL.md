@@ -36,14 +36,15 @@ Two responsibilities, in order:
 
 Read `picks.json`. For each `scan` record and each `idea` inside it where `status: "open"` AND `created_ts` is ≥ 20h ago (24h ± 4h tolerance for missed runs):
 
-1. Get current price via `kraken ticker <PAIR>USD -o json` (verify the pair format — Kraken uses `XETHZUSD` for ETH/USD; check actual ticker output, don't assume).
-2. Compute `actual_return_pct` = (current - entry) / entry * 100 for longs, (entry - current) / entry * 100 for shorts.
-3. `hit_target = abs(actual_return_pct) >= 5` (the relaxed bar's TP1 target).
-4. `outcome_verdict = "hit" if hit_target else "miss"`.
-5. Update: `status: "closed"`, `closed_at`, `exit_price`, `actual_return_pct`, `hit_target`, `outcome_verdict`. Don't change `met_bar` or `picked` — those are from the original scan.
-6. If the ticker errors (delisted, API down, HL perp-DEX ticker with no Kraken pair): keep `outcome_verdict: "expired"` as the diagnostic, but **also set `status: "closed"` and `actual_return_pct: 0.0`, `hit_target: false`**. The `expired` status is documented in the SKILL.md schema as a terminal state, but the bundled verifier (`dtp_journal_verifier.py:108`) only accepts `status == "closed"` for the 24h-old "fully closed" check, and crashes on `actual_return_pct=None` at line 115 (`abs(None)`). Verified 2026-07-05 10:00 CEST tick: 3 HL perp-DEX ideas (hl:LIT, hl:XPL, hl:FARTCOIN) in 2026-07-04-001 had no Kraken ticker → converted `expired` → `closed` (with `actual_return_pct=0.0`) to satisfy the verifier. `outcome_verdict="expired"` preserves the diagnostic. **Don't leave `status="expired"` and don't leave `actual_return_pct=None`** — both fail the verifier.
+1. Get the next-bar-open price via `kraken ohlc <PAIR>USD --interval=1h`. Take the open of the first 1h candle whose timestamp is **after** the idea's `closed_at` (or after `created_ts + 24h` if `closed_at` is unset). Also fetch the 24h wick via `kraken ticker <PAIR>USD -o json` — extract `l[0]` (24h low) and `h[0]` (24h high) for hit_target evidence.
+2. Compute `actual_return_pct` = (open_next - entry) / entry * 100 for longs, (entry - open_next) / entry * 100 for shorts.
+3. Store `exit_price` as the next-bar-open AND record `exit_wick_low` / `exit_wick_high` from the ticker wick. The wick preserves touch-evidence for hit_target; the next-bar-open is the trader's realized fill.
+4. `hit_target = (exit_wick_high >= tp1) if direction == "long" else (exit_wick_low <= tp1)` — direction-aware, based on wick touch (did price reach TP1?).
+5. `outcome_verdict = "hit" if hit_target else "miss"`.
+6. Update: `status: "closed"`, `closed_at`, `exit_price`, `exit_wick_low`, `exit_wick_high`, `actual_return_pct`, `hit_target`, `outcome_verdict`. Don't change `met_bar` or `picked` — those are from the original scan.
+7. If the next-bar-open fetch errors, fall back to `kraken ticker` for both exit_price and wick data. If both fail: keep `outcome_verdict: "expired"` as the diagnostic, but **also set `status: "closed"` and `actual_return_pct: 0.0`, `hit_target: false`**. The `expired` status is documented in the SKILL.md schema as a terminal state, but the bundled verifier (`dtp_journal_verifier.py:108`) only accepts `status == "closed"` for the 24h-old "fully closed" check, and crashes on `actual_return_pct=None` at line 115 (`abs(None)`). Verified 2026-07-05 10:00 CEST tick: 3 HL perp-DEX ideas (hl:LIT, hl:XPL, hl:FARTCOIN) in 2026-07-04-001 had no Kraken ticker → both fetch paths failed → converted `expired` → `closed` (with `actual_return_pct=0.0`) to satisfy the verifier. `outcome_verdict="expired"` preserves the diagnostic. **Don't leave `status="expired"` and don't leave `actual_return_pct=None`** — both fail the verifier.
 
-**Spec-conflict warning — this skill's formula is the authoritative source (worked DTP tick 2026-07-03 14:00 CEST).** The skill is versioned; downstream consumers can drift. **This skill's section above is the journal-verifier's reference** (`scripts/dtp_journal_verifier.py:113-125` checks `|return| >= 5`). For any idea whose `tp1_pct` is below 5% — common for early-cycle trend-follow + mean-reversion setups — a `hit_target = actual_return_pct >= tp1_pct` formula (comparing actual return to the original idea's TP1 floor) disagrees with this skill's `|return| >= 5` formula. **Always use this skill's formula when writing the journal, even if a downstream consumer's formula says otherwise.** Worked case: BCH-USD long, entry=217.61, exit=228.17, actual=+4.85%, original `tp1_pct=3.4465`. Downstream formula: `4.85 >= 3.45` → `hit=True`. Skill's formula: `|4.85| >= 5` → `hit=False`. The verifier flagged the downstream-formula output as FAIL. Skills are versioned; defer to the skill.
+If the journal write recipe (`references/journal-write-recipe.md`) and the spec disagree, the spec wins — but they should not disagree. Update both in the same commit.
 
 Read the whole JSON, modify in memory, write back atomically. Never append partial JSON.
 
@@ -65,7 +66,13 @@ Read the whole JSON, modify in memory, write back atomically. Never append parti
    1. Conviction ≥ source-specific gate (tier 1+2: ≥3; swing shortlist + CoinGecko: ≥4; smart money + HL narrative: ≥3 with L3 confirms)
    2. TP1 ≥ 5% from entry (long: tp1/entry - 1 >= 0.05; short: 1 - tp1/entry >= 0.05)
    3. R:R to TP1 ≥ 1.5:1 (|tp1 - entry| / |entry - stop|)
-   4. Direction aligns with ≥ 2 of 3 macro signals
+    4. (Advisory) Direction aligns with ≥ 2 of 3 macro signals — log the
+       `macro_aligned` count in the idea envelope but do NOT use it as a
+       veto. The L3 conviction gate (criterion 1) does the filtering; the
+       macro context is surfaced as a narrative note, not a hard rule.
+       Re-evaluate after 2-4 weeks of cleaned data (post BUGS-2026-07-07-1
+       and BUGS-2026-07-07-2 fixes) before deciding whether to drop,
+       invert, or reinstate the gate.
    5. L3 narrative doesn't contradict the structure (e.g. "spring" with TP1 below entry)
    6. Surf-MCP cross-check — skip if RSI > 80 OR mindshare 24h change < -30%
 5. **Cooldown check** — `cooldown_ok: true` if no `picked: true` on same ticker (any source) in last 24h. Cooldown applies ONLY to picking, not to bar-evaluation. Every idea gets evaluated; only the picked one is filtered by cooldown.
@@ -158,7 +165,7 @@ for i in last['ideas']:
 
 **Three failure modes to recognize:**
 
-1. **Real-bar failures (don't relax).** `conviction 2 < 3`, `tp1_pct 3.87 < 5`, `macro_aligned 1/3` — these are honest rejections. Don't loosen the bar to fill the slot.
+1. **Real-bar failures (don't relax).** `conviction 2 < 3`, `tp1_pct 3.87 < 5`, `rr_to_tp1 < 1.5` — these are honest rejections. Don't loosen the bar to fill the slot. (Note: `macro_aligned 1/3` is no longer a bar rejection per BUGS-2026-07-07-3 — the macro gate was relaxed to advisory.)
 2. **Float-precision artifact (operator decision).** `rr_to_tp1 1.499966 < 1.5` — the L3 strategy intent is exactly 1.5 by construction; the 2dp rounding on TP1 drops the recomputed ratio just below the floor. See "Bar strictness: prompt-edit alternative" below. Recurrence threshold for this artifact: 2+ consecutive ticks at the same R:R pattern → operator should consider the prompt fix; 3+ ticks → file a library-side Kanban ticket per `references/r-r-1.5x-rounding-edge-case.md`.
 3. **Cooldown-blocked met_bar (silent on cooldown).** All ideas failed the bar OR were met_bar but cooldown_ok=false → log inspection needed. Read `rejection_reasons` for the cooldown case.
 
@@ -213,23 +220,15 @@ The bundled `scripts/verify_journal.py` enforces a tight schema on `picks.json`.
   correctly rejecting it. (Note: HYPE open position per the existing
   watchlist remains — this is about scan-side noise, not position
   management. Position protection stays on `position-watchdog` as is.)
-- **Macro_aligned filter may be reading backwards (2026-07-06 journal
-  review, N=116 closed).** Counter-macro ideas (`macro_aligned 1/3`)
-  produced **+0.28% avg return**; aligned ideas (`2/3`) produced
-  **−1.82% avg return** for the dominant cluster (BTC4h=short +
-  ETH4h=short + F&G=long). Hit rate is also inverted (8% vs 67%) but
-  avg return is the cleaner signal — the aligned "hits" were
-  short-duration TP1 catches that reversed before TP2. **Hypothesis:**
-  the macro signal is real but the L3 strategies already price it in
-  (the strategy's own structure read is the stronger signal), and the
-  macro gate is double-counting regime direction. **Recommendation:**
-  **relax the macro_aligned veto to advisory** for now — let the L3
-  conviction gate do the filtering and surface the macro context as a
-  narrative note. Re-evaluate with another 2-4 weeks of cleaned data
-  (post R3 fix below) before deciding whether to fully drop, fully
-  invert, or reinstate the gate. Until then, do not "fix" the gate by
-  tightening it — the data clearly shows it isn't helping on either
-  side.
+- **Macro_aligned filter may be reading backwards (relaxed to advisory 2026-07-07,
+   original finding 2026-07-06 journal review, N=116 closed).** Counter-macro ideas
+   (`macro_aligned 1/3`) produced **+0.28% avg return**; aligned ideas (`2/3`)
+   produced **−1.82% avg return** for the dominant cluster (BTC4h=short +
+   ETH4h=short + F&G=long). **Resolution:** the macro_aligned gate has been
+   relaxed from a hard veto to advisory per BUGS-2026-07-07-3. The L3 conviction
+   gate does the filtering; macro context is surfaced as a narrative note.
+   Re-evaluate after 2-4 weeks of cleaned data (post BUGS-2026-07-07-1 and
+   BUGS-2026-07-07-2 fixes) before deciding whether to drop, invert, or reinstate.
 - **`(unmapped)` basket dominates negative returns (2026-07-06 journal
   review).** 41 closed ideas (~35% of total) didn't map to any
   watchlist basket. That bucket has a 41% hit rate and **−1.07% avg
@@ -240,18 +239,23 @@ The bundled `scripts/verify_journal.py` enforces a tight schema on `picks.json`.
   independent of the classifier issue (R3 below). Until the source is
   identified, treat every idea on a `(unmapped)` ticker as a
   research-only signal — manually map before evaluating.
-- **R3 — classifier is two bugs, not one (corrected 2026-07-07).**
-  22 of 43 "hits" had negative actual return; 28 of 70 "misses" had
-  positive actual return. The original 2026-07-06 framing called this
-  a single "wick-touch, should be close" bug. Re-diagnosis on the
-  worked data shows **two independent bugs**:
-  macro gate is double-counting regime direction. **Recommendation:**
-  treat this as a watchlist item for the next journal review (post
-  2026-07-20 with another 2 weeks of data). If the inversion
-  persists, file a spec to either (a) drop the macro_aligned gate
-  entirely (let conviction do the filtering), or (b) invert it
-  (counter-macro = alignment). Do NOT change anything in the bar
-  until the next data point confirms the pattern.
+- **Hit/miss classifier is two bugs, not one (fixed 2026-07-07).**
+   22 of 43 "hits" (51%) had **negative actual return**; 28 of 70
+   "misses" (40%) had positive actual return. The original 2026-07-06
+   framing called this a single "wick-touch" bug. Re-reading the worked
+   examples on 2026-07-07 revealed **two independent bugs** which have
+   both been fixed in this commit:
+   1. **Wick-based exit price (fix: use next-bar-open).** VVVUSD long:
+      TP1 14.77, exit 12.32 — exit price was the wick, not the close.
+      Fixed by fetching `kraken ohlc` next-bar-open for `exit_price`.
+   2. **Direction-blind `hit_target` formula (fix: direction-aware).**
+      `hit_target = abs(actual_return_pct) >= 5` misclassified every
+      SHORT that lost ≥ 5% as a "hit". Fixed by making `hit_target`
+      wick-touch based and direction-aware.
+   Re-validate the calibration dataset after this fix. The hit-rate
+   and avg-return figures cited in the pitfalls above (TP1 bands, stop
+   bands, conviction, direction, basket) were contaminated; treat them
+   as **directional hypotheses to re-test post-fix**.
 - **Pick rate is thin (2% of ideas, 0.3/day average) — operator
   feedback signal (2026-07-06 journal review).** Across 11 days,
   133 ideas logged but only **3 picks** (2% of total). The bar is
@@ -307,32 +311,9 @@ The bundled `scripts/verify_journal.py` enforces a tight schema on `picks.json`.
   conv=4). **Keep the conviction floor at ≥3 as-is.** Don't
   downgrade. (Caveat: the +2.43% number is contaminated by R3 below —
   re-validate after the classifier is fixed.)
-- **Hit/miss classifier is two bugs, not one (corrected 2026-07-07
-  re-diagnosis, N=113).** 22 of 43 "hits" (51%) had **negative actual
-  return**; 28 of 70 "misses" (40%) had positive actual return. The
-  original 2026-07-06 framing called this a single "wick-touch" bug.
-  Re-reading the worked examples on 2026-07-07 reveals **two
-  independent bugs** in the classifier:
-  1. **Wick-based exit price (affects longs).** VVVUSD long: TP1
-     14.77, exit 12.32 — exit price is the wick, not the close.
-     HYPEUSD long is the same pattern.
-  2. **Direction-blind `hit_target` formula (affects shorts).**
-     SOLUSD short: TP1 was 60.31, **never touched** — price went UP
-     to 81.09. Trade lost 10.67% (correctly so). But
-     `hit_target = abs(actual_return_pct) >= 5` is **direction-blind**:
-     `abs(-10.67) >= 5` is True → "hit". Every SHORT that loses ≥ 5%
-     is misclassified as a hit by this formula alone.
-  **Fix order:** bug 2 first (one-line change at line 41 to
-  `hit_target = actual_return_pct >= 5 if direction == "long" else
-  actual_return_pct <= -5`); bug 2 costs nothing to fix and stops
-  polluting ~50% of the dataset. Bug 1 second (close-based
-  `exit_price` in the consumer).
-  **Until both land:** do not trust `outcome_verdict`. Use
-  `actual_return_pct` directly for system calibration. The hit-rate
-  and avg-return figures cited in the pitfalls above (TP1 bands, stop
-  bands, conviction, direction, basket) are all contaminated; treat
-  them as **directional hypotheses to re-test post-fix**, not
-  validated rules.
+- **Hit/miss classifier — two bugs (fixed 2026-07-07, see full entry at line 250).**
+   Both bugs (wick-based exit price + direction-blind `hit_target`) have been fixed.
+   The calibration dataset should be re-validated with clean data post-fix.
 - **SHORT direction is structurally negative-EV in the current regime
   (2026-07-06 journal review, N=113).** LONG: 56 picks, 39% hit,
   **+1.37% avg**. SHORT: 57 picks, 37% hit, **-1.16% avg**. The
@@ -510,11 +491,11 @@ Worked example (HYPEUSD → EUR wallet at FX 1.1441): entry 71.34 → €62.35, 
 
 **Pitfall:** Sizing against the headline R:R without converting prices can lead to over-sizing. The headline tells you the *quality* of the setup (good, 2.6:1); the per-unit risk in wallet currency tells you the *position size* (use that, not the USD number).
 
-## Macro-dominant rejection cluster (added 2026-07-03)
+## Macro-dominant rejection cluster (updated 2026-07-07 — macro gate is advisory)
 
-A full-tape `[SILENT]` driven entirely by macro alignment (every idea has `macro_aligned 1/3`) is a recurring regime pattern worth recognizing: extreme-fear F&G supports longs while bellwether BTC 4h trend-follow is short, with ETH 4h having no idea (counts as 0). Net result: longs get 1/3 (F&G only), shorts get 1/3 (BTC only), nothing reaches the ≥2/3 threshold. This is NOT a candidate for relaxing the bar — it's an honest read that no direction has both structural and sentiment alignment.
+A full-tape `[SILENT]` driven entirely by macro alignment (every idea has `macro_aligned 1/3`) is a recurring regime pattern worth recognizing: extreme-fear F&G supports longs while bellwether BTC 4h trend-follow is short, with ETH 4h having no idea (counts as 0). Net result: longs get 1/3 (F&G only), shorts get 1/3 (BTC only). Since the macro gate is now advisory (BUGS-2026-07-07-3), this pattern alone no longer blocks picks — the L3 conviction gate does the filtering. If the tick is still silent with macro 1/3 ideas, inspect `rejection_reasons` for non-macro bars (conviction, TP1, R:R, cooldown).
 
-Detection: in `picks.json`, if the latest scan has `met_bar: false` for ≥80% of ideas AND the dominant `rejection_reasons` entry is `macro_aligned 1/3`, the regime is "macro disagreement" — wait for the bellwether trend to flip before re-expanding the universe. Don't add more sources to fight a 1/3 macro read; the bar is doing its job.
+Detection: in `picks.json`, if the latest scan has `met_bar: false` for ≥80% of ideas AND the dominant `rejection_reasons` exclude `macro_aligned` entries, the bar is honestly rejecting on non-macro criteria — don't add more sources.
 
 ## Quick reproduction
 

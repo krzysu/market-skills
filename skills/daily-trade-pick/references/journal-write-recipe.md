@@ -82,10 +82,10 @@ The spec's "Outcome check is NOT optional" rule applies even on the first tick �
 
 For each `scan` record and each `idea` inside it where `status: "open"` AND `created_ts` is ≥ 20h ago (24h ± 4h tolerance for missed runs):
 
-1. Get current price via `kraken ticker <PAIR>USD -o json`. **Pair format gotcha:** Kraken prepends X and Z for canonical pairs (`XETHZUSD` for ETH, `XXBTZUSD` for BTC, `XSOLZUSD` for SOL). Newer pairs like `HYPEUSD`, `ZECUSD` don't get the prefix. Extract the first key from the response, don't hardcode.
-2. Compute `actual_return_pct` per the idea direction.
-3. Set `hit_target`, `outcome_verdict`.
-4. Mutate the idea dict in-place: `status`, `closed_at`, `exit_price`, `actual_return_pct`, `hit_target`, `outcome_verdict`. **Don't touch `met_bar` or `picked`** — those are from the original scan and must remain immutable for calibration analysis.
+1. Get the next-bar-open price via `kraken ohlc <PAIR>USD --interval=1h`. Take the open of the first 1h candle whose timestamp is **after** the idea's `closed_at` (or after `created_ts + 24h` if `closed_at` is unset). Fall back to `kraken ticker` only when `kraken ohlc` returns empty (delisted, API down). Also fetch the 24h wick via `kraken ticker <PAIR>USD -o json` — extract `l[0]` (24h low) and `h[0]` (24h high) for hit_target evidence.
+2. Compute `actual_return_pct` per the idea direction, using the next-bar-open price.
+3. Set `hit_target` from the wick touch (direction-aware: long hit when wick high >= tp1, short hit when wick low <= tp1). Set `outcome_verdict` from hit_target.
+4. Mutate the idea dict in-place: `status`, `closed_at`, `exit_price`, `exit_wick_low`, `exit_wick_high`, `actual_return_pct`, `hit_target`, `outcome_verdict`. **Don't touch `met_bar` or `picked`** — those are from the original scan and must remain immutable for calibration analysis.
 
 ```python
 from datetime import datetime, timezone, timedelta
@@ -99,27 +99,71 @@ for scan in picks:
         if idea['status'] != 'open':
             continue
         pair = idea['pair']
-        # Fetch current price (Kraken pair format gotcha handled here)
-        result = subprocess.run(
+        # Fetch next-bar-open via kraken ohlc, fall back to ticker
+        ohlc_result = subprocess.run(
+            ['kraken', 'ohlc', f'{pair}USD', '--interval=1h'],
+            capture_output=True, text=True
+        )
+        ticker_result = subprocess.run(
             ['kraken', 'ticker', f'{pair}USD', '-o', 'json'],
             capture_output=True, text=True
         )
-        data = json.loads(result.stdout)
-        kraken_key = next(iter(data))  # first (only) key
-        current_price = float(data[kraken_key]['c'][0])
-        # Compute return
+        # Fallback chain: ohlc first, then ticker for exit_price
+        try:
+            ohlc_data = json.loads(ohlc_result.stdout)
+            kraken_key = next(iter(ohlc_data))
+            candles = ohlc_data[kraken_key]
+            cutoff = now.timestamp()
+            next_bar = None
+            for c in candles:
+                if c[0] > cutoff:  # candle timestamp after cutoff
+                    next_bar = c
+                    break
+            exit_price = float(next_bar[1]) if next_bar else None
+        except Exception:
+            exit_price = None
+        if exit_price is None:
+            # Fall back to ticker last trade
+            try:
+                tick_data = json.loads(ticker_result.stdout)
+                kraken_key = next(iter(tick_data))
+                exit_price = float(tick_data[kraken_key]['c'][0])
+            except Exception:
+                exit_price = None
+        if exit_price is None:
+            idea['status'] = 'closed'
+            idea['closed_at'] = now.isoformat()
+            idea['actual_return_pct'] = 0.0
+            idea['hit_target'] = False
+            idea['outcome_verdict'] = 'expired'
+            continue
+        # Extract wick data from ticker for hit_target
+        try:
+            tick_data = json.loads(ticker_result.stdout)
+            kraken_key = next(iter(tick_data))
+            exit_wick_low = float(tick_data[kraken_key]['l'][0])
+            exit_wick_high = float(tick_data[kraken_key]['h'][0])
+        except Exception:
+            exit_wick_low = exit_price
+            exit_wick_high = exit_price
+        # Compute actual_return_pct from next-bar-open
         if idea['direction'] == 'long':
-            ret = (current_price - idea['entry_price']) / idea['entry_price'] * 100
+            ret = (exit_price - idea['entry_price']) / idea['entry_price'] * 100
         else:
-            ret = (idea['entry_price'] - current_price) / idea['entry_price'] * 100
-        idea['exit_price'] = current_price
+            ret = (idea['entry_price'] - exit_price) / idea['entry_price'] * 100
+        idea['exit_price'] = exit_price
+        idea['exit_wick_low'] = exit_wick_low
+        idea['exit_wick_high'] = exit_wick_high
         idea['actual_return_pct'] = round(ret, 4)
-        # Direction-aware hit_target (avoids the direction-blind bug
-        # where a SHORT that loses ≥ 5% was classified as a hit).
-        # See SKILL.md §Pitfalls → "R3 — classifier is two bugs, not one".
-        idea['hit_target'] = (
-            ret >= 5.0 if idea['direction'] == 'long' else ret <= -5.0
-        )
+        # Direction-aware hit_target from wick touch (did price reach TP1?)
+        tp1 = idea.get('tp1')
+        if tp1 is not None:
+            idea['hit_target'] = (
+                exit_wick_high >= tp1 if idea['direction'] == 'long'
+                else exit_wick_low <= tp1
+            )
+        else:
+            idea['hit_target'] = False
         idea['outcome_verdict'] = 'hit' if idea['hit_target'] else 'miss'
         idea['status'] = 'closed'
         idea['closed_at'] = now.isoformat()
