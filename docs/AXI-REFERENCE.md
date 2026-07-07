@@ -222,6 +222,10 @@ exits `0` with `count: 0` — "no results" is not a failure.
 | Session-start dashboard | **shipped (phase 4)** | `market-state` skill (SKILL.md + lib.py + scripts/run.py + tests) — meta-skill pattern, not a single script |
 | TOON encoder (opt-in `--toon`) | **shipped (phase 5)** | Hand-rolled `toon_dump()` + `toon_load()` in `analysis.output`; 30-50% smaller on representative envelopes |
 
+Post-phase-5 backlog (risk/execution envelope migration, per-user-data
+subcommands, perps funding, TOON default-flip decision) is tracked in
+[`AXI-REMAINING.md`](./AXI-REMAINING.md).
+
 ## 10. What this doc is NOT
 
 - **Not the failure-mode contract** — see `LLM-ORCHESTRATION.md` for

@@ -7,6 +7,11 @@ we chose, and the consequences we accepted.
 `ARCHITECTURE.md` is the descriptive "what the system is" doc — it links
 here for the "why we built it this way" record.
 
+For "what's still left to ship" — see
+[`AXI-REMAINING.md`](../AXI-REMAINING.md) for the post-phase-5 backlog of
+AXI rollout work (out-of-scope skills, per-user-data subcommands, perps
+funding, TOON default-flip decision).
+
 ## How to add a new ADR
 
 1. Pick the next number (`ls docs/adr/` to find the highest current).

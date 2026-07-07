@@ -65,7 +65,11 @@ Read the whole JSON, modify in memory, write back atomically. Never append parti
 4. **Bar evaluation** (per-source — see `references/multi-source-design.md`):
    1. Conviction ≥ source-specific gate (tier 1+2: ≥3; swing shortlist + CoinGecko: ≥4; smart money + HL narrative: ≥3 with L3 confirms)
    2. TP1 ≥ 5% from entry (long: tp1/entry - 1 >= 0.05; short: 1 - tp1/entry >= 0.05)
-   3. R:R to TP1 ≥ 1.5:1 (|tp1 - entry| / |entry - stop|)
+    3. R:R to TP1 ≥ 1.5:1 — use the idea's precomputed `rr_to_tp1` (derived from unrounded
+       `take_profit_ideal` by `analysis.contracts.compute_rr_to_tp`).  Do NOT recompute from
+       the 2dp-display `tp1` — rounding drops the last 0.5% of ideas that are structurally
+       correct at 1.5:1.  Fallback when `rr_to_tp1` is absent:
+       `abs(|tp1 - entry| - 1.5 * |entry - stop|) <= 1e-3 * |entry - stop|`.
     4. (Advisory) Direction aligns with ≥ 2 of 3 macro signals — log the
        `macro_aligned` count in the idea envelope but do NOT use it as a
        veto. The L3 conviction gate (criterion 1) does the filtering; the
@@ -76,9 +80,10 @@ Read the whole JSON, modify in memory, write back atomically. Never append parti
    5. L3 narrative doesn't contradict the structure (e.g. "spring" with TP1 below entry)
    6. Surf-MCP cross-check — skip if RSI > 80 OR mindshare 24h change < -30%
 5. **Cooldown check** — `cooldown_ok: true` if no `picked: true` on same ticker (any source) in last 24h. Cooldown applies ONLY to picking, not to bar-evaluation. Every idea gets evaluated; only the picked one is filtered by cooldown.
-6. **Pick logic (top-3 cap)** — if any idea has `met_bar: true` AND `cooldown_ok: true`, pick the top 3 by R:R descending. Tie-break: conviction desc, source priority (tier 1+2 > swing_shortlist > coingecko_movers > smart_money > hl_narrative), tier (1 before 2), ticker alphabetical. Set `picked: true` on each of the top 3 and `picked: false` on the rest. Each picked idea gets `suggested_size_eur` from its source's cap (tier 1+2: EUR 200; swing + coingecko + smart money: EUR 100; hl_narrative: EUR 50 perp notional).
-7. **If `met_bar` ideas exist but all fail cooldown OR none make the top-3 cap** → `[SILENT]` (no Telegram pick), but journal scan record is still written with all of them.
-8. **If no idea meets the bar** → `[SILENT]`, journal written.
+6. **Pick logic (top-3 cap)** — if any idea has `met_bar: true` AND `cooldown_ok: true`, pick the top 3 by R:R descending. Tie-break: conviction desc, source priority (tier 1+2 > swing_shortlist > coingecko_movers > smart_money > hl_narrative), tier (1 before 2), ticker alphabetical. Set `picked: true` on each of the top 3 and `picked: false` on the rest. Each picked idea gets `suggested_size_eur` from its source's cap (tier 1+2: EUR 200; swing + coingecko + smart money: EUR 100; hl_narrative: EUR 50 perp notional), then adjusted by the track-record multiplier (step 7).
+7. **Track-record sizing multiplier (advisory)** — for each picked idea, compute `from analysis.track_record import compute_track_record; track_record = compute_track_record(pair, picks=<journal>)` over the last 20 scans (min 3 closed outcomes to be eligible). Set `suggested_size_eur = base_cap * track_record['multiplier']`, clamped to `base_cap * 3.0`. Record the track record on the picked idea as `_track_record: {hit_rate, n_closed, n_hits, n_misses, avg_return_pct, multiplier}` for downstream visibility. When `track_record['eligible']` is False (no history, < 3 closed, or lookback exhausted), `suggested_size_eur` stays at the base cap and `_track_record` is `{eligible: false, multiplier: 1.0}`.
+8. **If `met_bar` ideas exist but all fail cooldown OR none make the top-3 cap** → `[SILENT]` (no Telegram pick), but journal scan record is still written with all of them.
+9. **If no idea meets the bar** → `[SILENT]`, journal written.
 
 ## Journal schema
 
@@ -109,8 +114,9 @@ State file: the path in `$MARKET_SKILLS_DAILY_TRADE_PICK_PATH`. Top-level is a J
          "met_bar": bool,
          "picked": bool,
          "rejection_reasons": ["conviction 2 < 3", "tp1_pct 3.2 < 5", ...] or [],
-         "suggested_size_eur": float (only for picked),
-         "cooldown_ok": bool,
+          "suggested_size_eur": float (only for picked),
+          "_track_record": {"eligible": bool, "hit_rate": float, "n_closed": int, "multiplier": float} (optional, only for picked),
+          "cooldown_ok": bool,
          "status": "open" | "closed" | "expired",
          "closed_at": "ISO-8601 UTC" or null,
          "exit_price": float or null,
@@ -396,6 +402,7 @@ v0.7.0 — added 7 data-backed pitfalls to the Pitfalls section from the 2026-07
 - `references/dtp-journal-verifier-shape.md` — every FAIL line the bundled `dtp_journal_verifier.py` emits, with line numbers, triggers, and how to respond. Use this when the verifier exits 1 after a non-silent tick. **(added 2026-07-05)**
 - `scripts/verify_journal.py` — re-runnable ad-hoc verifier for the journal write. Checks JSON parseability, scan envelope, required idea fields, age-bucketed status (24h+ must be closed, <20h must be open), and picked-requires-met_bar invariant. Run after every journal write (see Verifier quirks above).
 - `scripts/analyze_journal.py` — offline journal analyzer. Run when the user asks "how are daily picks going" or "anything we can learn". Aggregates by hit/miss, ticker, direction, conviction, macro alignment, and day. Surfaces the actionable cuts (which tickers to drop, which filters are inverted, what the pick rate looks like). Pure stdout, no journal writes.
+- `scripts/backfill_outcomes.py` — one-off backfill that re-derives `actual_return_pct`, `hit_target`, and `outcome_verdict` for closed ideas using the current post-fix formulas (direction-aware, wick-based). Run once after BUGS-2026-07-07 fixes land to clean up the journal. Idempotent, supports `--dry-run`.
 
 ## L3 envelope iteration recipe (added 2026-07-03)
 
