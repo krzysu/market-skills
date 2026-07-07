@@ -5,9 +5,20 @@ Ticker convention:
   - Bare name: auto-detected via ``supports()`` (checks HL perpetual markets).
 """
 
+import logging
 import time
 
+import ccxt
 from hyperliquid.ccxt.hyperliquid import hyperliquid
+
+from analysis.providers.data._retry import with_retry
+
+logger = logging.getLogger(__name__)
+
+# ccxt transient errors (network glitches, request timeouts). ExchangeError
+# and BadRequest are intentionally excluded — those are 4xx / business-rule
+# responses, not retryable.
+_CCXT_TRANSIENT: tuple[type[BaseException], ...] = (ccxt.NetworkError,)
 
 _INTERVAL_MAP = {
     "1m": "1m",
@@ -76,9 +87,17 @@ class HyperliquidProvider:
         since = _period_to_since_ms(period)
         symbol = _to_symbol(ticker)
 
-        try:
+        def _do():
             self._ensure_markets()
-            ohlcv = self._exchange.fetch_ohlcv(symbol, hl_interval, since)
+            return self._exchange.fetch_ohlcv(symbol, hl_interval, since)
+
+        try:
+            ohlcv = with_retry(
+                _do,
+                transient=_CCXT_TRANSIENT,
+                label=f"hyperliquid.ohlcv({symbol})",
+                logger=logger,
+            )
         except Exception:
             return []
 
@@ -98,9 +117,18 @@ class HyperliquidProvider:
 
     def fetch_funding_rate(self, ticker: str) -> dict | None:
         symbol = _to_symbol(ticker)
-        try:
+
+        def _do():
             self._ensure_markets()
-            rate = self._exchange.fetch_funding_rate(symbol)
+            return self._exchange.fetch_funding_rate(symbol)
+
+        try:
+            rate = with_retry(
+                _do,
+                transient=_CCXT_TRANSIENT,
+                label=f"hyperliquid.funding_rate({symbol})",
+                logger=logger,
+            )
             if rate:
                 return {
                     "funding_rate": rate.get("fundingRate"),
@@ -110,8 +138,17 @@ class HyperliquidProvider:
         except Exception:
             pass
 
+        def _history():
+            self._ensure_markets()
+            return self._exchange.fetch_funding_rate_history(symbol, limit=30)
+
         try:
-            history = self._exchange.fetch_funding_rate_history(symbol, limit=30)
+            history = with_retry(
+                _history,
+                transient=_CCXT_TRANSIENT,
+                label=f"hyperliquid.funding_rate_history({symbol})",
+                logger=logger,
+            )
             if history:
                 avg = sum(float(h["fundingRate"]) for h in history) / len(history)
                 return {"funding_rate_avg_30": avg}

@@ -1,5 +1,10 @@
 import json
+import logging
 import subprocess
+
+from analysis.providers.data._retry import with_retry
+
+logger = logging.getLogger(__name__)
 
 _INTERVAL_MAP = {
     "1d": 1440,
@@ -25,14 +30,28 @@ class KrakenProvider:
         if pair in self._cache:
             return self._cache[pair]
 
-        try:
-            result = subprocess.run(
+        def _do():
+            return subprocess.run(
                 ["kraken", "pairs", "--pair", pair, "-o", "json"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+
+        # Transient tuple is intentionally narrow: subprocess.TimeoutExpired only.
+        # OSError is excluded because FileNotFoundError (CLI not in PATH) inherits
+        # from OSError — retrying it would waste 7s before giving up.
+        try:
+            result = with_retry(
+                _do,
+                transient=(subprocess.TimeoutExpired,),
+                label=f"kraken.pairs({pair})",
+                logger=logger,
+            )
+        except FileNotFoundError:
+            self._cache[pair] = False
+            return False
+        except subprocess.TimeoutExpired:
             self._cache[pair] = False
             return False
 
@@ -65,12 +84,21 @@ class KrakenProvider:
         ``None`` if the call fails (CLI missing, timeout, bad JSON, no fields).
         """
         pair = ticker.replace("-", "").replace("/", "").upper()
-        try:
-            result = subprocess.run(
+
+        def _do():
+            return subprocess.run(
                 ["kraken", "ticker", pair, "-o", "json"],
                 capture_output=True,
                 text=True,
                 timeout=10,
+            )
+
+        try:
+            result = with_retry(
+                _do,
+                transient=(subprocess.TimeoutExpired,),
+                label=f"kraken.ticker({pair})",
+                logger=logger,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None
@@ -125,8 +153,17 @@ class KrakenProvider:
             return []
 
         args = ["kraken", "ohlc", pair, "--interval", str(kraken_interval), "-o", "json"]
+
+        def _do():
+            return subprocess.run(args, capture_output=True, text=True, timeout=30)
+
         try:
-            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+            result = with_retry(
+                _do,
+                transient=(subprocess.TimeoutExpired,),
+                label=f"kraken.ohlc({pair})",
+                logger=logger,
+            )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return []
 

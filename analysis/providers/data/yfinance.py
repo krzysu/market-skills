@@ -1,6 +1,11 @@
+import logging
 import math
 
 import yfinance as yf
+
+from analysis.providers.data._retry import TRANSIENT_EXCEPTIONS, with_retry
+
+logger = logging.getLogger(__name__)
 
 
 class YFinanceProvider:
@@ -10,8 +15,16 @@ class YFinanceProvider:
         return True
 
     def fetch(self, ticker: str, interval: str = "1d", period: str = "1y") -> list[list]:
+        def _do():
+            return yf.download(ticker, interval=interval, period=period, progress=False, auto_adjust=True)
+
         try:
-            df = yf.download(ticker, interval=interval, period=period, progress=False, auto_adjust=True)
+            df = with_retry(
+                _do,
+                transient=TRANSIENT_EXCEPTIONS,
+                label=f"yfinance.download({ticker})",
+                logger=logger,
+            )
         except Exception:
             return []
 
