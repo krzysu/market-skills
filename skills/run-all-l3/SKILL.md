@@ -69,3 +69,7 @@ output of this runner and run their own state-tracking step. The runner's
 JSON envelope (`tickers[ticker].strategies[*].ideas[]`) is stable and
 self-describing — any consumer can read `entry_price`, `take_profit[0]`,
 and `direction` to compute progress and staleness on their own terms.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

@@ -61,3 +61,7 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
 - `tickers[ticker].skills[l2_name]` — full L2 result for each skill
 - `tickers[ticker].skills[l2_name].error` — error string if skill failed
 - Non-JSON mode: one line per skill showing present + classification
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

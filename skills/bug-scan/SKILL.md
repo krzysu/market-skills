@@ -106,3 +106,7 @@ Use `--json` to get the full list unsorted.
 - Detection rules use `analysis.contracts.l2_fired` and
   `l2_classification` (the single source of truth for "did the L2
   actually fire?") — never raw `pattern.get("classification")`.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count (findings for `bug-scan`, ranked ideas for `l3-conviction-scan`, total journal entries for `daily-trade-pick`), `help[]` is contextual next-step command templates.

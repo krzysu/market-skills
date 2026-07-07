@@ -32,6 +32,13 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from analysis.output import (
+    emit_envelope_json,
+    empty_state,
+    parse_axi_flags,
+    resolve_fields,
+)
+
 ENV_VAR = "MARKET_SKILLS_DAILY_TRADE_PICK_PATH"
 
 
@@ -227,7 +234,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--json", action="store_true", help="Emit JSON envelope to stdout")
     ap.add_argument("--journal", type=Path, default=None, help=f"Path to picks.json (overrides ${ENV_VAR})")
-    args = ap.parse_args()
+
+    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    args = ap.parse_args(filtered_argv)
 
     try:
         journal = resolve_journal_path(args.journal)
@@ -237,7 +246,25 @@ def main() -> int:
 
     ideas = load_ideas(journal)
     if args.json:
-        print(json.dumps(render_json(ideas), indent=2, default=str))
+        if not ideas:
+            print(json.dumps(empty_state(help=[
+                "Add entries to the journal first",
+                "Pass --full for the full payload or --fields=<csv> to project",
+            ])))
+            return 0
+        payload = render_json(ideas)
+        emit_envelope_json(
+            payload,
+            count=payload.get("total_ideas", 0),
+            help=[
+                "Pass --full for the full payload or --fields=<csv> to project",
+            ],
+            fields=resolve_fields(
+                fields_arg,
+                full=full,
+                default=["total_ideas", "hit_rate", "by_ticker", "by_direction", "recent_7d"],
+            ),
+        )
     else:
         print(render_text(ideas))
     return 0

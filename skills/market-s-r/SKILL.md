@@ -85,3 +85,7 @@ Then `read_file /tmp/sr.json` and grep `clustered_levels`.
 - Zone identification: consecutive levels within 2% of each other form a zone
 
 See `references/swing-levels-extraction.md` for the full pattern + worked examples.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

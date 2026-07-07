@@ -10,6 +10,31 @@ uv run pytest tests/             # all tests
 uv run pytest tests/test_X.py -v # single file
 ```
 
+## Output conventions (AXI envelope)
+
+Every skill's `--json` mode emits the canonical AXI envelope
+([ADR-0004](./docs/adr/0004-axi-adoption.md),
+[`docs/AXI-REFERENCE.md`](./docs/AXI-REFERENCE.md)):
+
+```json
+{"data": <payload>, "count": N, "errors": [], "help": ["..."]}
+```
+
+| Helper | Source | Use |
+|--------|--------|-----|
+| `envelope(data, *, count, help, errors, fields)` | `analysis.output` | Construct the envelope |
+| `emit_envelope_json(data, ...)` | `analysis.output` | Print the envelope to stdout |
+| `project_fields(d, fields)` | `analysis.output` | `--fields=` projection |
+| `truncate(text, limit, hint)` | `analysis.output` | Narrative / thesis capping |
+| `empty_state(help, errors)` | `analysis.output` | AXI principle 5 zero result |
+| `render_home_view(skill_name)` | `analysis.output` | No-arg mode dashboard |
+| `write_state_cache(skill_name, payload)` | `analysis.output` | Home-view state store |
+
+The lib.py contracts (`L1Result`, `L2Result`, `L3Result`, `L3Idea`,
+`RegimeSignal`, `RiskVerdict`, `FillConfirmation`, `Intent`) are
+unchanged — the envelope wraps them at the `scripts/run.py` boundary.
+TOON ships as opt-in behind `--toon`; the default is indent-2 JSON.
+
 ## Architecture
 
 - **`docs/adr/` holds dated architecture decision records.** Read the

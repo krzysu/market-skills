@@ -532,3 +532,7 @@ uv run skills/run-all-l3/scripts/run.py BTC-USD ETH-USD HYPE-USD NEAR-USD ZEC-US
 # 3. Verify journal
 python3 -c "import json; d=json.load(open('$MARKET_SKILLS_DAILY_TRADE_PICK_PATH')); print(f'Scans: {len(d)}, latest met_bar: {sum(1 for i in d[-1][\"ideas\"] if i[\"met_bar\"])}, picked: {sum(1 for i in d[-1][\"ideas\"] if i[\"picked\"])}')"
 ```
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count (findings for `bug-scan`, ranked ideas for `l3-conviction-scan`, total journal entries for `daily-trade-pick`), `help[]` is contextual next-step command templates.

@@ -371,3 +371,40 @@ def compute_rr_to_tp(idea: dict) -> list[float]:
     if denom <= 0:
         return []
     return [round((tp - entry) / denom, 6) for tp in tps]
+
+
+# --- AXI output envelope (see ADR-0004 + docs/AXI-REFERENCE.md) ---
+
+
+class AXIEnvelope(TypedDict, total=False):
+    """Canonical on-the-wire envelope emitted by every skill's `--json` mode.
+
+    The envelope is the contract between the CLI surface and the LLM
+    agent brain; the in-process TypedDicts above (L1Result, L2Result,
+    L3Result, RiskVerdict, FillConfirmation, etc.) describe the
+    lib.py contracts and are not affected by this shape.
+
+    Field semantics:
+
+      data   - skill-specific payload. May be a singleton dict, a
+               list, or None for empty results (AXI principle 5:
+               explicit zero-result, not bare empty).
+      count  - canonical item count. Single-item skills use 1;
+               list-returning skills use len(data) or a
+               pre-computed aggregate (AXI principle 4). None
+               when count is undefined (e.g. macro regime).
+      errors - list of structured error strings. Always a list
+               (empty when unset) so consumers never branch on
+               None. Replaces the bare `{"error": "..."}`
+               pattern that scattered across per-skill scripts
+               (AXI principle 6: structured errors).
+      help   - list of next-step command templates the LLM can
+               drop into narration verbatim (AXI principle 9:
+               contextual disclosure). Always a list, empty
+               when unset.
+    """
+
+    data: Any
+    count: int | None
+    errors: list[str]
+    help: list[str]

@@ -55,3 +55,7 @@ Golden cross (21 crossing above 50) is bullish reversal. Death cross is bearish.
 - Needs 220+ daily candles for EMA(200). Tickers with less history get an error.
 - EMA alignment lags price — best used for structure, not timing.
 - Combine with `market-rsi` for oversold entries aligned with trend.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

@@ -5,8 +5,17 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import emit_json, print_header, require_ticker, safe_parse_args
+from analysis.formatting import print_header, require_ticker, safe_parse_args
+from analysis.output import (
+    emit_envelope_json,
+    empty_state,
+    parse_axi_flags,
+    print_envelope,
+    resolve_fields,
+)
 from analysis.skill_loader import load_lib_for_script
+
+DEFAULT_FIELDS = ["ticker", "squeeze_on", "momentum", "direction", "signal"]
 
 
 def analyze(ticker, *, source=None, interval="1d", period="1y"):
@@ -30,27 +39,47 @@ def analyze(ticker, *, source=None, interval="1d", period="1y"):
         "interval": interval,
         "period": period,
         "candles_used": len(candles),
-        "indicators": result,
-        "score": None,
+        "current_price": result.get("current_price"),
+        "squeeze_on": result.get("squeeze_on"),
+        "momentum": result.get("momentum"),
+        "direction": result.get("direction"),
         "signal": result.get("signal"),
-        "zone": result.get("zone"),
+        "histogram_recent": result.get("histogram_recent"),
     }
 
 
+def _help_lines(ticker: str) -> list[str]:
+    return [
+        f"Run `market-volatility {ticker} --json` for realized vol context",
+        f"Run `market-breakout {ticker} --json` for breakout confirmation",
+        "Pass --full for the full payload or --fields=<csv> to project",
+    ]
+
+
 def main():
-    ticker, json_mode, source, interval, period = safe_parse_args(sys.argv[1:])
+    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    ticker, json_mode, source, interval, period = safe_parse_args(filtered_argv)
     require_ticker(ticker, json_mode)
     result = analyze(ticker, source=source, interval=interval, period=period)
 
     if json_mode:
-        emit_json(result)
+        if "error" in result:
+            print_envelope(empty_state(errors=[result["error"]], help=_help_lines(ticker or "TICKER")))
+            return
+        fields = resolve_fields(fields_arg, full=full, default=DEFAULT_FIELDS)
+        emit_envelope_json(
+            result,
+            count=1,
+            help=_help_lines(ticker),
+            fields=fields,
+        )
         return
 
     if "error" in result:
         print(f"  {ticker}: {result['error']}")
         return
 
-    ind = result["indicators"]
+    ind = result
     print_header("SQUEEZE MOMENTUM")
     print(f"  {ticker}  (price: {ind.get('current_price', 0):,.2f})")
     print(f"    Squeeze:    {'ON \u2014 compression' if ind.get('squeeze_on') else 'OFF \u2014 released'}")

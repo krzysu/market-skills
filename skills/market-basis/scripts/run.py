@@ -4,7 +4,7 @@
 import sys
 
 from analysis.data import fetch_funding_rate, fetch_ohlc
-from analysis.formatting import emit_json, print_header, safe_round
+from analysis.formatting import print_header, safe_round
 from analysis.indicators import (
     classify_ema_trend,
     classify_squeeze,
@@ -14,6 +14,13 @@ from analysis.indicators import (
     extract_ohlcv,
 )
 from analysis.intervals import validate_timeframe
+from analysis.output import (
+    emit_envelope_json,
+    empty_state,
+    parse_axi_flags,
+    print_envelope,
+    resolve_fields,
+)
 
 
 def _analyze_one(data, label):
@@ -139,6 +146,8 @@ def main():
     parser.add_argument("--json", action="store_true", help="JSON output")
     args = parser.parse_args()
 
+    fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
+
     try:
         result = analyze(args.ticker, source=args.source, interval=args.interval, period=args.period)
     except ValueError as e:
@@ -146,7 +155,25 @@ def main():
         sys.exit(2)
 
     if args.json:
-        emit_json(result)
+        if "error" in result:
+            print_envelope(empty_state(errors=[result["error"]], help=[
+                "Try a different --source (ccxt:binance, ccxt:bybit, etc.)",
+                "Pass --full for the full payload or --fields=<csv> to project",
+            ]))
+            return
+        fields = resolve_fields(
+            fields_arg,
+            full=full,
+            default=["ticker", "interval", "funding", "basis", "divergences"],
+        )
+        emit_envelope_json(
+            result,
+            count=1,
+            help=[
+                "Pass --full for the full payload or --fields=<csv> to project",
+            ],
+            fields=fields,
+        )
         return
 
     if "error" in result:

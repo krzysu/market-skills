@@ -174,3 +174,7 @@ shaped call. `sleeper` defaults to `time.sleep` and tests pass a no-op;
 The CLI parses flags, calls the lib, prints either JSON or a formatted
 table. No DB, no portfolio context, no env-mutating side effects beyond
 the CoinGecko rate-limit log.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

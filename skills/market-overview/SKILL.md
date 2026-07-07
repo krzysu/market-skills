@@ -48,3 +48,7 @@ The unified score weights each component and normalizes to 0-100. For details, s
 - Tickers with insufficient data are skipped and noted in errors.
 - The default watchlist is a suggestion — pass your own tickers for custom screening.
 - This is a screening tool, not a trading signal. Verify individual setups with `market-trend-quality`.
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

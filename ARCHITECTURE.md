@@ -4,6 +4,25 @@
 > This document describes **what the system is**. ADRs describe
 > **why we built it this way**.
 
+## Output conventions
+
+Every skill's `--json` mode emits the canonical AXI envelope
+(ADR-0004): `{data, count, errors, help[]}`. The envelope is the
+on-the-wire contract; the in-process TypedDicts
+(`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal` /
+`RiskVerdict` / `FillConfirmation` / `Intent`) describe the lib.py
+contracts and are unchanged.
+
+| Layer | Contract module | Reference |
+|-------|-----------------|-----------|
+| On-the-wire envelope | `analysis.output` | [`docs/AXI-REFERENCE.md`](./AXI-REFERENCE.md) |
+| In-process TypedDicts | `analysis.contracts` | `L1Result`, `L2Result`, `L3Result`, `RiskVerdict`, `FillConfirmation` |
+| Failure-mode workflow | (doc only) | [`LLM-ORCHESTRATION.md`](./LLM-ORCHESTRATION.md) |
+
+TOON is opt-in behind `--toon` (phase 5). The default is indent-2
+JSON. Migration to TOON-by-default is gated on a measured
+>30% token saving across the phase-1 pilot.
+
 ## Status
 
 A composable technical-analysis + execution stack. L1 indicator skills,

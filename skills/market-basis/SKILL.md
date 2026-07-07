@@ -52,3 +52,7 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
 - Some exchanges update funding every 8h, others every 1h or 4h
 - Lightly traded perps may have stale or erratic funding data
 - Best paired with `market-trend-quality` and `market-squeeze` for directional context
+
+## Output envelope (AXI)
+
+`--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

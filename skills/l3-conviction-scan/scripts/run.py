@@ -16,8 +16,15 @@ Usage:
 import argparse
 import sys
 
-from analysis.formatting import emit_json, parse_cli_error
+from analysis.formatting import parse_cli_error
 from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
+from analysis.output import (
+    emit_envelope_json,
+    empty_state,
+    parse_axi_flags,
+    print_envelope,
+    resolve_fields,
+)
 from analysis.skill_loader import load_lib_for_script
 
 
@@ -40,7 +47,9 @@ def main() -> int:
     p.add_argument("--top", type=int, default=None, help="Cap output rows to top N by conviction")
     p.add_argument("--narrative", action="store_true", help="Append top-5 strategy narratives after the table")
     p.add_argument("--json", action="store_true", help="Emit JSON envelope to stdout")
-    args = p.parse_args()
+
+    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    args = p.parse_args(filtered_argv)
 
     try:
         validate_timeframe(args.interval, args.period)
@@ -63,14 +72,36 @@ def main() -> int:
         return 2
 
     if args.json:
-        emit_json(
-            lib.render_json(
-                rows,
-                baskets=args.baskets,
-                interval=args.interval,
-                period=args.period,
-                top=args.top,
+        payload = lib.render_json(
+            rows,
+            baskets=args.baskets,
+            interval=args.interval,
+            period=args.period,
+            top=args.top,
+        )
+        ideas = payload.get("ideas") or []
+        if not rows:
+            print_envelope(
+                empty_state(
+                    help=[
+                        "Run with explicit tickers or check `market-watchlist list --json` for baskets",
+                        "Pass --top=N to cap the result",
+                    ],
+                )
             )
+            return 0
+        emit_envelope_json(
+            payload,
+            count=len(ideas),
+            help=[
+                "Pass --top=N to cap the result by conviction",
+                "Pass --full for the full payload or --fields=<csv> to project",
+            ],
+            fields=resolve_fields(
+                fields_arg,
+                full=full,
+                default=["ideas", "baskets", "interval", "period", "total"],
+            ),
         )
         return 0
 
