@@ -72,7 +72,7 @@ def _help_lines(ticker: str, has_ideas: bool) -> list[str]:
 
 
 def main():
-    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
     ticker, json_mode, source, interval, period = safe_parse_args(filtered_argv)
     if maybe_render_home_view(__file__, ticker, json_mode):
         return
@@ -100,8 +100,7 @@ def main():
         emit_envelope_json(
             {"ticker": ticker, "ideas": projected_ideas, "narrative": result.get("narrative", "")},
             count=len(projected_ideas),
-            help=_help_lines(ticker, bool(projected_ideas)),
-        )
+            help=_help_lines(ticker, bool(projected_ideas)), toon=toon,)
         return
 
     print_header(f"STRATEGY: BREAKOUT CONFIRM — {ticker}")

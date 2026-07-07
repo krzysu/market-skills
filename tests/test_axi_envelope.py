@@ -137,10 +137,12 @@ class TestTruncate:
 
 
 class TestToonDump:
-    def test_round_trip_with_json_loads(self):
+    def test_round_trip_with_toon_load(self):
+        from analysis.output import toon_load
+
         obj = {"a": 1, "b": [1, 2, 3], "c": None}
         out = toon_dump(obj)
-        assert json.loads(out) == obj
+        assert toon_load(out) == obj
 
     def test_handles_non_serializable_via_default_str(self):
         from datetime import datetime
@@ -148,6 +150,25 @@ class TestToonDump:
         ts = datetime(2026, 7, 7, 12, 0, 0)
         out = toon_dump({"ts": ts})
         assert "2026" in out
+
+    def test_smaller_than_indent2_json(self):
+        obj = {
+            "data": {
+                "ticker": "AAPL",
+                "rsi_14": 42,
+                "signal": "NEUTRAL",
+                "score": 0,
+            },
+            "count": 1,
+            "errors": [],
+            "help": [
+                "Run market-ema AAPL --json for trend context",
+                "Pass --full or --fields=<csv> to project",
+            ],
+        }
+        j = json.dumps(obj, indent=2, default=str)
+        t = toon_dump(obj)
+        assert len(t.encode("utf-8")) < len(j.encode("utf-8"))
 
 
 class TestEmitEnvelopeJson:
@@ -159,10 +180,12 @@ class TestEmitEnvelopeJson:
         assert parsed["count"] == 1
         assert parsed["help"] == ["try x --json"]
 
-    def test_toon_flag_emits_valid_json_today(self, capsys):
+    def test_toon_flag_emits_toon_payload(self, capsys):
+        from analysis.output import toon_load
+
         emit_envelope_json({"a": 1}, count=1, toon=True)
         out = capsys.readouterr().out
-        assert json.loads(out) == {"data": {"a": 1}, "count": 1, "errors": [], "help": []}
+        assert toon_load(out) == {"data": {"a": 1}, "count": 1, "errors": [], "help": []}
 
     def test_fields_projection_applied(self, capsys):
         emit_envelope_json({"a": 1, "b": 2, "c": 3}, count=1, fields=["a", "c"])

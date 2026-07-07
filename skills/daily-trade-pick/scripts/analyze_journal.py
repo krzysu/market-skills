@@ -235,7 +235,7 @@ def main() -> int:
     ap.add_argument("--json", action="store_true", help="Emit JSON envelope to stdout")
     ap.add_argument("--journal", type=Path, default=None, help=f"Path to picks.json (overrides ${ENV_VAR})")
 
-    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
     args = ap.parse_args(filtered_argv)
 
     try:
@@ -269,8 +269,7 @@ def main() -> int:
                 fields_arg,
                 full=full,
                 default=["total_ideas", "hit_rate", "by_ticker", "by_direction", "recent_7d"],
-            ),
-        )
+            ), toon=toon,)
     else:
         print(render_text(ideas))
     return 0

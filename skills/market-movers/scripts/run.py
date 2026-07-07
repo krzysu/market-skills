@@ -171,7 +171,7 @@ def main() -> int:
         if maybe_render_home_view(__file__, None, args.json):
             return 0
 
-    fields_arg, full, _ = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, _ = parse_axi_flags(sys.argv[1:])
 
     lib = load_lib_for_script(__file__)
     payload = lib.fetch_movers(
@@ -198,8 +198,7 @@ def main() -> int:
                 "Pass --top-n=N to cap each panel",
                 "Pass --full for the full payload or --fields=<csv> to project",
             ],
-            fields=fields,
-        )
+            fields=fields, toon=toon,)
         return 0
 
     print("MARKET MOVERS")

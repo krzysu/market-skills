@@ -58,7 +58,7 @@ def _skill_fired(skill_result: dict) -> bool:
 
 
 def main():
-    fields_arg, full, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
     tickers, json_mode, source, interval, period, include_notes, fired_only = _parse_argv(filtered_argv)
     if not tickers:
         if maybe_render_home_view(__file__, None, json_mode):
@@ -112,8 +112,7 @@ def main():
                 "Pass --fields=<csv> to project or --full for the full payload",
             ],
             errors=errors,
-            fields=fields,
-        )
+            fields=fields, toon=toon,)
         return
 
     print_header("RUN ALL L2 SKILLS")
