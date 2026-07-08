@@ -318,3 +318,106 @@ FORMATTERS: dict[str, "callable"] = {
     "compact": format_as_compact,
     "verbose": format_as_verbose,
 }
+
+
+def _status_zone_range(zone: dict, ctx: dict) -> str:
+    """Render a zone range like ``$7.50–$9.00`` (or ``$7.50–∞`` when high is inf)."""
+    low = _fmt_price(zone["low"], ctx)
+    high = zone["high"]
+    if high == float("inf"):
+        return f"{low}–∞"
+    return f"{low}–{_fmt_price(high, ctx)}"
+
+
+def _status_zone_block(event: dict, ctx: dict) -> str:
+    """Render the zone-attribution chunk of a status line.
+
+    Examples (Chinese-style separators stripped):
+      '🟡 T2 wait zone (no add) — above T1 add ($7.50–$9.00)'
+      'no active zone'
+      'below all zones'
+    """
+    active = event.get("active_zone")
+    next_below = event.get("next_zone_below")
+    if active is not None:
+        head = f"{active['emoji']} {active['label']}"
+        if next_below is not None:
+            tail = f"above {next_below['label']} ({_status_zone_range(next_below, ctx)})"
+            return f"{head} — {tail}"
+        return head
+    if next_below is not None:
+        return "below all zones"
+    return "no active zone"
+
+
+def _status_invalidation_block(floor: float | None, ctx: dict) -> str:
+    if floor is None:
+        return ""
+    return f"invalid <{_fmt_price(floor, ctx)}"
+
+
+def _status_drop_block(fired: list[dict]) -> str:
+    if not fired:
+        return ""
+    parts = [_fmt_pct(d["pct"]) for d in fired]
+    return f"drop {', '.join(parts)} fired"
+
+
+def _status_pct_block(
+    *,
+    entry: float | None,
+    pct: float | None,
+    current_price: float | None,
+    prev_price: float | None,
+    ctx: dict,
+) -> str:
+    if entry is None:
+        return ""
+    if pct is not None:
+        return f"{_fmt_pct(pct)} from entry {_fmt_price(entry, ctx)}"
+    ref = current_price if current_price is not None else prev_price
+    if ref is not None:
+        return f"(no live price; using last known {_fmt_price(ref, ctx)})"
+    return "(entry defined, no current price)"
+
+
+def format_as_default_status(event: dict, ctx: dict) -> str:
+    """Render one watch's current state as a single line.
+
+    Compose in order: name + live price + zone attribution + invalidation
+    + most-recent fired drop thresholds + pct-from-entry + above-entry
+    streak. Pure function; not registered in ``FORMATTERS`` (which
+    dispatches by event ``type`` for transition alerts — status mode has
+    no event type, so the dispatcher has nothing to dispatch on).
+    """
+    name = event["name"]
+    price = event.get("current_price")
+    live = _fmt_live(price, ctx) if price is not None else "<fetch failed>"
+
+    middle_parts = [
+        s
+        for s in (
+            _status_zone_block(event, ctx),
+            _status_invalidation_block(event.get("invalidation_floor"), ctx),
+            _status_drop_block(event.get("fired_drops") or []),
+        )
+        if s
+    ]
+    middle = "; ".join(middle_parts)
+
+    tail = _status_pct_block(
+        entry=event.get("entry_price"),
+        pct=event.get("pct_from_entry"),
+        current_price=event.get("current_price"),
+        prev_price=event.get("prev_price"),
+        ctx=ctx,
+    )
+
+    streak = int(event.get("above_entry_streak", 0) or 0)
+    streak_suffix = f"; above entry streak={streak}" if streak > 0 else ""
+
+    if middle and tail:
+        return f"[{name}] @ {live} | {middle} | {tail}{streak_suffix}"
+    if middle:
+        return f"[{name}] @ {live} | {middle}{streak_suffix}"
+    return f"[{name}] @ {live}{streak_suffix}"

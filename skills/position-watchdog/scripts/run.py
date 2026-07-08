@@ -12,10 +12,13 @@ the formatter context, invoking the formatter, and printing the result.
 Exit codes:
   0 — normal tick (silent or alerts printed); also when every enabled watch had a
       single-tick fetch blip (all-fetches-failed but the rolling 5-tick window
-      shows <3 failures per watch) — logged as `[WARN]`, no FATAL.
+      shows <3 failures per watch) — logged as `[WARN]`, no FATAL. Also used
+      by `--status` mode when every enabled watch returned a live price.
   1 — fatal: bad config, schema error, or sustained all-watches fetch failure
       (≥3 of last 5 ticks failing per watch)
-  2 — partial: some watches had fetch failures but at least one succeeded
+  2 — partial: some watches had fetch failures but at least one succeeded.
+      `--status` mode uses 2 if any per-watch live fetch failed (lines still
+      print with `<fetch failed>` fallback).
 """
 
 import argparse
@@ -62,7 +65,9 @@ _pw_lib = _load_watchdog_mod("lib.py", "position_watchdog_lib")
 _pw_fmt = _load_watchdog_mod("formatter.py", "position_watchdog_formatter")
 evaluate_levels = _pw_lib.evaluate_levels
 evaluate_signals = _pw_lib.evaluate_signals
+_status_summary = _pw_lib._status_summary
 format_alerts = _pw_fmt.format_alerts
+format_as_default_status = _pw_fmt.format_as_default_status
 FORMATTERS = _pw_fmt.FORMATTERS
 
 
@@ -358,6 +363,69 @@ def _build_ctx(
     }
 
 
+def _render_status_mode(watches: list[dict], args) -> int:
+    """Render one status line per enabled watch and return the exit code.
+
+    Read-only: makes one live-price fetch per watch (via the existing
+    ``_current_price`` retry/error path), reads the existing state file
+    (treating stale >24h state as empty), and prints the rendered lines.
+    Does not advance ``alerted_levels``, ``above_entry_streak``, or
+    ``prev_price`` — and does not update ``fetch_failures_window``.
+
+    ``--watch`` is ignored here (status mode always renders all enabled
+    watches per spec).
+
+    Returns 0 if every watch returned a live price, 2 if any watch had a
+    fetch failure (lines still print with a ``<fetch failed>`` fallback).
+    """
+    lines: list[str] = []
+    any_failed = False
+    for watch in watches:
+        if not watch.get("enabled"):
+            continue
+        name = watch["name"]
+        monitor = watch["monitor_provider"]
+        interval = watch.get("interval", "4h")
+        period = watch.get("period", "6mo")
+        try:
+            validate_timeframe(interval, period)
+        except ValueError as e:
+            print(
+                f"[{name}] invalid timeframe interval={interval!r} period={period!r}: {e} — skipping", file=sys.stderr
+            )
+            continue
+
+        price = _current_price(monitor, interval=interval, period=period)
+        if price is None:
+            any_failed = True
+
+        raw_state = _load_state(name) or {}
+        state = {} if _state_is_stale(raw_state) else raw_state
+
+        if price is not None:
+            ctx = _build_ctx(watch, price, monitor, args.config)
+        else:
+            ctx = {
+                "name": name,
+                "price": None,
+                "primary_quote": _primary_quote(monitor) or "EUR",
+                "monitor_provider": monitor,
+                "format_style": "default",
+            }
+
+        event = _status_summary(
+            name=name,
+            config=watch,
+            state=state,
+            current_price=price,
+        )
+        lines.append(format_as_default_status(event, ctx))
+
+    for line in lines:
+        print(line)
+    return 2 if any_failed else 0
+
+
 def _process_watch(
     watch: dict,
     dry_run: bool,
@@ -481,6 +549,15 @@ def main() -> int:
             "Defaults from filename: open-positions.json→default, else→compact."
         ),
     )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help=(
+            "Render a one-line current-state snapshot per enabled watch and "
+            "exit. Read-only: does not advance state, fire alerts, or write "
+            "the fetch-failures window. --watch is ignored when --status is set."
+        ),
+    )
     args = parser.parse_args()
 
     globals()["DATA_DIR"] = args.state_dir  # noqa: F841 — module-level mutation
@@ -517,6 +594,9 @@ def main() -> int:
     fetch_failures = 0
     enabled_count = 0
     enabled_names: list[str] = []
+
+    if args.status:
+        return _render_status_mode(watches, args)
 
     known_tickers: set[str] | None = None
     if args.watchlist:

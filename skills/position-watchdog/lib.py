@@ -308,3 +308,127 @@ def _level_id(level: dict) -> str:
     if level_type == "recovery":
         return "recovery"
     return f"{level_type}:{level}"
+
+
+def _status_summary(
+    *,
+    name: str,
+    config: dict,
+    state: dict | None,
+    current_price: float | None,
+) -> dict:
+    """Build the status event dict for one watch. Read-only; no I/O.
+
+    Composes the existing config (entry_price, levels, position_size) and
+    the existing state file (alerted_levels, above_entry_streak,
+    prev_price) with the live ``current_price`` into a single event dict
+    shaped for ``formatter.format_as_default_status``.
+
+    The caller is responsible for staleness-filtering ``state`` — this
+    function treats ``state`` as either ``None`` / ``{}`` or a fresh
+    state dict. Stale state (>24h) makes streaks and alerted_levels
+    unreliable; ``--status`` mode replaces stale state with ``{}`` so
+    the output reflects only the current tick + config.
+
+    Returns keys:
+      name, current_price, entry_price, prev_price, above_entry_streak,
+      alerted_levels, active_zone (dict|None), next_zone_below (dict|None),
+      invalidation_floor (float|None), next_tp_unfired (dict|None),
+      fired_drops (list[dict]), position_size, pct_from_entry.
+    """
+    levels = config.get("levels", []) or []
+    entry = config.get("entry_price")
+    size = config.get("position_size")
+
+    state = state or {}
+    alerted = state.get("alerted_levels") or {}
+    streak = int(state.get("above_entry_streak", 0) or 0)
+    prev_price = state.get("prev_price")
+
+    zones = [lv for lv in levels if lv.get("type") == "zone"]
+    active_zone: dict | None = None
+    next_zone_below: dict | None = None
+
+    if current_price is not None:
+        for z in zones:
+            z_low = float(z.get("low", 0))
+            z_high = float(z.get("high", float("inf")))
+            if z_low <= current_price <= z_high:
+                active_zone = {
+                    "label": z.get("label", f"zone {z_low:g}–{z_high:g}"),
+                    "emoji": z.get("emoji", "🎯"),
+                    "low": z_low,
+                    "high": z_high,
+                }
+                break
+        below = [
+            z
+            for z in zones
+            if float(z.get("low", 0)) < current_price
+            and not (
+                active_zone is not None
+                and float(z.get("low", 0)) == active_zone["low"]
+                and float(z.get("high", float("inf"))) == active_zone["high"]
+            )
+        ]
+        if below:
+            below.sort(key=lambda z: float(z.get("low", 0)), reverse=True)
+            top = below[0]
+            z_low = float(top.get("low", 0))
+            z_high = float(top.get("high", float("inf")))
+            next_zone_below = {
+                "label": top.get("label", f"zone {z_low:g}–{z_high:g}"),
+                "emoji": top.get("emoji", "🎯"),
+                "low": z_low,
+                "high": z_high,
+            }
+
+    invalids = [float(lv["below"]) for lv in levels if lv.get("type") == "invalidation" and "below" in lv]
+    invalidation_floor = max(invalids) if invalids else None
+
+    def _tp_price(lv: dict) -> float:
+        return float(lv["price"])
+
+    unfired_tps = [lv for lv in levels if lv.get("type") == "tp" and f"tp:{lv.get('price')}" not in alerted]
+    next_tp_unfired: dict | None = None
+    if unfired_tps:
+        ref = current_price if current_price is not None else prev_price
+        if entry is not None and ref is not None and float(ref) < float(entry):
+            unfired_tps.sort(key=_tp_price, reverse=True)
+        else:
+            unfired_tps.sort(key=_tp_price)
+        head = unfired_tps[0]
+        next_tp_unfired = {
+            "price": _tp_price(head),
+            "exit_pct": head.get("exit_pct"),
+        }
+
+    fired_drops = [
+        {"pct": float(lv["pct"])} for lv in levels if lv.get("type") == "drop" and f"drop:{lv.get('pct')}" in alerted
+    ]
+    fired_drops.sort(key=lambda d: d["pct"])
+
+    pct_from_entry: float | None = None
+    if entry is not None:
+        ref_price = current_price if current_price is not None else prev_price
+        if ref_price is not None:
+            try:
+                pct_from_entry = (float(ref_price) - float(entry)) / float(entry) * 100
+            except (TypeError, ValueError, ZeroDivisionError):
+                pct_from_entry = None
+
+    return {
+        "name": name,
+        "current_price": current_price,
+        "entry_price": float(entry) if entry is not None else None,
+        "prev_price": prev_price,
+        "above_entry_streak": streak,
+        "alerted_levels": dict(alerted),
+        "active_zone": active_zone,
+        "next_zone_below": next_zone_below,
+        "invalidation_floor": invalidation_floor,
+        "next_tp_unfired": next_tp_unfired,
+        "fired_drops": fired_drops,
+        "position_size": size,
+        "pct_from_entry": pct_from_entry,
+    }
