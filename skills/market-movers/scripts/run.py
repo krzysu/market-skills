@@ -198,7 +198,9 @@ def main() -> int:
                 "Pass --top-n=N to cap each panel",
                 "Pass --full for the full payload or --fields=<csv> to project",
             ],
-            fields=fields, toon=toon,)
+            fields=fields,
+            toon=toon,
+        )
         return 0
 
     print("MARKET MOVERS")

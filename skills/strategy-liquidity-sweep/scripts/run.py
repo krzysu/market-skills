@@ -100,7 +100,9 @@ def main():
         emit_envelope_json(
             {"ticker": ticker, "ideas": projected_ideas, "narrative": result.get("narrative", "")},
             count=len(projected_ideas),
-            help=_help_lines(ticker, bool(projected_ideas)), toon=toon,)
+            help=_help_lines(ticker, bool(projected_ideas)),
+            toon=toon,
+        )
         return
 
     print_header(f"STRATEGY: LIQUIDITY SWEEP — {ticker}")

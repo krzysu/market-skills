@@ -179,8 +179,7 @@ class TestBugAbsentWithSubsRegression:
         # Pre-fix: present=False, classification=None with swing_taken + volume present.
         # Post-fix: present=True, classification=DOUBLE_TEST.
         assert result["pattern"]["present"] is True, (
-            f"2 subs (swing_taken+volume, wsum=0.35) "
-            f"must fire the pattern, got {result['pattern']}"
+            f"2 subs (swing_taken+volume, wsum=0.35) must fire the pattern, got {result['pattern']}"
         )
         assert result["pattern"]["classification"] == "DOUBLE_TEST"
 

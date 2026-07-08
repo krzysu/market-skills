@@ -10,8 +10,11 @@ orchestrator (``run.py``) is responsible for fetching prices, building
 the formatter context, invoking the formatter, and printing the result.
 
 Exit codes:
-  0 — normal tick (silent or alerts printed)
-  1 — fatal: bad config, schema error, all-watches fetch failed
+  0 — normal tick (silent or alerts printed); also when every enabled watch had a
+      single-tick fetch blip (all-fetches-failed but the rolling 5-tick window
+      shows <3 failures per watch) — logged as `[WARN]`, no FATAL.
+  1 — fatal: bad config, schema error, or sustained all-watches fetch failure
+      (≥3 of last 5 ticks failing per watch)
   2 — partial: some watches had fetch failures but at least one succeeded
 """
 
@@ -32,6 +35,14 @@ DEFAULT_CONFIG = os.path.join(SKILL_DIR, "data", "watches.json")
 DEFAULT_STATE_DIR = os.path.join(SKILL_DIR, "data")
 STALE_STATE_SECONDS = 24 * 3600
 DATA_DIR = ""
+
+# Sustained-failure window for the all-watches FATAL trip. A single tick of
+# all-fetches-failed is treated as a blip and logged but not fatal; the FATAL
+# only trips when every enabled watch has failed in ≥THRESHOLD of the last
+# LOOKBACK ticks. The 3-of-5 calibration suppresses the noisy 1-tick blip
+# (single API hiccup) while still alarming on a real multi-tick outage.
+FETCH_FAILURES_LOOKBACK = 5
+FETCH_FAILURES_THRESHOLD = 3
 
 ENV_CONFIG = "MARKET_SKILLS_WATCHDOG_PATH"
 ENV_STATE_DIR = "MARKET_SKILLS_WATCHDOG_STATE_DIR"
@@ -86,6 +97,61 @@ def _save_state(name: str, state: dict) -> None:
     with open(tmp, "w") as f:
         json.dump(state, f, indent=2)
     os.replace(tmp, path)
+
+
+def _record_fetch_outcome(name: str, fetch_failed: bool) -> None:
+    """Append the current tick's fetch outcome to the per-watch failure window.
+
+    The window is a list of booleans, oldest first, capped at
+    ``FETCH_FAILURES_LOOKBACK``. Used by the main loop to drive the
+    sustained-failure FATAL trigger; a watch with a long True streak is
+    part of a real outage, a single True is just a blip.
+    """
+    existing = _load_state(name) or {}
+    window = list(existing.get("fetch_failures_window") or [])
+    window.append(bool(fetch_failed))
+    if len(window) > FETCH_FAILURES_LOOKBACK:
+        window = window[-FETCH_FAILURES_LOOKBACK:]
+    existing["fetch_failures_window"] = window
+    _save_state(name, existing)
+
+
+def _all_watches_failed_sustained(
+    enabled_names: list[str],
+    *,
+    lookback: int = FETCH_FAILURES_LOOKBACK,
+    threshold: int = FETCH_FAILURES_THRESHOLD,
+) -> bool:
+    """True iff every enabled watch has ≥threshold failures in the last lookback ticks.
+
+    Reads each watch's ``fetch_failures_window`` from its state file. A
+    sustained outage lights up when every watch has been failing together
+    — a single 1-tick blip (one True per window) returns False.
+    """
+    if not enabled_names:
+        return False
+    for name in enabled_names:
+        state = _load_state(name) or {}
+        window = state.get("fetch_failures_window") or []
+        recent = window[-lookback:]
+        if sum(1 for x in recent if x) < threshold:
+            return False
+    return True
+
+
+def _window_after_success(name: str, carry: list[bool] | None) -> list[bool]:
+    """Return the failure window for a watch that just succeeded this tick.
+
+    The success tick appends ``False`` to whatever window was already on
+    disk (capped at ``FETCH_FAILURES_LOOKBACK``). Used to refresh the
+    rolling counter when ``_process_watch`` produces a healthy new_state.
+    """
+    state = _load_state(name) or {}
+    window = list(state.get("fetch_failures_window") or carry or [])
+    window.append(False)
+    if len(window) > FETCH_FAILURES_LOOKBACK:
+        window = window[-FETCH_FAILURES_LOOKBACK:]
+    return window
 
 
 def _state_is_stale(state: dict | None) -> bool:
@@ -450,6 +516,7 @@ def main() -> int:
     any_alerts = False
     fetch_failures = 0
     enabled_count = 0
+    enabled_names: list[str] = []
 
     known_tickers: set[str] | None = None
     if args.watchlist:
@@ -467,6 +534,7 @@ def main() -> int:
         if args.watch and watch["name"] != args.watch:
             continue
         enabled_count += 1
+        enabled_names.append(watch["name"])
 
         if known_tickers is not None:
             bare = _bare_ticker(watch["monitor_provider"])
@@ -482,6 +550,7 @@ def main() -> int:
 
         alerts, new_state = _process_watch(watch, args.dry_run, now, config_path=args.config)
         if new_state is None and not args.dry_run:
+            _record_fetch_outcome(watch["name"], fetch_failed=True)
             fetch_failures += 1
             continue
 
@@ -490,11 +559,24 @@ def main() -> int:
             any_alerts = True
 
         if new_state is not None and not args.dry_run:
+            new_state["fetch_failures_window"] = _window_after_success(
+                watch["name"], new_state.get("fetch_failures_window")
+            )
             _save_state(watch["name"], new_state)
 
     if fetch_failures and fetch_failures == enabled_count:
-        print(f"FATAL: all {enabled_count} enabled watches had fetch failures", file=sys.stderr)
-        return 1
+        sustained = _all_watches_failed_sustained(enabled_names)
+        if sustained:
+            print(
+                f"FATAL: all {enabled_count} enabled watches had fetch failures "
+                f"(sustained: ≥{FETCH_FAILURES_THRESHOLD} of last {FETCH_FAILURES_LOOKBACK} ticks)",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"[WARN] all {enabled_count} enabled watches failed this tick (sustained=False); suppressing FATAL",
+            file=sys.stderr,
+        )
     if fetch_failures and any_alerts:
         return 2
 

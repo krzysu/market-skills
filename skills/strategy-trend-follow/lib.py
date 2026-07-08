@@ -5,7 +5,9 @@ from analysis.contracts import (
     conviction_version,
     enforce_min_stop_distance,
     l2_classification,
-    validate_l3_tp_ladder,
+    l3_tp3_dead_zone_ceiling,
+    l3_tp3_dead_zone_floor,
+    validate_l3_tp_ladder_silent,
 )
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
@@ -184,15 +186,19 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
                 "entry_price": round_price(entry),
                 "entry_range": [round_price(entry - atr * 0.5), round_price(entry + atr * 0.5)],
                 "stop_loss": round_price(stop),
+                # BUGS-2026-07-08-3: clamp TP3 at the 5% boundary. risk × 4
+                # is normally well above 5%, but on tight ATR with a high
+                # entry price (e.g. large-cap stocks), the clamp catches
+                # any underflow before the validator rejects.
                 "take_profit": [
                     round_price(entry + risk * 1.5),
                     round_price(entry + risk * 2.5),
-                    round_price(entry + risk * 4),
+                    round_price(max(entry + risk * 4, l3_tp3_dead_zone_floor(entry))),
                 ],
                 "take_profit_ideal": [
                     entry + risk * 1.5,
                     entry + risk * 2.5,
-                    entry + risk * 4,
+                    max(entry + risk * 4, l3_tp3_dead_zone_floor(entry)),
                 ],
                 "reasoning": reasoning,
                 "source_skills": ["market-trend-quality", "market-breakout"],
@@ -210,6 +216,8 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         risk = entry - stop
         conviction = max(1, min(5, tq_pattern["confidence"] - 1))
         move_maturity_pct, entry_window_validity_pct = _compute_maturity_metrics(closes, entry)
+        # BUGS-2026-07-08-3: 5% clamp on TP3.
+        tp3 = max(entry + risk * 4, l3_tp3_dead_zone_floor(entry))
         ideas.append(
             {
                 "pair": ticker,
@@ -223,12 +231,12 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
                 "take_profit": [
                     round_price(entry + risk * 1.5),
                     round_price(entry + risk * 2.5),
-                    round_price(entry + risk * 4),
+                    round_price(tp3),
                 ],
                 "take_profit_ideal": [
                     entry + risk * 1.5,
                     entry + risk * 2.5,
-                    entry + risk * 4,
+                    tp3,
                 ],
                 "reasoning": (
                     "WEAKENING classification but macro structure intact "
@@ -250,6 +258,8 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         boost = 1 if bo_classification and "BREAKOUT" in str(bo_classification) else 0
         conviction = min(5, tq_pattern["confidence"] + boost)
         move_maturity_pct, entry_window_validity_pct = _compute_maturity_metrics(closes, entry)
+        # BUGS-2026-07-08-3: 5% ceiling on TP3 for shorts.
+        tp3 = min(entry - risk * 4, l3_tp3_dead_zone_ceiling(entry))
         ideas.append(
             {
                 "pair": ticker,
@@ -263,12 +273,12 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
                 "take_profit": [
                     round_price(entry - risk * 1.5),
                     round_price(entry - risk * 2.5),
-                    round_price(entry - risk * 4),
+                    round_price(tp3),
                 ],
                 "take_profit_ideal": [
                     entry - risk * 1.5,
                     entry - risk * 2.5,
-                    entry - risk * 4,
+                    tp3,
                 ],
                 "reasoning": f"Healthy downtrend ({classification}), breakdown entry.",
                 "source_skills": ["market-trend-quality", "market-breakout"],
@@ -279,11 +289,19 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
             }
         )
 
-    for idea in ideas:
-        _apply_pattern_s(idea)
-        idea.pop("_close", None)
-        idea["rr_to_tp"] = compute_rr_to_tp(idea)
-        validate_l3_tp_ladder(idea)
+    tp_rejection = None
+    if ideas:
+        validated = []
+        for idea in ideas:
+            _apply_pattern_s(idea)
+            idea.pop("_close", None)
+            idea["rr_to_tp"] = compute_rr_to_tp(idea)
+            err = validate_l3_tp_ladder_silent(idea)
+            if err is None:
+                validated.append(idea)
+            elif tp_rejection is None:
+                tp_rejection = err
+        ideas = validated
 
     # Drop sub-2% stops (noise risk in swing mode).
     stop_2pct_rejection = None
@@ -300,6 +318,8 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     if ideas:
         dirs = ", ".join(i["direction"] for i in ideas)
         narrative = f"Trend-follow setup: {dirs}. {tq_result.get('narrative', '')}"
+    elif tp_rejection is not None:
+        narrative = tp_rejection
     elif stop_2pct_rejection is not None:
         narrative = stop_2pct_rejection
     else:

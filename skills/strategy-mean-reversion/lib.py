@@ -4,7 +4,9 @@ from analysis.contracts import (
     compute_rr_to_tp,
     conviction_version,
     enforce_min_stop_distance,
-    validate_l3_tp_ladder,
+    l3_tp3_dead_zone_ceiling,
+    l3_tp3_dead_zone_floor,
+    validate_l3_tp_ladder_silent,
 )
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
@@ -82,9 +84,13 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         entry = price
         stop = support - atr * 1
         risk = entry - stop
-        # Audit 2026-06-21 #5: TP3 must be ≥ entry × 1.05. If resistance is too close
-        # to entry, fall back to a 3R target instead of letting TP3 degenerate to entry.
-        far_target = resistance if (resistance is not None and resistance >= entry * 1.05) else entry + risk * 3
+        # BUGS-2026-07-08-3: TP3 must clear the 5% dead zone even when risk
+        # is small (low-vol assets, sub-$5 prices). The max() floors TP3
+        # at the 5% boundary (with a rounding-precision buffer) regardless
+        # of where resistance sits or how small risk × 3 is. Same idea for
+        # the short branch below.
+        resistance_floor = resistance if resistance is not None else float("-inf")
+        far_target = max(resistance_floor, entry + risk * 3, l3_tp3_dead_zone_floor(entry))
         conviction = 3 if low_vol else 2
         ideas.append(
             {
@@ -96,7 +102,9 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
                 "entry_price": round_price(entry),
                 "entry_range": [round_price(support), round_price(entry * 1.01)],
                 "stop_loss": round_price(stop),
-                # 3-TP ladder (ascending): 1R → 2R → full reversion to resistance.
+                # 3-TP ladder (ascending): 1R → 2R → reversion to resistance
+                # clamped at the 5% boundary so low-vol assets still emit
+                # an idea.
                 "take_profit": [
                     round_price(entry + risk * 1),
                     round_price(entry + risk * 2),
@@ -116,9 +124,11 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         entry = price
         stop = resistance + atr * 1
         risk = stop - entry
-        # Audit 2026-06-21 #5: TP3 must be ≤ entry × 0.95. If support is too close,
-        # fall back to 3R target.
-        far_target = support if (support is not None and support <= entry * 0.95) else entry - risk * 3
+        # BUGS-2026-07-08-3: TP3 ceiling at entry × 0.95 (5% dead-zone floor
+        # for shorts). When support sits inside the dead zone (between
+        # entry × 0.95 and entry), the clamp pushes TP3 to the boundary.
+        support_ceiling = support if support is not None else float("inf")
+        far_target = min(support_ceiling, entry - risk * 3, l3_tp3_dead_zone_ceiling(entry))
         conviction = 3 if low_vol else 2
         ideas.append(
             {
@@ -130,7 +140,8 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
                 "entry_price": round_price(entry),
                 "entry_range": [round_price(entry * 0.99), round_price(resistance)],
                 "stop_loss": round_price(stop),
-                # 3-TP ladder (descending): 1R → 2R → full reversion to support.
+                # 3-TP ladder (descending): 1R → 2R → reversion to support
+                # clamped at the 5% boundary.
                 "take_profit": [
                     round_price(entry - risk * 1),
                     round_price(entry - risk * 2),
@@ -146,10 +157,18 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
             }
         )
 
-    for idea in ideas:
-        _apply_cape_valuation_tag(idea, valuation)
-        idea["rr_to_tp"] = compute_rr_to_tp(idea)
-        validate_l3_tp_ladder(idea)
+    tp_rejection = None
+    if ideas:
+        validated = []
+        for idea in ideas:
+            _apply_cape_valuation_tag(idea, valuation)
+            idea["rr_to_tp"] = compute_rr_to_tp(idea)
+            err = validate_l3_tp_ladder_silent(idea)
+            if err is None:
+                validated.append(idea)
+            elif tp_rejection is None:
+                tp_rejection = err
+        ideas = validated
 
     # Drop sub-2% stops (noise risk in swing mode).
     stop_2pct_rejection = None
@@ -165,6 +184,8 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
 
     if ideas:
         narrative = f"Mean-reversion setup: {', '.join(i['direction'] for i in ideas)}."
+    elif tp_rejection is not None:
+        narrative = tp_rejection
     elif stop_2pct_rejection is not None:
         narrative = stop_2pct_rejection
     else:

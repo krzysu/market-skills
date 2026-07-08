@@ -67,12 +67,10 @@ def main():
         state,
         count=state["sources_cached"],
         help=_help_lines(),
-        errors=[
-            f"missing cache: {label}"
-            for label, age in state["freshness"].items()
-            if age == "no cache"
-        ],
-        fields=fields, toon=toon,)
+        errors=[f"missing cache: {label}" for label, age in state["freshness"].items() if age == "no cache"],
+        fields=fields,
+        toon=toon,
+    )
 
 
 if __name__ == "__main__":

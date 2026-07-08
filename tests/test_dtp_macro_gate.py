@@ -45,10 +45,13 @@ def test_macro_gate_no_longer_vetoes() -> None:
     assert not any("macro_aligned" in r for r in idea["rejection_reasons"])
 
 
-@pytest.mark.parametrize("scan_id,expected_avg", [
-    ("counter_macro_n116", COUNTER_MACRO_AVG_RETURN),
-    ("aligned_n116", ALIGNED_AVG_RETURN),
-])
+@pytest.mark.parametrize(
+    "scan_id,expected_avg",
+    [
+        ("counter_macro_n116", COUNTER_MACRO_AVG_RETURN),
+        ("aligned_n116", ALIGNED_AVG_RETURN),
+    ],
+)
 def test_macro_gate_inversion_locked_in(scan_id: str, expected_avg: float) -> None:
     """Tripwire: the historical inversion data is locked in."""
     assert expected_avg in (COUNTER_MACRO_AVG_RETURN, ALIGNED_AVG_RETURN)

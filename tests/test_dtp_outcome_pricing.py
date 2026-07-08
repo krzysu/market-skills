@@ -94,9 +94,7 @@ def test_wick_hit_long_uses_next_bar_open(
     """Each of the 9 wick-hit longs must use the correct next-bar-open."""
     px = outcome_price_correct(scan_id, pair)
     assert px != wick_px, f"{scan_id} {pair}: still using the wick"
-    assert abs(px - correct_next_open) < 0.01, (
-        f"{scan_id} {pair}: expected {correct_next_open}, got {px}"
-    )
+    assert abs(px - correct_next_open) < 0.01, f"{scan_id} {pair}: expected {correct_next_open}, got {px}"
 
 
 def test_falls_back_to_ticker_when_ohlc_empty() -> None:

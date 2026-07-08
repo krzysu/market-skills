@@ -107,7 +107,9 @@ def main() -> int:
                 fields_arg,
                 full=full,
                 default=["ideas", "baskets", "interval", "period", "total"],
-            ), toon=toon,)
+            ),
+            toon=toon,
+        )
         return 0
 
     print(lib.render_text(rows, top=args.top, tf=args.interval))

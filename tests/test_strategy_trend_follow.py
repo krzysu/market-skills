@@ -286,14 +286,16 @@ def _make_trending_candles(start=100.0, end=300.0, n=250, seed=42):
         pct = i / (n - 1)
         close = start + (end - start) * pct
         half_range = close * 0.01
-        candles.append([
-            i * 86400,
-            close,
-            close + rng.uniform(0, half_range * 2),
-            close - rng.uniform(0, half_range * 2),
-            close,
-            rng.randint(100000, 500000),
-        ])
+        candles.append(
+            [
+                i * 86400,
+                close,
+                close + rng.uniform(0, half_range * 2),
+                close - rng.uniform(0, half_range * 2),
+                close,
+                rng.randint(100000, 500000),
+            ]
+        )
     return candles
 
 
@@ -523,12 +525,15 @@ class TestAssetClassScaling:
         def _tq_analyze(c, **_kw):
             return {
                 "pattern": {
-                    "present": True, "confidence": confidence,
+                    "present": True,
+                    "confidence": confidence,
                     "classification": classification,
-                    "max_confidence": 5, "type": "trend",
+                    "max_confidence": 5,
+                    "type": "trend",
                 },
                 "input_scores": {},
             }
+
         tq_mod = type("TQ", (), {"analyze": staticmethod(_tq_analyze)})()
         bo_mod = type(
             "BO",
@@ -536,6 +541,7 @@ class TestAssetClassScaling:
             {"analyze": staticmethod(lambda c, **_kw: {"pattern": {"present": False}})},
         )()
         import analysis.skill_loader as sl
+
         canned = {"market-trend-quality": tq_mod, "market-breakout": bo_mod}
         monkeypatch.setattr(sl, "load_skill", lambda name: canned.get(name))
 

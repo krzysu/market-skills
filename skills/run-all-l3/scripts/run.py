@@ -148,7 +148,9 @@ def main():
             total_fired_strategies += tick_fired
         out["ideas_count"] = total_ideas
         out["fired_strategies"] = total_fired_strategies
-        out["summary"] = f"{len(tickers)} ticker(s), {total_ideas} L3 idea(s), {total_fired_strategies} strategy/strategies fired"
+        out["summary"] = (
+            f"{len(tickers)} ticker(s), {total_ideas} L3 idea(s), {total_fired_strategies} strategy/strategies fired"
+        )
         cache_run_result(__file__, out)
         help_lines = [
             "Pass --top=N to cap ideas per ticker (sorted by conviction)",
@@ -161,7 +163,9 @@ def main():
             out,
             count=len(tickers),
             help=help_lines,
-            errors=errors, toon=toon,)
+            errors=errors,
+            toon=toon,
+        )
         return
 
     print_header("RUN ALL L3 STRATEGIES")

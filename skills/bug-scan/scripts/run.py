@@ -167,7 +167,9 @@ def main() -> int:
                 "Run `bug-scan HYPEUSD SOLUSD --json` for a fresh scan on a pair",
                 "Pass --full for the full payload or --fields=<csv> to project",
             ],
-            fields=fields, toon=toon,)
+            fields=fields,
+            toon=toon,
+        )
         return 0
 
     findings = envelope.get("findings") or []

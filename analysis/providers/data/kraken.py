@@ -17,6 +17,42 @@ _INTERVAL_MAP = {
     "30m": 30,
 }
 
+_TRANSIENT_API_MARKERS: tuple[str, ...] = (
+    "egeneral",
+    "eservice",
+    "einternal",
+    "busy",
+    "rate limit",
+    "timeout",
+    "temporarily unavailable",
+)
+
+
+def _is_kraken_api_error(result: subprocess.CompletedProcess) -> bool:
+    """True if a Kraken subprocess result is a transient API-level error body.
+
+    The Kraken CLI exits 0 even when the upstream returns an error envelope
+    like ``{"error":"api","message":"EGeneral:Internal error"}``. Without
+    this predicate, ``with_retry`` only catches ``subprocess.TimeoutExpired``
+    and the bad result is returned on the first attempt — a 1-2 second
+    blip cascades into a hard fetch failure for every caller.
+
+    Transient markers (``egeneral``/``eservice``/``einternal``/``busy``/``rate
+    limit``/``timeout``/``temporarily unavailable``) are the operator's
+    shortlist of retry-worthy classes. ``EQuery:Unknown asset pair`` and
+    other permanent errors don't match and propagate immediately.
+    """
+    if result.returncode != 0:
+        return False
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(data, dict) or not data.get("error"):
+        return False
+    msg = (data.get("message") or "").lower()
+    return any(m in msg for m in _TRANSIENT_API_MARKERS)
+
 
 class KrakenProvider:
     name = "kraken"
@@ -45,6 +81,7 @@ class KrakenProvider:
             result = with_retry(
                 _do,
                 transient=(subprocess.TimeoutExpired,),
+                transient_result=_is_kraken_api_error,
                 label=f"kraken.pairs({pair})",
                 logger=logger,
             )
@@ -97,6 +134,7 @@ class KrakenProvider:
             result = with_retry(
                 _do,
                 transient=(subprocess.TimeoutExpired,),
+                transient_result=_is_kraken_api_error,
                 label=f"kraken.ticker({pair})",
                 logger=logger,
             )
@@ -161,6 +199,7 @@ class KrakenProvider:
             result = with_retry(
                 _do,
                 transient=(subprocess.TimeoutExpired,),
+                transient_result=_is_kraken_api_error,
                 label=f"kraken.ohlc({pair})",
                 logger=logger,
             )
