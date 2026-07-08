@@ -41,14 +41,16 @@ def _make_candles(n: int = 220, seed: int = 42) -> list[list]:
         open_p = price * (1 + random.gauss(0, 0.003))
         high_p = max(open_p, price) * (1 + abs(random.gauss(0, 0.003)))
         low_p = min(open_p, price) * (1 - abs(random.gauss(0, 0.003)))
-        candles.append([
-            i * 86400,
-            open_p,
-            high_p,
-            low_p,
-            price,
-            random.randint(100, 1000),
-        ])
+        candles.append(
+            [
+                i * 86400,
+                open_p,
+                high_p,
+                low_p,
+                price,
+                random.randint(100, 1000),
+            ]
+        )
     return candles
 
 

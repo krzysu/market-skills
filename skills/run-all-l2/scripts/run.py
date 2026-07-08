@@ -112,7 +112,9 @@ def main():
                 "Pass --fields=<csv> to project or --full for the full payload",
             ],
             errors=errors,
-            fields=fields, toon=toon,)
+            fields=fields,
+            toon=toon,
+        )
         return
 
     print_header("RUN ALL L2 SKILLS")

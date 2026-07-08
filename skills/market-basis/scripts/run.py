@@ -184,7 +184,9 @@ def main():
             help=[
                 "Pass --full for the full payload or --fields=<csv> to project",
             ],
-            fields=fields, toon=toon,)
+            fields=fields,
+            toon=toon,
+        )
         return
 
     if "error" in result:

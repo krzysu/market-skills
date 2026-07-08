@@ -290,6 +290,62 @@ def validate_l3_tp_ladder(idea: dict) -> None:
             )
 
 
+def validate_l3_tp_ladder_silent(idea: dict) -> str | None:
+    """Wrap :func:`validate_l3_tp_ladder` and return the error message instead of raising.
+
+    Returns ``None`` when the ladder is structurally valid; returns the
+    ``ValueError`` message string when invalid. Used by L3 strategies as
+    a safety net after the producer-side 5% clamp: if the clamp misses
+    (e.g. a future strategy that doesn't apply it), the strategy
+    surfaces the rejection as a structured narrative rather than letting
+    the cron see a silent ``ideas: []`` (the "second silent-failure
+    fingerprint" worked in the 2026-07-03 packet).
+    """
+    try:
+        validate_l3_tp_ladder(idea)
+    except ValueError as e:
+        return str(e)
+    return None
+
+
+def l3_tp3_dead_zone_floor(entry: float) -> float:
+    """Minimum TP3 for a long idea to clear the 5% dead zone after rounding.
+
+    Returns ``entry * 1.05`` plus a magnitude-aware buffer to clear
+    :func:`analysis.formatting.round_price`'s precision tier (2dp for
+    |value|≥1, 4dp for ≥0.01, 6dp otherwise). Without the buffer, a clamp
+    at exactly the boundary can round down past the threshold and trip
+    :func:`validate_l3_tp_ladder` — e.g. PAXGUSD entry=4135.9 produces
+    4342.695 which Python's banker's rounding drops to 4342.69 at 2dp,
+    failing the `tps[-1] < entry * 1.05` check.
+    """
+    abs_entry = abs(entry)
+    if abs_entry >= 1:
+        buffer = 0.01
+    elif abs_entry >= 0.01:
+        buffer = 0.0001
+    else:
+        buffer = 0.000001
+    return entry * 1.05 + buffer
+
+
+def l3_tp3_dead_zone_ceiling(entry: float) -> float:
+    """Maximum TP3 for a short idea to clear the 5% dead zone after rounding.
+
+    Mirror of :func:`l3_tp3_dead_zone_floor` for shorts. Returns
+    ``entry * 0.95`` minus the magnitude-aware buffer so the rounded
+    value clears ``entry * 0.95`` from below.
+    """
+    abs_entry = abs(entry)
+    if abs_entry >= 1:
+        buffer = 0.01
+    elif abs_entry >= 0.01:
+        buffer = 0.0001
+    else:
+        buffer = 0.000001
+    return entry * 0.95 - buffer
+
+
 def enforce_min_stop_distance(
     idea: dict,
     min_pct: float = SWING_MIN_STOP_DISTANCE,

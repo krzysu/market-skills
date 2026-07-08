@@ -5,7 +5,8 @@ from analysis.contracts import (
     conviction_version,
     enforce_min_stop_distance,
     l2_fired,
-    validate_l3_tp_ladder,
+    l3_tp3_dead_zone_floor,
+    validate_l3_tp_ladder_silent,
 )
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
@@ -50,6 +51,9 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         stop = entry - atr * 1.5
         risk = entry - stop
         conviction = min(5, sweep_pattern.get("confidence", 3) + accum_pattern.get("confidence", 3) // 2)
+        # BUGS-2026-07-08-3: clamp TP3 at the 5% boundary so low-vol sweeps
+        # still produce an idea.
+        tp3 = max(entry + risk * 4, l3_tp3_dead_zone_floor(entry))
         ideas.append(
             {
                 "pair": ticker,
@@ -60,16 +64,16 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
                 "entry_price": round_price(entry),
                 "entry_range": [round_price(entry - atr * 0.3), round_price(entry + atr * 0.3)],
                 "stop_loss": round_price(stop),
-                # 3-TP ladder: 2R → 3R → 4R from entry.
+                # 3-TP ladder: 2R → 3R → 4R from entry (clamped at 5%).
                 "take_profit": [
                     round_price(entry + risk * 2),
                     round_price(entry + risk * 3),
-                    round_price(entry + risk * 4),
+                    round_price(tp3),
                 ],
                 "take_profit_ideal": [
                     entry + risk * 2,
                     entry + risk * 3,
-                    entry + risk * 4,
+                    tp3,
                 ],
                 "reasoning": "Liquidity sweep with accumulation and volume confirmation — reversal setup.",
                 "source_skills": ["market-liquidity-sweep", "market-accumulation", "market-volume"],
@@ -79,6 +83,8 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         entry = price
         stop = entry - atr * 1.5
         risk = entry - stop
+        # BUGS-2026-07-08-3: clamp TP3 at the 5% boundary.
+        tp3 = max(entry + risk * 4, l3_tp3_dead_zone_floor(entry))
         ideas.append(
             {
                 "pair": ticker,
@@ -89,25 +95,33 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
                 "entry_price": round_price(entry),
                 "entry_range": [round_price(entry - atr * 0.3), round_price(entry + atr * 0.3)],
                 "stop_loss": round_price(stop),
-                # 3-TP ladder: 2R → 3R → 4R from entry.
+                # 3-TP ladder: 2R → 3R → 4R from entry (clamped at 5%).
                 "take_profit": [
                     round_price(entry + risk * 2),
                     round_price(entry + risk * 3),
-                    round_price(entry + risk * 4),
+                    round_price(tp3),
                 ],
                 "take_profit_ideal": [
                     entry + risk * 2,
                     entry + risk * 3,
-                    entry + risk * 4,
+                    tp3,
                 ],
                 "reasoning": "Liquidity sweep with volume confirmation (no accumulation) — speculative reversal.",
                 "source_skills": ["market-liquidity-sweep", "market-volume"],
             }
         )
 
-    for idea in ideas:
-        idea["rr_to_tp"] = compute_rr_to_tp(idea)
-        validate_l3_tp_ladder(idea)
+    tp_rejection = None
+    if ideas:
+        validated = []
+        for idea in ideas:
+            idea["rr_to_tp"] = compute_rr_to_tp(idea)
+            err = validate_l3_tp_ladder_silent(idea)
+            if err is None:
+                validated.append(idea)
+            elif tp_rejection is None:
+                tp_rejection = err
+        ideas = validated
 
     # Drop sub-2% stops (noise risk in swing mode).
     stop_2pct_rejection = None
@@ -123,6 +137,8 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
 
     if ideas:
         narrative = f"Liquidity sweep setup: long. {sweep_result.get('narrative', '')}"
+    elif tp_rejection is not None:
+        narrative = tp_rejection
     elif stop_2pct_rejection is not None:
         narrative = stop_2pct_rejection
     else:

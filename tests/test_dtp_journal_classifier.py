@@ -22,10 +22,7 @@ def hit_target_from_wick(
     tp1: float,
     direction: str,
 ) -> bool:
-    return (
-        exit_wick_high >= tp1 if direction == "long"
-        else exit_wick_low <= tp1
-    )
+    return exit_wick_high >= tp1 if direction == "long" else exit_wick_low <= tp1
 
 
 # The 15 shorts that were direction-blind misclassified under the old
@@ -35,21 +32,21 @@ def hit_target_from_wick(
 #
 # Fields: (scan_id, pair, direction, exit_wick_low, exit_wick_high, tp1)
 DIRECTION_BLIND_SHORTS = [
-    ("2026-06-25-002", "SOLUSD",   "short", 76.0, 82.0, 68.0),
-    ("2026-06-29-004", "ETH-USD",  "short", 1850, 1920, 1740),
-    ("2026-06-29-004", "SOL-USD",  "short", 145.0, 155.0, 133.0),
+    ("2026-06-25-002", "SOLUSD", "short", 76.0, 82.0, 68.0),
+    ("2026-06-29-004", "ETH-USD", "short", 1850, 1920, 1740),
+    ("2026-06-29-004", "SOL-USD", "short", 145.0, 155.0, 133.0),
     ("2026-06-30-001", "XETHZUSD", "short", 1820, 1910, 1700),
-    ("2026-06-30-001", "SOLUSD",   "short", 148.0, 160.0, 136.0),
-    ("2026-06-30-001", "TAOUSD",   "short", 310.0, 335.0, 285.0),
-    ("2026-06-30-001", "BCHUSD",   "short", 225.0, 245.0, 208.0),
-    ("2026-06-30-001", "ENAUSD",   "short", 0.42, 0.48, 0.38),
-    ("2026-06-30-001", "PUMPUSD",  "short", 0.25, 0.28, 0.22),
-    ("2026-06-30-001", "XRPUSD",   "short", 0.48, 0.52, 0.43),
-    ("2026-06-30-002", "ETHUSD",   "short", 1840, 1950, 1700),
-    ("2026-06-30-002", "SOLUSD",   "short", 150.0, 166.0, 138.0),
-    ("2026-06-30-002", "TAOUSD",   "short", 315.0, 340.0, 290.0),
-    ("2026-07-02-001", "WLDUSD",   "short", 2.10, 2.35, 1.90),
-    ("2026-07-03-002", "AEROUSD",  "short", 0.70, 0.78, 0.63),
+    ("2026-06-30-001", "SOLUSD", "short", 148.0, 160.0, 136.0),
+    ("2026-06-30-001", "TAOUSD", "short", 310.0, 335.0, 285.0),
+    ("2026-06-30-001", "BCHUSD", "short", 225.0, 245.0, 208.0),
+    ("2026-06-30-001", "ENAUSD", "short", 0.42, 0.48, 0.38),
+    ("2026-06-30-001", "PUMPUSD", "short", 0.25, 0.28, 0.22),
+    ("2026-06-30-001", "XRPUSD", "short", 0.48, 0.52, 0.43),
+    ("2026-06-30-002", "ETHUSD", "short", 1840, 1950, 1700),
+    ("2026-06-30-002", "SOLUSD", "short", 150.0, 166.0, 138.0),
+    ("2026-06-30-002", "TAOUSD", "short", 315.0, 340.0, 290.0),
+    ("2026-07-02-001", "WLDUSD", "short", 2.10, 2.35, 1.90),
+    ("2026-07-03-002", "AEROUSD", "short", 0.70, 0.78, 0.63),
 ]
 
 
@@ -68,8 +65,7 @@ def test_direction_blind_short_reclassified(
     """Each short that lost money (price up, wick low > tp1) must be miss."""
     result = hit_target_from_wick(wick_low, wick_high, tp1, direction)
     assert result is False, (
-        f"{scan_id} {pair} short price-went-up (wick_low={wick_low} "
-        f"> tp1={tp1}) must be miss, got hit"
+        f"{scan_id} {pair} short price-went-up (wick_low={wick_low} > tp1={tp1}) must be miss, got hit"
     )
 
 

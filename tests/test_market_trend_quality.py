@@ -253,8 +253,7 @@ class TestThreeSubSignalFallback:
         monkeypatch.setattr(sl, "load_skill", lambda name: canned.get(name))
 
     def test_two_sub_bullish_at_w045_classifies(self, monkeypatch):
-        """2 subs at w=0.45, signed_score=+0.45 must classify as WEAKENING.
-        """
+        """2 subs at w=0.45, signed_score=+0.45 must classify as WEAKENING."""
         # ema: present (FULL_BULL)         contribution +0.25
         # hh_hl: NOT present (mixed)        contribution   0
         # pullback: present (fib<3)        contribution +0.20
@@ -526,8 +525,8 @@ class TestThreeSubSignalFallback:
             f"test setup error — expected exactly 3 present sub-signals, got {present_count}: {result['signals']}"
         )
         assert result["pattern"]["classification"] == "WEAKENING", (
-             f"3 subs with opposing signs (wsum=0.70, signed_score=0.20) "
-             f"must classify as WEAKENING. "
+            f"3 subs with opposing signs (wsum=0.70, signed_score=0.20) "
+            f"must classify as WEAKENING. "
             f"Got classification={result['pattern']['classification']!r}, "
             f"present={result['pattern']['present']}"
         )

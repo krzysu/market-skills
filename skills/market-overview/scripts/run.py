@@ -204,7 +204,9 @@ def main():
                 "Pass --top=N to limit the panel size",
                 "Pass --full for the full payload or --fields=<csv> to project",
             ],
-            errors=[e.get("error", "unknown") for e in errors], toon=toon,)
+            errors=[e.get("error", "unknown") for e in errors],
+            toon=toon,
+        )
         return
 
     print_header("UNIFIED MARKET OVERVIEW")

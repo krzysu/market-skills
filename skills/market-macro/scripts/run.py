@@ -69,7 +69,9 @@ def main():
             count=None,
             help=_help_lines(),
             errors=signal.get("errors") or [],
-            fields=fields, toon=toon,)
+            fields=fields,
+            toon=toon,
+        )
         return
 
     print("\n")

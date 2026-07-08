@@ -136,8 +136,7 @@ class TestL3ConvictionScanEnvelope:
                     "period": kwargs.get("period", "1y"),
                     "total": len(rows),
                     "ideas": [
-                        {"ticker": r["ticker"], "strategy": r["strategy"], "conviction": r["conviction"]}
-                        for r in rows
+                        {"ticker": r["ticker"], "strategy": r["strategy"], "conviction": r["conviction"]} for r in rows
                     ],
                 }
 

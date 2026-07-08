@@ -269,7 +269,9 @@ def main() -> int:
                 fields_arg,
                 full=full,
                 default=["total_ideas", "hit_rate", "by_ticker", "by_direction", "recent_7d"],
-            ), toon=toon,)
+            ),
+            toon=toon,
+        )
     else:
         print(render_text(ideas))
     return 0

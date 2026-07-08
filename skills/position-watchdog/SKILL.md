@@ -304,8 +304,8 @@ bash skills/position-watchdog/scripts/run.sh \
 ```
 
 Exit codes:
-- `0` — normal tick (silent or alerts printed)
-- `1` — fatal: bad config, schema error, or all-watches fetch failed
+- `0` — normal tick (silent or alerts printed); also when every enabled watch had a single-tick fetch blip (all-fetches-failed but the rolling 5-tick window shows <3 failures per watch) — logged as `[WARN]`, no FATAL
+- `1` — fatal: bad config, schema error, or sustained all-watches fetch failure (≥3 of last 5 ticks failing per watch)
 - `2` — partial: some watches had fetch failures but at least one succeeded
 
 ## Migration from pre-0.3.0 configs

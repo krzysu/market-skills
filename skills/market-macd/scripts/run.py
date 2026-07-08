@@ -78,7 +78,9 @@ def main():
             result,
             count=1,
             help=_help_lines(ticker),
-            fields=fields, toon=toon,)
+            fields=fields,
+            toon=toon,
+        )
         return
 
     if "error" in result:

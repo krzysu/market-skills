@@ -50,6 +50,7 @@ def with_retry[T](
     base_delay: float = DEFAULT_BASE_DELAY_S,
     jitter: float = DEFAULT_JITTER_S,
     transient: tuple[type[BaseException], ...] = TRANSIENT_NETWORK,
+    transient_result: Callable[[T], bool] | None = None,
     logger: logging.Logger | None = None,
     label: str = "fetch",
 ) -> T:
@@ -58,13 +59,20 @@ def with_retry[T](
     Returns the first successful value. Raises the last exception
     after ``attempts`` failures. Non-transient exceptions propagate
     immediately (no retry on schema / JSON / HTTP 4xx errors).
+
+    If ``transient_result`` is provided, it is called on each non-raising
+    result. A ``True`` return marks the result as transiently bad (e.g.
+    API-error body with rc=0) and triggers the same backoff-and-retry
+    flow as a caught exception. On exhaustion the bad result is
+    returned (preserves the consumer contract of ``None``/``[]``/``False``
+    on hard failure rather than raising).
     """
     last_exc: BaseException | None = None
     if attempts < 1:
         raise ValueError(f"attempts must be >= 1, got {attempts}")
     for i in range(attempts):
         try:
-            return fn()
+            result = fn()
         except transient as e:
             last_exc = e
             if i == attempts - 1:
@@ -80,5 +88,27 @@ def with_retry[T](
                     e,
                     slept,
                 )
+            continue
+        if transient_result is not None and transient_result(result):
+            if i == attempts - 1:
+                if logger:
+                    logger.warning(
+                        "%s transient result on attempt %d/%d; out of attempts, returning bad result",
+                        label,
+                        i + 1,
+                        attempts,
+                    )
+                return result
+            slept = _sleep(i, base_delay, jitter)
+            if logger:
+                logger.warning(
+                    "%s transient result on attempt %d/%d; retrying after %.2fs",
+                    label,
+                    i + 1,
+                    attempts,
+                    slept,
+                )
+            continue
+        return result
     assert last_exc is not None  # only reachable when attempts >= 1 and every attempt raised
     raise last_exc
