@@ -67,7 +67,7 @@ analytics-only (`run-all-l3`, `position-watchdog`).
          │
 ┌────────▼───────────────────────────────┐
 │   analysis/ package                    │
-│   indicators.py  contracts.py          │
+│   indicators/  contracts.py           │
 │   track_record.py  data.py            │
 │   providers/*                         │
 └────────────────────────────────────────┘
@@ -161,7 +161,7 @@ The bullets below are descriptive of how the system is built, not
 
 ## Extensibility
 
-- **New indicator** → function in `analysis/indicators.py`, optionally wrap as L1 skill.
+- **New indicator** → function in `analysis/indicators/`, optionally wrap as L1 skill.
 - **New pattern** → L2 skill in `skills/market-{name}/`. Compose L1s via the cached skill loader. Return `{pattern, signals, input_scores, narrative}`.
 - **New strategy** → L3 skill in `skills/strategy-{name}/`. Compose L2s. Return `{ideas, narrative}`.
 - **New read-side signal** → pure-function module in `analysis/` like `analysis/track_record.py`. No I/O, no registration required. Callers pass parsed data in; the function returns a TypedDict.
