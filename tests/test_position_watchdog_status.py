@@ -1,7 +1,5 @@
 """Tests for position-watchdog --status mode.
 
-Spec: SPEC-2026-07-08-position-watchdog-status-mode.md.
-
 Covers:
   1. --status with a watch in a zone emits the zone attribution + next-zone hint + pct from entry.
   2. --status with two fired drop levels lists both thresholds in the rendered block.

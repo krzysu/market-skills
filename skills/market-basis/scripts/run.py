@@ -234,7 +234,7 @@ def main():
     if divergences:
         print("  ── Divergences ──")
         for d in divergences:
-            print(f"    ⚠ {d}")
+            print(f"    {d}")
         print()
 
 

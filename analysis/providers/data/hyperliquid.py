@@ -15,6 +15,14 @@ from analysis.providers.data._retry import with_retry
 
 logger = logging.getLogger(__name__)
 
+# fetch_spot_markets works on a fresh exchange instance, but fails on
+# subsequent calls after fetch_swap_markets mutates exchange state
+# (TypeError: NoneType + str at symbol assembly, ccxt 4.5.58).
+# When a future ccxt upgrade fixes the re-trigger crash, flip this flag
+# to False and verify that fetch_ticker (via load_markets -> fetch_markets)
+# no longer crashes on re-entry.
+_CCXT_SPOT_MARKETS_RETRIGGER_BUG = True
+
 # ccxt transient errors (network glitches, request timeouts). ExchangeError
 # and BadRequest are intentionally excluded — those are 4xx / business-rule
 # responses, not retryable.
@@ -76,6 +84,7 @@ class HyperliquidProvider:
         if self._markets_loaded:
             return
         swap_markets = self._exchange.fetch_swap_markets()
+        spot_markets: list = []
         try:
             spot_markets = self._exchange.fetch_spot_markets()
         except Exception:
@@ -85,9 +94,8 @@ class HyperliquidProvider:
             self._exchange.markets.setdefault(m["symbol"], m)
         self._exchange.markets_by_id = {str(m["id"]): m for m in swap_markets}
         self._exchange.symbols = list(self._exchange.markets.keys())
-        # Prevent fetch_ticker / any other ccxt method from re-triggering
-        # the broken fetch_spot_markets call (TypeError on None base)
-        self._exchange.fetch_spot_markets = lambda params={}: []
+        if _CCXT_SPOT_MARKETS_RETRIGGER_BUG:
+            self._exchange.fetch_spot_markets = lambda params={}: []
         self._markets_loaded = True
 
     def supports(self, ticker: str) -> bool:

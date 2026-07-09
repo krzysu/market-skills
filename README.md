@@ -236,7 +236,7 @@ L1 Indicator Skills
   market-volume  market-volatility  market-macd
   market-fibonacci  market-s-r
                 │
-          analysis/indicators.py (pure math)
+          analysis/indicators/ (pure math)
 
 Cross-asset environment (singleton context, runs alongside per-ticker stack):
   market-macro              F&G + VIX + DXY + US10Y + BTC.D + total mcap → RegimeSignal

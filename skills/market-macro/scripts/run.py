@@ -49,8 +49,8 @@ def _help_lines() -> list[str]:
 
 
 def main():
-    fields_arg, full, toon, _ = parse_axi_flags(sys.argv[1:])
-    json_mode, ttl, write_history = _parse_argv(sys.argv[1:])
+    fields_arg, full, toon, filtered = parse_axi_flags(sys.argv[1:])
+    json_mode, ttl, write_history = _parse_argv(filtered)
     if len(sys.argv) == 1:
         if maybe_render_home_view(__file__, None, json_mode):
             return
