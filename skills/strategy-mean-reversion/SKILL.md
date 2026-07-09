@@ -63,9 +63,4 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
 
 ## Home view (no-arg mode)
 
-Running this skill with no args prints the home view (last cached
-state from `$XDG_DATA_HOME/market-skills/<skill>_last.json`) instead
-of a usage error. `render_home_view()` is the underlying helper;
-`cache_run_result(__file__, result)` writes the cache after every
-successful run. Errors (`"error"` key in the result) are NOT
-cached — the home view always reflects the last healthy run.
+No-arg mode prints the home view from `$XDG_DATA_HOME/market-skills/<skill>_last.json` (last successful run). Errors are not cached.
