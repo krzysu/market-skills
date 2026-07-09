@@ -41,11 +41,16 @@ def _period_to_since_ms(period: str) -> int:
     seconds = {
         "1d": 86400,
         "5d": 432000,
+        "1w": 604800,
+        "2w": 1209600,
+        "3w": 1814400,
+        "4w": 2419200,
         "1mo": 2592000,
         "3mo": 7776000,
         "6mo": 15552000,
         "1y": 31536000,
         "2y": 63072000,
+        "10y": 315360000,
         "max": 1576800000,
     }
     return int(time.time() * 1000) - (seconds.get(period, 31536000) * 1000)
@@ -156,3 +161,50 @@ class HyperliquidProvider:
             pass
 
         return None
+
+    def fetch_spot_price(self, ticker: str) -> dict | None:
+        """Fetch live mid-price via ccxt ``fetch_ticker``.
+
+        Returns a dict mirroring the Kraken provider's shape
+        (``price``, ``last``, ``bid``, ``ask``, ``source``) so callers
+        reading ``analysis.data.fetch_spot_price`` get a uniform contract
+        across providers. ``None`` on failure (CLI missing, timeout,
+        empty payload).
+        """
+        symbol = _to_symbol(ticker)
+
+        def _do():
+            self._ensure_markets()
+            return self._exchange.fetch_ticker(symbol)
+
+        try:
+            t = with_retry(
+                _do,
+                transient=_CCXT_TRANSIENT,
+                label=f"hyperliquid.ticker({symbol})",
+                logger=logger,
+            )
+        except Exception:
+            return None
+
+        if not isinstance(t, dict):
+            return None
+        last = t.get("last")
+        bid = t.get("bid")
+        ask = t.get("ask")
+        try:
+            last_f = float(last) if last is not None else None
+            bid_f = float(bid) if bid is not None else None
+            ask_f = float(ask) if ask is not None else None
+        except (TypeError, ValueError):
+            return None
+        price = last_f if last_f is not None else bid_f
+        if price is None:
+            return None
+        return {
+            "price": price,
+            "last": last_f,
+            "bid": bid_f,
+            "ask": ask_f,
+            "source": "hl:ticker",
+        }

@@ -40,11 +40,16 @@ uv run skills/run-all-l2/scripts/run.py AAPL --interval=4h --period=1mo --json
 | `TICKER`... (positional, repeatable) | — | At least one ticker required. Supports `provider:ticker`. |
 | `--json` | human | Emit JSON envelope to stdout. |
 | `--source=PROVIDER` | auto-detect | Force a data provider. |
-| `--interval=INTERVAL` | `1d` | `1m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. Passed to each L2. |
-| `--period=PERIOD` | `1y` | `1d`/`5d`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. Passed to each L2. |
+| `--interval=INTERVAL` | `1d` | `1m`/`2m`/`5m`/`15m`/`30m`/`1h`/`2h`/`4h`/`8h`/`12h`/`1d`/`3d`/`1wk`/`1M`. Passed to each L2. |
+| `--period=PERIOD` | `1y` | `1d`/`5d`/`1w`/`2w`/`3w`/`4w`/`1mo`/`3mo`/`6mo`/`1y`/`2y`/`5y`/`10y`/`ytd`/`max`. Passed to each L2. |
 | `--include-notes` | off | Auto-load active [`market-notes`](../market-notes/) for each ticker. |
+| `--fired-only` | off | Drop L2 skills whose pattern didn't fire (present=False or classification=None). |
+| `--fields=<csv>` | minimal | Project each per-ticker block to the listed keys. |
+| `--full` | — | Ship the complete envelope payload. |
 
-Both timeframe flags are validated — bad values exit 2 with a friendly error. JSON output includes top-level `interval`/`period` so the consumed timeframe is always visible to downstream agents.
+Both `--flag value` (space-separated) and `--flag=value` (equals) syntaxes are accepted; both are validated against `analysis/intervals.VALID_INTERVALS` / `VALID_PERIODS` — a bad value exits 2 with a friendly error. JSON output includes top-level `interval`/`period` so the consumed timeframe is always visible to downstream agents.
+
+**yfinance caveat:** when the resolved provider is yfinance and the requested (interval, period) is outside yfinance's per-interval lookback cap (e.g. `4h` beyond `1mo`, `1h` beyond `1mo`, `5m` beyond `5d`), the call returns `[]` and emits a stderr warning instead of letting yfinance 404 on the unknown token. Route around by using `hl:<ticker>` or `kraken:<ticker>` for non-daily intraday data.
 
 ## Runs
 

@@ -326,12 +326,12 @@ uv run skills/market-ema/scripts/run.py yf:AAPL --json
 
 ## Conventions
 
-- All analysis scripts (`market-*`, `strategy-*`, `run-all-*`, `market-basis`, `run-watchlist`) accept the same `--interval=` / `--period=` flags (defaults `1d` / `1y`). `position-watchdog` is config-driven — `interval` / `period` are set per watch in `watches.json` (default `4h` / `6mo`).
+- All analysis scripts (`market-*`, `strategy-*`, `run-all-*`, `market-basis`, `run-watchlist`) accept the same `--interval=` / `--period=` flags (defaults `1d` / `1y`). Both `--flag value` (space-separated) and `--flag=value` (equals) syntaxes work; bad values exit 2 with a friendly error pointing at the valid set. `position-watchdog` is config-driven — `interval` / `period` are set per watch in `watches.json` (default `4h` / `6mo`).
 - Scripts accept `--json` for machine-readable output, require a ticker as the first positional argument, and accept `--source=<provider>` (auto-detect by default).
 - `analysis/` functions are pure math — no I/O, no side effects.
 - Each skill follows the Agent Skills spec: `SKILL.md` + `lib.py` + `scripts/`.
-- Data providers in `analysis/providers/` implement the `Provider` protocol; execution providers implement the `ExecutionProvider` protocol. Add a new venue by implementing the protocol and registering it.
-- Skill return shapes (`L1Result`, `L2Result`, `L3Result`, `L3Idea`) and L2/L3 invariants (present/classification coupling, TP-ladder monotonicity, conviction `version`, soft-veto reasons) are defined in `analysis/contracts.py` and enforced by the strategies at emit time.
+- Data providers in `analysis/providers/data/` implement the `Provider` protocol; execution providers in `analysis/providers/execution/` implement the `ExecutionProvider` protocol. All four data providers (`kraken`, `hl`, `yf`, `ccxt:*`) now expose `fetch_spot_price` so `analysis.data.fetch_spot_price` returns a uniform `{price, last, bid, ask, source}` dict for any prefix. Add a new venue by implementing the protocol and registering it.
+- Skill return shapes (`L1Result`, `L2Result`, `L3Result`, `L3Idea`) and L2/L3 invariants (present/classification coupling, TP-ladder monotonicity, conviction `version`, soft-veto reasons) are defined in `analysis/contracts.py` and enforced by the strategies at emit time. L3 strategies emit a stable `rejection_reasons[]` tag list when `ideas=[]` so callers can branch without parsing `narrative`.
 - Per-user data (`market-watchlist`, `market-notes`, `position-watchdog`, `portfolio-mgmt`) lives under `skills/<name>/data/` and is gitignored; checked-in samples ship under `skills/<name>/examples/`.
 - All analysis scripts emit the [AXI output envelope](#output-envelope-axi) on `--json` (default 3-6 fields, `--fields=<csv>` for projection, `--full` for the full payload, `count` + `help[]` on every output). `--toon` is opt-in. The envelope is constructed via `analysis.output.envelope()`; lib.py return shapes (`L1Result`, `L2Result`, `L3Result`, `L3Idea`, `RegimeSignal`) are unchanged.
 
@@ -348,20 +348,26 @@ uv run skills/market-trend/scripts/run.py SPY --interval=1wk --period=5y --json
 
 # Bulk run-all-l2 at 1h over 6mo
 uv run skills/run-all-l2/scripts/run.py BTCUSD ETHUSD --interval=1h --period=6mo --json
+
+# Both space-separated and equals syntaxes
+uv run skills/market-rsi/scripts/run.py AAPL --interval 4h --period 2w --json
+uv run skills/run-all-l3/scripts/run.py hl:LIT --interval 4h --period 2w --json
 ```
 
 **Supported intervals** (union across providers): `1m`, `2m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `8h`, `12h`, `1d`, `3d`, `1wk`, `1M`.
 
-**Supported periods**: `1d`, `5d`, `1mo`, `3mo`, `6mo`, `1y`, `2y`, `5y`, `10y`, `ytd`, `max`.
+**Supported periods**: `1d`, `5d`, `1w`, `2w`, `3w`, `4w`, `1mo`, `3mo`, `6mo`, `1y`, `2y`, `5y`, `10y`, `ytd`, `max`.
 
-**Provider limits** (yfinance caps, the most common provider):
+**Provider limits (yfinance)** — the provider rejects incompatible (interval, period) pairs upfront at the boundary rather than letting yfinance silently interpret unknown tokens as ticker symbols:
 
 | Interval | Max period |
 |----------|------------|
-| `1m`–`30m` | ~60 days (script warns to stderr if exceeded) |
-| `1h`–`12h` | ~2 years (warns) |
+| `1m`–`30m` | `5d` |
+| `1h`, `2h`, `4h` | `1mo` |
 | `1d`+ | no effective limit |
 
-Source of truth: `analysis/intervals.py`. Kraken drops `1M`; Hyperliquid/CCXT drop the sub-hour `2m`. Check `analysis/providers/{kraken,hyperliquid,ccxt,yfinance}.py` if you need a non-standard interval on a specific provider.
+Anything outside the table returns an empty candle list with a clear stderr warning. Route around by using `hl:<ticker>` or `kraken:<ticker>` for non-daily intraday data — they support the full period range.
+
+Source of truth: `analysis/intervals.py` for the validation whitelist; `analysis/providers/data/yfinance.py::_YFINANCE_INTERVAL_MAX_PERIOD` for the per-interval cap map. Kraken drops `1M`; Hyperliquid/CCXT drop the sub-hour `2m`. Check the provider file if you need a non-standard interval on a specific venue.
 
 `position-watchdog` uses the same per-watch `interval`/`period` fields in `watches.json` (default `4h` / `6mo`). The same pair governs both the live-price tick and the L3 strategy evaluation — there is no split. Trade-off: alerts can lag by up to one full candle.

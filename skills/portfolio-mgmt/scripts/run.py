@@ -49,6 +49,37 @@ def _parse_price_overrides(raw: list[str] | None) -> dict[str, float]:
     return out
 
 
+def _resolve_portfolio_id(raw: str | int | None, db_path: str) -> int | None:
+    """Resolve ``--portfolio`` argument to a portfolio id.
+
+    Accepts either an integer id (``"2"`` or ``2``) or a portfolio name
+    (``"defi"``, case-sensitive — matches what ``portfolio show
+    id_or_name`` does). Returns ``None`` when no portfolio matches, so
+    callers can render a friendly error instead of a stack trace.
+
+    Lookup precedence: numeric ids first (so ``"2"`` resolves to id 2
+    even if a portfolio is also named ``"2"``), then by name. This
+    mirrors how ``portfolio show <id_or_name>`` resolves.
+    """
+    if raw is None:
+        return None
+    # Try numeric id first — parse "2" as int, look up. Falls through
+    # to name lookup only when the string isn't a clean integer or no
+    # row matched.
+    if isinstance(raw, str) and raw.isdigit():
+        pf = get_portfolio(db_path, int(raw))
+        if pf:
+            return int(pf["id"])
+    elif isinstance(raw, int):
+        pf = get_portfolio(db_path, raw)
+        if pf:
+            return int(pf["id"])
+    pf = get_portfolio(db_path, raw)
+    if not pf:
+        return None
+    return int(pf["id"])
+
+
 # ───────────────────────────────────────────────────────────────── subcommands
 
 
@@ -116,13 +147,10 @@ def cmd_portfolio_delete(args):
 
 
 def cmd_add(args):
-    pid = args.portfolio
-    pf = get_portfolio(args.db, pid)
-    if not pf:
-        print(f"Portfolio '{pid}' not found", file=sys.stderr)
+    pid = _resolve_portfolio_id(args.portfolio, args.db)
+    if pid is None:
+        print(f"Portfolio '{args.portfolio}' not found", file=sys.stderr)
         sys.exit(1)
-    if isinstance(pid, str):
-        pid = pf["id"]
 
     asset = args.asset
     side = args.side.upper()
@@ -161,9 +189,13 @@ def cmd_add(args):
 
 
 def cmd_list(args):
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     rows = list_transactions(
         args.db,
-        portfolio_id=args.portfolio,
+        portfolio_id=portfolio_id,
         asset=args.asset,
         side=args.side,
         since=args.since,
@@ -198,7 +230,10 @@ def _get_prices(args):
 
 
 def cmd_view(args):
-    portfolio_id = args.portfolio
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     prices = _get_prices(args)
     summary = get_portfolio_summary(args.db, portfolio_id, prices)
 
@@ -221,7 +256,10 @@ def cmd_view(args):
 
 
 def cmd_positions(args):
-    portfolio_id = args.portfolio
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     prices = _get_prices(args)
     positions = compute_positions(args.db, portfolio_id, prices)
 
@@ -246,7 +284,10 @@ def cmd_positions(args):
 
 
 def cmd_pnl(args):
-    portfolio_id = args.portfolio
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     prices = _get_prices(args)
     rows = compute_pnl(args.db, portfolio_id, prices)
 
@@ -271,7 +312,10 @@ def cmd_pnl(args):
 
 
 def cmd_lots(args):
-    portfolio_id = args.portfolio
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     lots = compute_lots(args.db, portfolio_id, args.asset)
     if args.json:
         print(json.dumps(lots, indent=2))
@@ -317,7 +361,10 @@ def cmd_prices_refresh(args):
 
 
 def cmd_replay(args):
-    portfolio_id = args.portfolio
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     events = replay_fifo(args.db, portfolio_id)
     if args.json:
         print(json.dumps(events, indent=2))
@@ -343,7 +390,10 @@ def cmd_replay(args):
 
 
 def cmd_reconcile(args):
-    portfolio_id = args.portfolio
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     if not args.balance_file:
         print("--balance-file is required", file=sys.stderr)
         sys.exit(1)
@@ -367,8 +417,12 @@ def cmd_reconcile(args):
 
 
 def cmd_allocation(args):
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     prices = _get_prices(args)
-    rows = compute_allocation(args.db, args.portfolio, prices)
+    rows = compute_allocation(args.db, portfolio_id, prices)
     if args.json:
         print(json.dumps(rows, indent=2))
         return
@@ -382,8 +436,12 @@ def cmd_allocation(args):
 
 
 def cmd_performance(args):
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
     prices = _get_prices(args)
-    rows = compute_performance(args.db, args.portfolio, prices)
+    rows = compute_performance(args.db, portfolio_id, prices)
     if args.json:
         print(json.dumps(rows, indent=2))
         return
@@ -402,7 +460,11 @@ def cmd_performance(args):
 
 
 def cmd_export(args):
-    rows = export_transactions(args.db, args.portfolio)
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db)
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
+    rows = export_transactions(args.db, portfolio_id)
     if args.format == "csv":
         import csv
         import io
@@ -515,7 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # list
     p = sub.add_parser("list", help="List transactions", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--asset")
     p.add_argument("--side", choices=[s.lower() for s in VALID_SIDES])
     p.add_argument("--since")
@@ -524,14 +586,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # view
     p = sub.add_parser("view", help="Portfolio summary", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--price-override", action="append", help="e.g. kraken:BTCUSD=45000")
     p.add_argument("--no-refresh", action="store_true", help="Use cached prices only, skip auto-fetch")
     p.set_defaults(func=cmd_view)
 
     # positions
     p = sub.add_parser("positions", help="Current holdings", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--asset")
     p.add_argument("--price-override", action="append", help="e.g. kraken:BTCUSD=45000")
     p.add_argument("--no-refresh", action="store_true", help="Use cached prices only, skip auto-fetch")
@@ -539,7 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # pnl
     p = sub.add_parser("pnl", help="P&L per asset", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--asset")
     p.add_argument("--price-override", action="append", help="e.g. kraken:BTCUSD=45000")
     p.add_argument("--no-refresh", action="store_true", help="Use cached prices only, skip auto-fetch")
@@ -547,7 +609,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # lots
     p = sub.add_parser("lots", help="Open FIFO lots", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--asset")
     p.set_defaults(func=cmd_lots)
 
@@ -571,29 +633,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     # allocation
     p = sub.add_parser("allocation", help="Portfolio allocation by asset", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--price-override", action="append", help="e.g. kraken:BTCUSD=45000")
     p.add_argument("--no-refresh", action="store_true", help="Use cached prices only, skip auto-fetch")
     p.set_defaults(func=cmd_allocation)
 
     # performance
     p = sub.add_parser("performance", help="Trading performance stats", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--no-refresh", action="store_true", help="Use cached prices only, skip auto-fetch")
     p.set_defaults(func=cmd_performance)
 
     p = sub.add_parser("replay", help="FIFO audit trail — shows every lot open and close", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.set_defaults(func=cmd_replay)
 
     p = sub.add_parser("reconcile", help="Compare computed positions against external balance file", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--balance-file", required=True, help='JSON file: {"asset": qty, ...}')
     p.set_defaults(func=cmd_reconcile)
 
     # export
     p = sub.add_parser("export", help="Export transactions to CSV or JSON", parents=[shared])
-    p.add_argument("--portfolio", type=int)
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
     p.add_argument("--format", choices=["csv", "json"], default="json")
     p.add_argument("--output", help="Output file path (default: stdout)")
     p.set_defaults(func=cmd_export)

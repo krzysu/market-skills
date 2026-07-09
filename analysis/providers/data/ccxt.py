@@ -19,12 +19,17 @@ def _period_to_since_ms(period: str) -> int:
     seconds = {
         "1d": 86400,
         "5d": 432000,
+        "1w": 604800,
+        "2w": 1209600,
+        "3w": 1814400,
+        "4w": 2419200,
         "1mo": 2592000,
         "3mo": 7776000,
         "6mo": 15552000,
         "1y": 31536000,
         "2y": 63072000,
         "5y": 157680000,
+        "10y": 315360000,
         "max": 1576800000,
     }
     return int(time.time() * 1000) - (seconds.get(period, 31536000) * 1000)
@@ -70,6 +75,39 @@ class CCXTProvider:
             pass
 
         return None
+
+    def fetch_spot_price(self, ticker: str) -> dict | None:
+        """Fetch live mid-price via ccxt ``fetch_ticker``.
+
+        Mirrors the Kraken/HL provider shape (``price``/``last``/``bid``/
+        ``ask``/``source``) so ``analysis.data.fetch_spot_price`` is
+        uniform across providers. Returns ``None`` on failure (symbol not
+        supported by this exchange, rate-limited, etc.).
+        """
+        if "/" not in ticker:
+            return None
+        try:
+            t = self._exchange.fetch_ticker(ticker)
+        except Exception:
+            return None
+        if not isinstance(t, dict):
+            return None
+        try:
+            last_f = float(t["last"]) if t.get("last") is not None else None
+            bid_f = float(t["bid"]) if t.get("bid") is not None else None
+            ask_f = float(t["ask"]) if t.get("ask") is not None else None
+        except (TypeError, ValueError, KeyError):
+            return None
+        price = last_f if last_f is not None else bid_f
+        if price is None:
+            return None
+        return {
+            "price": price,
+            "last": last_f,
+            "bid": bid_f,
+            "ask": ask_f,
+            "source": f"ccxt:{self._exchange.id}",
+        }
 
     def fetch(self, ticker: str, interval: str = "1d", period: str = "1y") -> list[list]:
         ccxt_interval = _INTERVAL_MAP.get(interval)

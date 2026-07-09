@@ -377,8 +377,14 @@ def _render_status_mode(watches: list[dict], args) -> int:
 
     Returns 0 if every watch returned a live price, 2 if any watch had a
     fetch failure (lines still print with a ``<fetch failed>`` fallback).
+
+    When ``args.json`` is set, output goes through the AXI envelope
+    (see ADR-0004): each watch is an item in ``data.watches[]`` and the
+    full event dict is shipped (LLM-agent-friendly — no Unicode-minus /
+    EUR-sign parsing). Human format (``--status`` only) is unchanged.
     """
     lines: list[str] = []
+    events: list[dict] = []
     any_failed = False
     for watch in watches:
         if not watch.get("enabled"):
@@ -419,7 +425,23 @@ def _render_status_mode(watches: list[dict], args) -> int:
             state=state,
             current_price=price,
         )
+        events.append(event)
         lines.append(format_as_default_status(event, ctx))
+
+    if args.json:
+        from analysis.output import emit_envelope_json
+
+        emit_envelope_json(
+            {"watches": events},
+            count=len(events),
+            help=[
+                "Run position-watchdog (no --status) to advance state and fire alerts",
+                "Pass --status --json for this structured read-only snapshot",
+            ],
+            errors=[f"fetch failed for {e['name']}" for e in events if e.get("current_price") is None],
+            toon=False,
+        )
+        return 2 if any_failed else 0
 
     for line in lines:
         print(line)
@@ -534,6 +556,11 @@ def main() -> int:
         help=f"Directory for per-watch state files (default: ${{{ENV_STATE_DIR}}} or {DEFAULT_STATE_DIR})",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print what would alert, don't update state")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the AXI envelope to stdout (machine-readable). Use with --status for a structured status snapshot.",
+    )
     parser.add_argument("--watch", help="Process only this watch by name (default: all enabled)")
     parser.add_argument(
         "--watchlist",

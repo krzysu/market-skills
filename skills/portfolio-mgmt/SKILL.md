@@ -43,14 +43,14 @@ add --portfolio <NAME> \
 
 The `--notes` JSON should at minimum include `order_id` plus the entry/stop/TP ladder for every trade with a level plan — this makes `pnl` queries answer "did this TP fire?" in one read.
 
-**Pitfall — `add` uses portfolio NAME, `positions/pnl/view` use ID.** The four subcommands take inconsistent flags:
-- `add --portfolio <NAME>` (NAME — string)
-- `positions --portfolio <ID>` (ID — integer)
-- `pnl --portfolio <ID>`
-- `view --portfolio <ID>`
-- `replay --portfolio <ID>` (also integer)
+**`--portfolio` accepts name OR integer ID on every subcommand.** `add`, `positions`, `pnl`, `view`, `lots`, `allocation`, `performance`, `replay`, `reconcile`, `export`, and `list` all resolve the argument via `portfolio get_portfolio(id_or_name)` — numeric IDs first, then by name. Use whichever is handier:
 
-Run `portfolio list` to resolve a portfolio NAME to its ID before using `positions`/`pnl`/`view`/`replay`. When logging a trade, use `add --portfolio <NAME>` (string).
+```bash
+add --portfolio defi --asset=hl:LIT --side buy --qty 100 --price 0.085      # by name
+positions --portfolio 2                                                    # by integer id (same effect)
+```
+
+If neither matches, the command exits non-zero with a friendly `No portfolio matching '<arg>'` message instead of crashing on the previous `invalid int value` shape.
 
 ## CLI
 
@@ -85,6 +85,8 @@ export [--portfolio X] [--format csv|json] [--output FILE]
 All commands accept `--json` for machine output and `--db PATH` to override the default database location.
 `init` creates the parent directory if it doesn't exist. The default DB path comes from `$MARKET_SKILLS_PORTFOLIO_DB`; the CLI raises if it is unset (no host-specific fallback).
 `view`, `positions`, `pnl`, `allocation`, `performance` automatically use cached prices from `prices refresh`. Override with `--price-override`.
+
+**Price freshness on `prices refresh`:** when a held asset doesn't expose a live spot endpoint, the cache falls back to the most recent daily candle close and the asset is flagged `ohlc:close` in the `price_cache.source` column. Stale-fallback assets are listed to stderr so operators can see when unrealized P&L is mark-to-stale rather than mark-to-market. All four providers (`kraken`, `hl`, `yf`, `ccxt:*`) now expose `fetch_spot_price`, so the fallback path is rare in practice.
 
 ## Asset format
 
