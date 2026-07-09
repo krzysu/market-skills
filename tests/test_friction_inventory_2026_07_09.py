@@ -248,6 +248,7 @@ class TestCLI3YfinanceIncompatibleComboRejected:
         [
             ("1d", "1y"),
             ("1d", "6mo"),
+            ("1d", "max"),  # yfinance serves 1d+max directly
             ("1h", "1mo"),  # yfinance supports 1h@1mo
             ("5m", "5d"),  # yfinance supports 5m@5d
         ],
@@ -265,6 +266,25 @@ class TestCLI3YfinanceIncompatibleComboRejected:
         # we test that _validate_yfinance_combo returns None for these
         # pairs (the upstream pre-check that decides whether to raise).
         assert _validate_yfinance_combo(interval, period) is None
+
+    @pytest.mark.parametrize(
+        "interval, period",
+        [
+            ("4h", "max"),
+            ("1h", "max"),
+            ("5m", "max"),
+            ("1wk", "max"),
+        ],
+    )
+    def test_incompatible_max_with_non_1d_rejected(self, interval, period):
+        """('non-1d', 'max') still raises — only 1d+max is allowed."""
+        from analysis.providers.data.yfinance import (
+            YFinanceIncompatibleTimeframeError,
+            _validate_yfinance_combo,
+        )
+
+        with pytest.raises(YFinanceIncompatibleTimeframeError):
+            _validate_yfinance_combo(interval, period)
 
 
 # ──────────────────────────────────────────────────────────────────── DATA-1

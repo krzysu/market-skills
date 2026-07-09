@@ -143,7 +143,21 @@ def main():
         idea_fields = resolve_fields(
             fields_arg,
             full=full,
-            default=["pair", "direction", "conviction", "version", "entry_price", "stop_loss"],
+            default=[
+                "strategy_name",
+                "idea_id",
+                "entry_price",
+                "entry_range",
+                "direction",
+                "conviction",
+                "stop_loss",
+                "take_profit",
+                "rr_to_tp",
+                "tp1",
+                "tp2",
+                "tp3",
+                "tp1_pct",
+            ],
         )
         for t in tickers:
             candles = fetch_ohlc(t, interval=interval, period=period, source=source)

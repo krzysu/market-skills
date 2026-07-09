@@ -469,6 +469,16 @@ def _process_watch(
     """
     name = watch["name"]
     monitor = watch["monitor_provider"]
+    # Warn if watch name's provider prefix mismatches monitor_provider
+    name_provider = name.split(":")[0] if ":" in name else None
+    mon_provider = monitor.split(":")[0] if ":" in monitor else None
+    if name_provider and mon_provider and name_provider != mon_provider:
+        suggested = f"{name_provider}:{_bare_ticker(name)}"
+        print(
+            f"[WARN] watch '{name}' uses monitor_provider '{monitor}' (provider={mon_provider}) — "
+            f"consider setting monitor_provider = '{suggested}' for accurate pricing",
+            file=sys.stderr,
+        )
     interval = watch.get("interval", "4h")
     period = watch.get("period", "6mo")
 
