@@ -224,15 +224,23 @@ class TestScriptPlumbing:
     )
     def test_per_skill_uses_safe_parse_args(self, script_path):
         """Each CLI script should import `safe_parse_args` (not the raw
-        `parse_args`), so bad interval/period values get friendly errors."""
+        `parse_args`), so bad interval/period values get friendly errors.
+
+        For market-* skills the call lives in ``main()``. For
+        strategy-* skills the call lives in the shared
+        :mod:`analysis.strategy_runner` — we confirm the script
+        delegates to that runner instead.
+        """
         run_mod = _load_run_script(script_path)
-        # We can't introspect imports directly, but we can confirm the
-        # main() function unpacks 5 values from safe_parse_args
         import inspect
 
         src = inspect.getsource(run_mod.main)
+        if "strategy-" in script_path:
+            assert "run_strategy_cli" in src, (
+                f"{script_path} should delegate to analysis.strategy_runner.run_strategy_cli"
+            )
+            return
         assert "safe_parse_args" in src, f"{script_path} should use safe_parse_args"
-        # Confirm the tuple unpacks all 5 values
         assert "interval" in src and "period" in src
 
 

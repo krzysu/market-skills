@@ -131,7 +131,9 @@ class TestHomeViewEndToEnd:
     def test_strategy_trend_follow_run_then_home_view(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         mod = _load_skill_run("strategy-trend-follow")
-        monkeypatch.setattr(mod, "fetch_ohlc", lambda *a, **kw: _make_candles())
+        from analysis import strategy_runner
+
+        monkeypatch.setattr(strategy_runner, "fetch_ohlc", lambda *a, **kw: _make_candles())
 
         from analysis import watchlist as wl
 
@@ -155,7 +157,7 @@ class TestHomeViewEndToEnd:
                     "narrative": "test narrative",
                 }
 
-        monkeypatch.setattr(mod, "load_lib_for_script", lambda _p: _FakeLib)
+        monkeypatch.setattr(strategy_runner, "load_lib_for_script", lambda _p: _FakeLib)
 
         rc = _run_cli(mod, "AAPL", "--json", monkeypatch=monkeypatch)
         assert rc in (0, None)

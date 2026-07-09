@@ -66,8 +66,10 @@ def _run_skill(skill_name, *argv, candles=None, monkeypatch):
     mod = _load_skill_run(skill_name)
     if candles is None:
         candles = _make_candles()
-    monkeypatch.setattr(mod, "fetch_ohlc", lambda *a, **kw: candles)
-    monkeypatch.setattr(mod, "metadata_for", lambda t: {})
+    from analysis import strategy_runner
+
+    monkeypatch.setattr(strategy_runner, "fetch_ohlc", lambda *a, **kw: candles)
+    monkeypatch.setattr(strategy_runner, "metadata_for", lambda t: {})
     return _run_cli(mod, *argv), mod
 
 

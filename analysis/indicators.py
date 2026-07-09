@@ -28,22 +28,6 @@ def compute_sma(values, period):
     return sum(values[-period:]) / period
 
 
-def compute_sma_series(values, period):
-    """Rolling SMA over the full series.
-
-    Returns list of length len(values) - period + 1.
-    """
-    n = len(values)
-    if n < period:
-        return []
-    window = sum(values[:period])
-    out = [window / period]
-    for i in range(period, n):
-        window += values[i] - values[i - period]
-        out.append(window / period)
-    return out
-
-
 def stdev(values, period):
     """Population standard deviation of the last `period` values."""
     if len(values) < period:

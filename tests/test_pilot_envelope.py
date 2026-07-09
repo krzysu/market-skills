@@ -174,7 +174,9 @@ class TestStrategyTrendFollowEnvelope:
         mod = _load_skill_run("strategy-trend-follow")
         if candles is None:
             candles = _make_candles()
-        monkeypatch.setattr(mod, "fetch_ohlc", lambda *a, **kw: candles)
+        from analysis import strategy_runner
+
+        monkeypatch.setattr(strategy_runner, "fetch_ohlc", lambda *a, **kw: candles)
         return _run_cli(mod, *argv)
 
     def test_envelope_keys(self, capsys, monkeypatch):
