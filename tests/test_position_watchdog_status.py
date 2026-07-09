@@ -11,6 +11,7 @@ Covers:
   6. --status treats stale state (>24h old) as empty; streak from stale state is NOT rendered.
   7. --status with a watch that has no entry_price omits the % from entry clause.
   8. Per-watch smoke test over six real-config snippets (ETH, HYPE, NEAR, PAXG, VVV, ZEC).
+  9. Provider mismatch warning when watch name prefix != monitor_provider prefix.
 
 Two test categories:
   * CLI/round-trip tests (3, 4) — invoke ``run.main()`` end-to-end via the
@@ -27,6 +28,7 @@ import io
 import json
 import os
 import sys
+from unittest.mock import patch
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SKILLS_DIR = os.path.join(_REPO_ROOT, "skills", "position-watchdog")
@@ -423,3 +425,65 @@ def test_status_per_watch_zec_no_entry() -> None:
     assert "[ZEC] @ $505.00" in line
     assert "from entry" not in line
     assert "🟢 T2 limit zone" in line
+
+
+class TestProviderMismatchWarning:
+    """FO-3: provider prefix in watch name != monitor_provider prefix logs a warning."""
+
+    def _load_run(self):
+        return _load_module("position_watchdog_run_mismatch", _RUN_PATH)
+
+    def _watch(self, name: str, monitor: str) -> dict:
+        return {
+            "name": name,
+            "monitor_provider": monitor,
+            "enabled": True,
+            "interval": "1d",
+            "period": "1y",
+        }
+
+    def test_hl_name_with_kraken_monitor_logs_warning(self, capsys):
+        run = self._load_run()
+        watch = self._watch("hl:LIT", "kraken:LITUSD")
+        with (
+            patch.object(run, "_current_price", return_value=100.0),
+            patch.object(run, "_load_state", return_value={}),
+            patch.object(run, "_save_state"),
+            patch.object(run, "_state_is_stale", return_value=False),
+            patch.object(run, "_build_ctx", return_value={}),
+        ):
+            run._process_watch(watch, "/fake/config.json", dt.datetime.now(dt.UTC).timestamp())
+
+        err = capsys.readouterr().err
+        assert "[WARN]" in err
+        assert "monitor_provider" in err.lower() or "mismatch" in err.lower()
+
+    def test_matching_providers_no_warning(self, capsys):
+        run = self._load_run()
+        watch = self._watch("hl:LIT", "hl:LITUSD")
+        with (
+            patch.object(run, "_current_price", return_value=100.0),
+            patch.object(run, "_load_state", return_value={}),
+            patch.object(run, "_save_state"),
+            patch.object(run, "_state_is_stale", return_value=False),
+            patch.object(run, "_build_ctx", return_value={}),
+        ):
+            run._process_watch(watch, "/fake/config.json", dt.datetime.now(dt.UTC).timestamp())
+
+        err = capsys.readouterr().err
+        assert "[WARN]" not in err
+
+    def test_no_provider_prefix_in_name_no_warning(self, capsys):
+        run = self._load_run()
+        watch = self._watch("LIT", "kraken:LITUSD")
+        with (
+            patch.object(run, "_current_price", return_value=100.0),
+            patch.object(run, "_load_state", return_value={}),
+            patch.object(run, "_save_state"),
+            patch.object(run, "_state_is_stale", return_value=False),
+            patch.object(run, "_build_ctx", return_value={}),
+        ):
+            run._process_watch(watch, "/fake/config.json", dt.datetime.now(dt.UTC).timestamp())
+
+        err = capsys.readouterr().err
+        assert "[WARN]" not in err

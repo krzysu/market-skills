@@ -73,6 +73,9 @@ def _validate_yfinance_combo(interval: str, period: str) -> None:
             f"yfinance provider does not support interval={interval!r} — "
             f"known intervals: {sorted(_YFINANCE_INTERVAL_MAX_PERIOD)}"
         )
+    # yfinance serves ('1d', 'max') directly — bypass the rank gate
+    if interval == "1d" and period == "max":
+        return
     requested_rank = _PERIOD_RANK.get(period)
     if requested_rank is None:
         return  # unknown period — let the validator upstream flag it

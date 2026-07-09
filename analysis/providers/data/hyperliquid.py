@@ -72,13 +72,23 @@ class HyperliquidProvider:
         self._exchange = hyperliquid({"enableRateLimit": True})
         self._markets_loaded = False
 
-    def _ensure_markets(self):
-        if not self._markets_loaded:
-            swap_markets = self._exchange.fetch_swap_markets()
-            self._exchange.markets = {m["symbol"]: m for m in swap_markets}
-            self._exchange.markets_by_id = {str(m["id"]): m for m in swap_markets}
-            self._exchange.symbols = [m["symbol"] for m in swap_markets]
-            self._markets_loaded = True
+    def _ensure_markets(self) -> None:
+        if self._markets_loaded:
+            return
+        swap_markets = self._exchange.fetch_swap_markets()
+        try:
+            spot_markets = self._exchange.fetch_spot_markets()
+        except Exception:
+            spot_markets = []
+        self._exchange.markets = {m["symbol"]: m for m in swap_markets}
+        for m in spot_markets:
+            self._exchange.markets.setdefault(m["symbol"], m)
+        self._exchange.markets_by_id = {str(m["id"]): m for m in swap_markets}
+        self._exchange.symbols = list(self._exchange.markets.keys())
+        # Prevent fetch_ticker / any other ccxt method from re-triggering
+        # the broken fetch_spot_markets call (TypeError on None base)
+        self._exchange.fetch_spot_markets = lambda params={}: []
+        self._markets_loaded = True
 
     def supports(self, ticker: str) -> bool:
         try:

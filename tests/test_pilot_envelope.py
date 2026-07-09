@@ -199,8 +199,23 @@ class TestStrategyTrendFollowEnvelope:
         env = _envelope_of(capsys)
         if env["data"]["ideas"]:
             for idea in env["data"]["ideas"]:
-                for k in ("pair", "direction", "conviction", "version", "entry_price", "stop_loss"):
-                    assert k in idea, f"missing {k} in default idea fields"
+                canonical = [
+                    "strategy_name",
+                    "idea_id",
+                    "entry_price",
+                    "entry_range",
+                    "direction",
+                    "conviction",
+                    "stop_loss",
+                    "take_profit",
+                    "rr_to_tp",
+                    "tp1",
+                    "tp2",
+                    "tp3",
+                    "tp1_pct",
+                ]
+                for k in canonical:
+                    assert k in idea, f"missing {k!r} in default idea fields (has {sorted(idea)})"
 
     def test_full_includes_reasoning(self, capsys, monkeypatch):
         self._run("AAPL", "--json", "--full", monkeypatch=monkeypatch)

@@ -71,7 +71,7 @@ This repo does NOT own a Python orchestrator that auto-pipes signals to executio
 
 - All `scripts/run.py` accept `--json` for machine output, require a ticker as first positional argument, and `--source=<provider>`.
 - Ruff: `skills/*/scripts/run.py` only ignore E501 (long display f-strings). No E402 — `analysis.skill_loader.load_lib_for_script(__file__)` replaced the `sys.path.insert` dance.
-- Provider notation: `provider:ticker` (e.g. `hl:LIT`, `yf:AAPL`, `kraken:BTC-USD`).
+- Provider notation: `provider:ticker` (e.g. `hl:LIT`, `yf:AAPL`, `kraken:BTCUSD`).
 - Never use `l` as a variable name — ambiguous with `1`, triggers E741.
 - **No backward compatibility.** When you change a public name, signature, or path, update every caller in the same commit. Do not add re-export shims, deprecation aliases, or `*_legacy` modules. The repo is consumed by an LLM that reads fresh `SKILL.md` on every call — there is no installed-base to protect.
 - Commit messages: single line, semantic prefix (`feat:` / `fix:` / `docs:` / `refactor:` / `test:` / `chore:` / `perf:` / `style:` / `build:` / `ci:`). Format: `<prefix>: <imperative summary, lowercase after the prefix>`. Good: `fix: use live Kraken ticker instead of stale daily OHLC close`. Bad: `Fix: address HYPE price issue`, `fix(portfolio): ...\n\nLong body...`.
