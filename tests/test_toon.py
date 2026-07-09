@@ -18,7 +18,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from analysis.output import toon_dump, toon_load
+from analysis.toon import toon_dump, toon_load
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

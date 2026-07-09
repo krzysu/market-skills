@@ -25,6 +25,11 @@ import uuid
 from analysis.providers.execution import (
     kraken_spot as _execution_kraken,  # noqa: F401 — side-effect: registers provider
 )
+from analysis.providers.execution._cli_common import (
+    _confirm,
+    _emit_json,
+    _resolve_portfolio_id,
+)
 from analysis.providers.execution.base import (
     Intent,
     get_execution_provider,
@@ -35,18 +40,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.dirname(HERE)
 
 _lib = load_lib_for_script(__file__)
-
-
-def _emit_json(payload: dict | list) -> None:
-    print(json.dumps(payload, indent=2, default=str))
-
-
-def _confirm(prompt: str) -> bool:
-    try:
-        reply = input(prompt)
-    except EOFError:
-        return False
-    return reply.strip().lower() in ("y", "yes")
 
 
 def _vet_afk_gate(intent, args):
@@ -74,19 +67,6 @@ def _vet_afk_gate(intent, args):
     except (OSError, ValueError, KeyError, TypeError) as e:
         print(f"warning: AFK gate evaluation failed: {type(e).__name__}: {e}", file=sys.stderr)
         return {"gate": "passed", "status": "APPROVED", "reason": "afk evaluation error", "detail": {}}
-
-
-def _resolve_portfolio_id(db_path: str, portfolio: str | None) -> int | None:
-    """Resolve a portfolio id from a name/id argument. Returns None if not specified."""
-    if not portfolio:
-        return None
-    from portfolio.db import get_portfolio
-
-    pf = get_portfolio(db_path, portfolio)
-    if pf is None:
-        print(f"error: portfolio '{portfolio}' not found in {db_path}", file=sys.stderr)
-        sys.exit(2)
-    return pf["id"]
 
 
 def _resolve_intent(args: argparse.Namespace) -> Intent:

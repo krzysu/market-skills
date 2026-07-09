@@ -31,6 +31,11 @@ import sys
 from analysis.providers.execution import (
     kraken_perps as _execution_kraken_perps,  # noqa: F401 — side-effect: registers provider
 )
+from analysis.providers.execution._cli_common import (
+    _confirm,
+    _emit_json,
+    _resolve_portfolio_id,
+)
 from analysis.providers.execution.base import (
     Intent,
     get_execution_provider,
@@ -40,24 +45,12 @@ from analysis.skill_loader import load_lib_for_script
 _lib = load_lib_for_script(__file__)
 
 
-def _emit_json(payload: dict | list) -> None:
-    print(json.dumps(payload, indent=2, default=str))
-
-
-def _confirm(prompt: str) -> bool:
-    try:
-        reply = input(prompt)
-    except EOFError:
-        return False
-    return reply.strip().lower() in ("y", "yes")
-
-
 def _vet_afk_gate(intent):
     """Wrap ``analysis.risk.afk.vet_afk`` for perps execution.
 
     Perps position sizing uses ``position_value`` (notional in quote
     ccy) instead of ``volume * limit_price``. The position_cap gate
-    reads ``volume * limit_price`` and treats perps as
+    reads ``volume * limit_price` and treats perps as
     ``volume * limit_price`` (best-effort); for AFK the notional comes
     from ``extras.position_value`` when supplied. We pass total_value=0
     so the gate degrades to fail-open on missing data, matching spot.
@@ -90,19 +83,6 @@ def _vet_afk_gate(intent):
         intent["volume"] = original_volume
         if original_limit_price is None:
             intent.pop("limit_price", None)
-
-
-def _resolve_portfolio_id(db_path: str, portfolio: str | None) -> int | None:
-    """Resolve portfolio name/id to its DB row id."""
-    if not portfolio:
-        return None
-    from portfolio.db import get_portfolio
-
-    pf = get_portfolio(db_path, portfolio)
-    if pf is None:
-        print(f"error: portfolio '{portfolio}' not found in {db_path}", file=sys.stderr)
-        sys.exit(2)
-    return pf["id"]
 
 
 def _resolve_intent(args: argparse.Namespace, *, intent_id: str) -> Intent:

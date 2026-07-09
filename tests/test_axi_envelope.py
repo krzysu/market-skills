@@ -23,10 +23,10 @@ from analysis.output import (
     envelope,
     project_fields,
     render_home_view,
-    toon_dump,
     truncate,
     write_state_cache,
 )
+from analysis.toon import toon_dump
 
 
 class TestEnvelopeShape:
@@ -138,7 +138,7 @@ class TestTruncate:
 
 class TestToonDump:
     def test_round_trip_with_toon_load(self):
-        from analysis.output import toon_load
+        from analysis.toon import toon_load
 
         obj = {"a": 1, "b": [1, 2, 3], "c": None}
         out = toon_dump(obj)
@@ -181,7 +181,7 @@ class TestEmitEnvelopeJson:
         assert parsed["help"] == ["try x --json"]
 
     def test_toon_flag_emits_toon_payload(self, capsys):
-        from analysis.output import toon_load
+        from analysis.toon import toon_load
 
         emit_envelope_json({"a": 1}, count=1, toon=True)
         out = capsys.readouterr().out

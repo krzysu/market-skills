@@ -7,13 +7,6 @@ from datetime import UTC, datetime
 from analysis.intervals import DEFAULT_INTERVAL, DEFAULT_PERIOD, validate_timeframe
 
 
-def clamp(val, min_val=0, max_val=100):
-    """Clamp a numeric value to a range."""
-    if val is None:
-        return None
-    return max(min_val, min(max_val, val))
-
-
 def safe_round(val, ndigits=2):
     """Round a number, returning None if input is None."""
     if val is None:

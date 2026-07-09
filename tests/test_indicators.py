@@ -16,7 +16,6 @@ from analysis.indicators import (
     compute_obv_trend,
     compute_rsi,
     compute_sma,
-    compute_sma_series,
     compute_squeeze,
     detect_crossover,
     detect_obv_divergence,
@@ -59,13 +58,6 @@ class TestSMA:
 
     def test_insufficient_data(self):
         assert compute_sma([1.0, 2.0], 5) is None
-
-    def test_sma_series(self):
-        values = list(range(1, 11))
-        series = compute_sma_series(values, 3)
-        assert len(series) == 8
-        assert series[0] == pytest.approx(2.0)  # (1+2+3)/3
-        assert series[-1] == pytest.approx(9.0)  # (8+9+10)/3
 
 
 class TestStdev:
