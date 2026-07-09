@@ -203,37 +203,61 @@ def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y", source: st
     Raises:
         ValueError: if ``interval`` or ``period`` is not in the supported set
             (see ``analysis.intervals``).
+        YFinanceIncompatibleTimeframeError: if the resolved provider is
+            yfinance and the (interval, period) combo can't be served.
+            yfinance would otherwise 404 with a misleading "symbol may
+            be delisted" message because it interprets unknown tokens
+            like ``4h`` as ticker symbols.
     """
     validate_timeframe(interval, period)
 
     # Try explicit `provider:ticker` routing first
-    explicit = _resolve_explicit(ticker, interval, period)
+    explicit = _resolve_ticker_prefix(ticker)
     if explicit is not None:
-        candles, provider_name = explicit
-        _log_provider_warn(provider_name, interval, period)
-        return candles
+        raw_ticker, provider_name = explicit
+        return _fetch_from_provider(provider_name, raw_ticker, interval, period)
 
     # Legacy source argument (used by some scripts)
     if source:
-        try:
-            provider = _get_provider(source)
-            _log_provider_warn(provider.name, interval, period)
-            return provider.fetch(ticker, interval, period)
-        except Exception as e:
-            logger.warning("fetch_ohlc(source=%s, %s): %s", source, ticker, e)
-            return []
+        return _fetch_from_provider(source, ticker, interval, period)
 
     # Auto-detect: try each provider in registry order
     for p in _REGISTRY:
         if p.supports(ticker):
             try:
-                _log_provider_warn(p.name, interval, period)
-                return p.fetch(ticker, interval, period)
+                return _fetch_from_provider(p.name, ticker, interval, period)
             except Exception as e:
                 logger.debug("fetch_ohlc(auto, %s=%s): %s", p.name, ticker, e)
                 continue
 
     return []
+
+
+def _fetch_from_provider(provider_name: str, raw_ticker: str, interval: str, period: str) -> list[list]:
+    """Dispatch to one provider and emit the yfinance cap warning on success.
+
+    Raises :class:`YFinanceIncompatibleTimeframe` from yfinance's own
+    boundary when the requested combo isn't serveable. Other providers
+    return ``[]`` on any error (timeout, no data, etc.) — the existing
+    contract.
+    """
+    try:
+        provider = _get_provider(provider_name)
+    except Exception as e:
+        logger.warning("_fetch_from_provider(%s): unknown provider: %s", provider_name, e)
+        return []
+    try:
+        candles = provider.fetch(raw_ticker, interval, period)
+    except Exception as e:
+        if provider_name == "yfinance":
+            # Surface the incompatibility to the caller — yfinance swallows
+            # bad (interval, period) combos into a misleading 404.
+            logger.warning("fetch_ohlc(yfinance, %s, %s/%s): %s", raw_ticker, interval, period, e)
+        else:
+            logger.debug("fetch_ohlc(%s, %s, %s/%s): %s", provider_name, raw_ticker, interval, period, e)
+        return []
+    _log_provider_warn(provider_name, interval, period)
+    return candles
 
 
 def _log_provider_warn(provider_name: str, interval: str, period: str) -> None:

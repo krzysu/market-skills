@@ -64,6 +64,7 @@ class L3Idea(TypedDict):
 class L3Result(TypedDict):
     ideas: list[L3Idea]
     narrative: str
+    rejection_reasons: NotRequired[list[str]]  # when ideas=[]; lets LLM agents branch without parsing narrative
 
 
 # --- Macro domain (cross-asset regime context) ---
@@ -126,6 +127,16 @@ class RegimeSignal(TypedDict):
     consumers that read only the label never see a partial regime
     mislabelled as RISK_ON / RISK_OFF. The downstream policy that
     treats UNKNOWN as adverse (regime_consistency) fires accordingly.
+
+    ``missing_inputs`` is the structured mirror of ``errors``: a list
+    of input names that failed (``fng`` / ``vix`` / ``dxy`` / ``us10y``
+    / ``btc_dominance`` / ``total_mcap_usd``). Lets LLM agents ask
+    "which input failed?" without parsing ``regime_note`` or
+    string-matching ``errors[]``. Always a list (empty when the regime
+    is complete), matching the AXI envelope's structured-errors
+    principle. ``btc_dominance`` / ``total_mcap_usd`` share the
+    CoinGecko upstream; either appearing here means the CoinGecko
+    HTTP call (or its total-mcap field) failed.
     """
 
     timestamp: str
@@ -133,6 +144,7 @@ class RegimeSignal(TypedDict):
     regime: MacroRegime
     errors: list[str]  # per-source fetch failures ("fng: timeout", "coingecko: 429", ...)
     incomplete: bool  # bool(errors); canonical "regime degraded" flag
+    missing_inputs: list[str]  # structured: ["vix", "btc_dominance"] etc.
     regime_note: str
 
 

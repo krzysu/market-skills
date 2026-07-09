@@ -188,6 +188,48 @@ def _fetch_coingecko(
 # --- Classification -----------------------------------------------------------
 
 
+def _missing_inputs_from_errors(errors: list[str]) -> list[str]:
+    """Extract a structured list of input names that failed to fetch.
+
+    ``errors[]`` entries follow the pattern ``"<label>: <reason>"`` where
+    ``<label>`` is the short source key (one of the ``_LABEL_*``
+    constants: ``fng``, ``vix``, ``dxy``, ``us10y``, ``btc_mcap``,
+    ``coingecko``). This helper extracts the labels, deduplicates, and
+    returns them in the order they first appear — so an LLM agent can
+    ask "which inputs failed?" without parsing the human-render
+    ``regime_note`` or string-matching ``errors[]``.
+
+    CoinGecko upstream provides both ``total_mcap_usd`` and the
+    fallback ``btc_dominance`` (via ``market_cap_percentage``); when
+    the call fails, both downstream inputs are reported as missing.
+    """
+    if not errors:
+        return []
+    # Map source labels to the user-facing input names from ``inputs``.
+    # A single source label can map to multiple inputs when one HTTP
+    # call produces several semantic fields.
+    label_to_inputs: dict[str, tuple[str, ...]] = {
+        _LABEL_FNG: ("fng",),
+        _LABEL_VIX: ("vix",),
+        _LABEL_DXY: ("dxy",),
+        _LABEL_US10Y: ("us10y",),
+        _LABEL_BTC_MCAP: ("btc_dominance",),
+        _LABEL_COINGECKO: ("btc_dominance", "total_mcap_usd"),
+    }
+    seen: set[str] = set()
+    out: list[str] = []
+    for err in errors:
+        if not isinstance(err, str) or ":" not in err:
+            continue
+        label = err.split(":", 1)[0].strip()
+        for canonical in label_to_inputs.get(label, ()):
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            out.append(canonical)
+    return out
+
+
 def _classify_risk_appetite(vix: float | None, dxy: float | None, us10y: float | None) -> str:
     """Map (vix, dxy, us10y) to a risk-appetite label.
 
@@ -415,12 +457,19 @@ def fetch_regime(
     if incomplete and not note.startswith("[REGIME INCOMPLETE"):
         note = f"[REGIME INCOMPLETE — {len(errors)} input(s) missing] " + note
 
+    # Structured per-input missing map. Lets LLM agents ask
+    # "is BTC mcap missing?" without parsing the errors[] strings or the
+    # regime_note prefix. Populated from errors[] labels (each carries
+    # the input name as its first token, e.g. "fng: timeout").
+    missing_inputs = _missing_inputs_from_errors(errors)
+
     signal: dict[str, Any] = {
         "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
         "inputs": inputs_payload,
         "regime": regime_payload,
         "errors": errors,
         "incomplete": incomplete,
+        "missing_inputs": missing_inputs,
         "regime_note": note,
     }
 

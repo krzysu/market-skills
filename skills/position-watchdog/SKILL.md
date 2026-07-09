@@ -308,7 +308,7 @@ uv run skills/position-watchdog/scripts/run.py \
   --status
 ```
 
-Output example:
+Human output example:
 
 ```
 [VVV] @ $10.39 | 🟡 T2 wait zone (no add) — above T1 add zone ($7.50–$9.00); invalid <$8.00; drop −20.0%, −10.0% fired | −33.9% from entry $15.73; above entry streak=3
@@ -316,9 +316,50 @@ Output example:
 [HYPE] @ $68.35 | no active zone | +13.6% from entry $60.15
 ```
 
+### `--status --json` (machine-readable snapshot)
+
+`--status --json` emits the same data through the AXI envelope so the LLM
+agent brain can read the snapshot without parsing Unicode-minus signs or
+euro symbols out of the human-render text:
+
+```bash
+uv run skills/position-watchdog/scripts/run.py \
+  --config /path/to/watches.json \
+  --status --json
+```
+
+Envelope shape:
+
+```json
+{
+  "data": {
+    "watches": [
+      {
+        "name": "VVV",
+        "current_price": 10.39,
+        "entry_price": 15.73,
+        "prev_price": 10.50,
+        "above_entry_streak": 3,
+        "alerted_levels": {"drop:-10": "fired", "drop:-20": "fired", "recovery": "fired"},
+        "active_zone": {"label": "T2 wait zone (no add)", "emoji": "🟡", "low": 9.5, "high": 11.5},
+        "next_zone_below": {"label": "T1 add zone", "emoji": "🟢", "low": 7.5, "high": 9.0},
+        "invalidation_floor": 8.0,
+        "next_tp_unfired": null,
+        "fired_drops": [{"pct": -20.0}, {"pct": -10.0}],
+        "position_size": null,
+        "pct_from_entry": -33.92
+      }
+    ]
+  },
+  "count": 1,
+  "errors": [],
+  "help": ["Run position-watchdog (no --status) to advance state and fire alerts", "Pass --status --json for this structured read-only snapshot"]
+}
+```
+
 Notes:
 - `--watch` is ignored when `--status` is set; status mode always renders every enabled watch (pipe to `grep VVV` to filter).
-- Per-watch fetch failure renders as `<fetch failed>` and falls back to the last `prev_price` from state for the `% from entry` clause.
+- Per-watch fetch failure renders as `<fetch failed>` in human mode and as `current_price: null` in JSON mode; lines still print with a fallback to the last `prev_price` from state for the `% from entry` clause.
 - Stale state (>24h old) is treated as empty so streaks and `alerted_levels` reflect only the current tick + config.
 - Exit codes: `0` clean (all live prices returned), `2` partial (one or more fetches failed but lines still print).
 - No new state fields, no new thresholds, no behavioral change to the existing tick path.

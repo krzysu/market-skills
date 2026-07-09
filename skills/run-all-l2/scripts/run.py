@@ -26,9 +26,12 @@ def _parse_argv(argv):
     interval = DEFAULT_INTERVAL
     period = DEFAULT_PERIOD
     fired_only = False
-    for a in argv:
+    i = 0
+    while i < len(argv):
+        a = argv[i]
         if a == "--json":
             json_mode = True
+            i += 1
         elif a in ("--help", "-h"):
             print(
                 "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
@@ -36,18 +39,44 @@ def _parse_argv(argv):
                 "[--fired-only] [--fields=<csv>] [--full]"
             )
             sys.exit(0)
-        elif a.startswith("--source="):
-            source = a.split("=", 1)[1]
-        elif a.startswith("--interval="):
-            interval = a.split("=", 1)[1]
-        elif a.startswith("--period="):
-            period = a.split("=", 1)[1]
+        elif a == "--source" or a.startswith("--source="):
+            if a.startswith("--source="):
+                source = a.split("=", 1)[1]
+                i += 1
+            elif i + 1 < len(argv):
+                source = argv[i + 1]
+                i += 2
+            else:
+                raise ValueError("--source requires a value")
+        elif a == "--interval" or a.startswith("--interval="):
+            if a.startswith("--interval="):
+                interval = a.split("=", 1)[1]
+                i += 1
+            elif i + 1 < len(argv):
+                interval = argv[i + 1]
+                i += 2
+            else:
+                raise ValueError("--interval requires a value")
+        elif a == "--period" or a.startswith("--period="):
+            if a.startswith("--period="):
+                period = a.split("=", 1)[1]
+                i += 1
+            elif i + 1 < len(argv):
+                period = argv[i + 1]
+                i += 2
+            else:
+                raise ValueError("--period requires a value")
         elif a == "--include-notes":
             include_notes = True
+            i += 1
         elif a == "--fired-only":
             fired_only = True
+            i += 1
         elif not a.startswith("--"):
             tickers.append(a)
+            i += 1
+        else:
+            raise ValueError(f"unrecognized flag: {a}")
     validate_timeframe(interval, period)
     return tickers, json_mode, source, interval, period, include_notes, fired_only
 

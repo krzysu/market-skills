@@ -25,6 +25,7 @@ The first call typically shows several "no cache" freshness entries; populate th
 | Flag | Default | Notes |
 |------|---------|-------|
 | `--json` | human | Emit the AXI envelope to stdout. |
+| `--refresh` | off | Bypass the macro TTL cache and re-fetch the regime before composing the dashboard. Other sources still read from their on-disk cache; this flag is the explicit "I know the macro is stale" override. The home-view stdout / JSON `help[]` both list which sources were refreshed in this run. |
 | `--fields=<csv>` | `summary,freshness,sources_cached,sources_total` | Project the dashboard. |
 | `--full` | — | Full payload including slim source views. |
 
@@ -34,12 +35,14 @@ The dashboard composes 6 cached sources. Each source contributes a slim view (a 
 
 | Source | Skill | Headline fields |
 |--------|-------|-----------------|
-| regime | `market-macro` | `risk_appetite` / `liquidity` / `sentiment` |
+| regime | `market-macro` | `risk_appetite` / `liquidity` / `sentiment` / `missing_inputs[]` |
 | valuation | `market-valuation` | `regime` (CAPE z-score) |
 | movers | `market-movers` | `gainers_count` / `losers_count` / `trending_count` |
 | watchlist | `run-watchlist` | `summary` / `fired_skills_total` / `ideas_count` |
 | conviction | `l3-conviction-scan` | `total` / `baskets` / `top_ideas` (top 5) |
 | notes | `market-notes` | `pair_count` / `summary` |
+
+When the macro regime fetch is degraded (any source fails), `regime.missing_inputs` lists the structured input names that failed — `fng`, `vix`, `dxy`, `us10y`, `btc_dominance`, `total_mcap_usd`. LLM agents can branch on `missing_inputs` instead of parsing `regime_note`.
 
 The top-level `freshness` map shows each source's age (`3h ago`, `2d ago`, `no cache`). When `sources_cached` is below `sources_total`, refresh stale sources by running them with `--json` before relying on the dashboard.
 

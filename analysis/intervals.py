@@ -14,7 +14,7 @@ Supported intervals (union across providers):
     1m, 2m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1wk, 1M
 
 Supported periods (yfinance-style strings):
-    1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
+    1d, 5d, 1w, 2w, 3w, 4w, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
 """
 
 from __future__ import annotations
@@ -23,7 +23,9 @@ VALID_INTERVALS: frozenset[str] = frozenset(
     {"1m", "2m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1wk", "1M"}
 )
 
-VALID_PERIODS: frozenset[str] = frozenset({"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"})
+VALID_PERIODS: frozenset[str] = frozenset(
+    {"1d", "5d", "1w", "2w", "3w", "4w", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"}
+)
 
 DEFAULT_INTERVAL: str = "1d"
 DEFAULT_PERIOD: str = "1y"
@@ -56,6 +58,10 @@ _YFINANCE_PROVIDER_NAMES = frozenset({"yfinance"})
 _PERIOD_SECONDS = {
     "1d": 86400,
     "5d": 432000,
+    "1w": 604800,
+    "2w": 1209600,
+    "3w": 1814400,
+    "4w": 2419200,
     "1mo": 2592000,
     "3mo": 7776000,
     "6mo": 15552000,
