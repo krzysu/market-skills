@@ -136,7 +136,7 @@ Shows in `list` output and `export`.
 
 The **decision_context** sub-object captures the *state of the world at the moment you decided to take the trade* — what signals fired, what the risk verdict said, whether you overrode anything. It's the difference between "I bought HYPE at $60.15" (current data, already captured) and "I bought HYPE at $60.15 because L3 trend-follow LONG conv 4 fired under fear-recovery regime, macro regime was supportive, and I overrode the L3 stop from $49.71 to $50.50 because ZEC was already in the same direction" (decision trace, queryable later).
 
-**System of record:** the `decisions` table in the portfolio SQLite DB (see `portfolio/db.py`). Each row is keyed by `intent_id` (unique). For backward compat with tools that read the `transactions.notes` JSON, a copy is also embedded in `notes.decision_context` — but the `decisions` table is the authoritative source.
+**System of record:** the `decisions` table in the portfolio SQLite DB (see `portfolio.db.schema`). Each row is keyed by `intent_id` (unique). For backward compat with tools that read the `transactions.notes` JSON, a copy is also embedded in `notes.decision_context` — but the `decisions` table is the authoritative source.
 
 The canonical schema is the `DecisionContext` TypedDict in `analysis/decision.py` — that module is the single source of truth for field types and validation. The example below is illustrative; always refer to the TypedDict for the exact shape.
 

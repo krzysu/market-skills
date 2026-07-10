@@ -90,7 +90,7 @@ def _reset_cache_and_fixtures(monkeypatch):
     # the network. The fake's fast_info raises KeyError for symbols
     # not in _FAST_INFO_BY_SYMBOL — tests that want a yfinance failure
     # simply omit the symbol from the fixture.
-    monkeypatch.setattr("analysis.macro.yf.Ticker", FakeTicker)
+    monkeypatch.setattr("analysis.macro.fetchers.yf.Ticker", FakeTicker)
 
     yield
     macro.clear_cache()
@@ -223,7 +223,7 @@ class TestTtlCache:
     def test_cache_disabled_with_ttl_zero(self):
         # Two calls with ttl=0 should both call the underlying sources.
         # We count requests.get invocations as the proxy.
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(30)),
                 FakeResponse(payload=_coingecko_payload()),
@@ -241,7 +241,7 @@ class TestTtlCache:
         assert mock_get.call_count == 4
 
     def test_cache_hit_skips_network(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(30)),
                 FakeResponse(payload=_coingecko_payload()),
@@ -258,7 +258,7 @@ class TestTtlCache:
         assert mock_get.call_count == 2
 
     def test_clear_cache_forces_refetch(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(30)),
                 FakeResponse(payload=_coingecko_payload()),
@@ -378,7 +378,7 @@ class TestHistoryStore:
 
 class TestFetchRegimeHappyPath:
     def test_full_success_shape(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(22, "Extreme Fear")),
                 FakeResponse(payload=_coingecko_payload(2_000_000_000_000.0, 55.0)),
@@ -421,7 +421,7 @@ class TestFetchRegimeErrorIsolation:
     def test_fng_down_still_returns_others(self):
         import requests as _real_requests
 
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             # F&G raises (timeout), CoinGecko ok
             mock_get.side_effect = [
                 _real_requests.Timeout("simulated"),
@@ -447,7 +447,7 @@ class TestFetchRegimeErrorIsolation:
         assert sig["regime"]["sentiment"] == "NEUTRAL"
 
     def test_coingecko_down_loses_btc_dominance_but_keeps_others(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(60, "Greed")),
                 FakeResponse(status_code=429),
@@ -478,7 +478,7 @@ class TestFetchRegimeErrorIsolation:
         canonical fix-shape fixture). Liquidity + sentiment keep their
         best-effort labels so the LLM can still narrate them.
         """
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(50)),
                 FakeResponse(payload=_coingecko_payload(2_000_000_000_000.0, 50.0)),
@@ -502,7 +502,7 @@ class TestFetchRegimeErrorIsolation:
         """yfinance often returns None for crypto market_cap; CoinGecko's
         pre-computed market_cap_percentage.btc is the fallback path.
         """
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(50)),
                 FakeResponse(payload=_coingecko_payload(2_000_000_000_000.0, 54.7)),
@@ -525,7 +525,7 @@ class TestFetchRegimeErrorIsolation:
     def test_all_sources_down_returns_safe_defaults(self):
         import requests as _real_requests
 
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = _real_requests.ConnectionError("nope")
             # No yfinance fixtures either
             sig = macro.fetch_regime(ttl_seconds=0, write_history=False)
@@ -549,7 +549,7 @@ class TestFetchRegimeErrorIsolation:
     def test_clean_run_is_complete(self):
         """Happy-path fetch → incomplete=False, risk_appetite keeps its
         native classifier output (NEUTRAL or better, never UNKNOWN)."""
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(50)),
                 FakeResponse(payload=_coingecko_payload(2_000_000_000_000.0, 50.0)),
@@ -577,7 +577,7 @@ class TestFetchRegimeErrorIsolation:
         policy in ``analysis.risk.spot`` reads these fields and fires
         CONCERN when risk_appetite is UNKNOWN.
         """
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             # CoinGecko returns 429 → btc_mcap + total_mcap unavailable.
             # The other 5 inputs (F&G, VIX, DXY, US10Y, plus the
             # yfinance partial mcap path) still populate. Only 1 of 6
@@ -619,7 +619,7 @@ class TestBtcDominanceSource:
     def test_primary_path_records_yf_source(self):
         """yfinance has BTC mcap + CoinGecko has total mcap → primary
         derivation; source must be 'yf'."""
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(50)),
                 FakeResponse(payload=_coingecko_payload(2_000_000_000_000.0, 50.0)),
@@ -637,7 +637,7 @@ class TestBtcDominanceSource:
     def test_fallback_path_records_coingecko_source(self):
         """yfinance BTC mcap missing → fallback to CoinGecko's pre-computed
         BTC.D; source must be 'coingecko'."""
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 FakeResponse(payload=_fng_payload(50)),
                 FakeResponse(payload=_coingecko_payload(2_000_000_000_000.0, 54.7)),
@@ -655,7 +655,7 @@ class TestBtcDominanceSource:
     def test_both_paths_failed_records_none_source(self):
         """Both pipelines missing BTC.D and total_mcap → source None,
         and the field is still present in the payload (not omitted)."""
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             # Both total_mcap_usd and BTC.D absent in the /global payload;
             # yfinance BTC mcap also missing. Source must be None.
             cg_payload = {
@@ -726,7 +726,7 @@ class TestBtcDominanceSource:
 
 class TestFetchFng:
     def test_non_200(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.return_value = FakeResponse(status_code=503)
             value, label, err = macro._fetch_fng()
         assert value is None
@@ -734,21 +734,21 @@ class TestFetchFng:
         assert "503" in err
 
     def test_empty_payload(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.return_value = FakeResponse(payload={"data": []})
             value, label, err = macro._fetch_fng()
         assert value is None
         assert "empty" in err
 
     def test_non_numeric_value(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.return_value = FakeResponse(payload={"data": [{"value": "abc"}]})
             value, label, err = macro._fetch_fng()
         assert value is None
         assert "non-numeric" in err
 
     def test_invalid_json(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             r = FakeResponse()
             r.json = MagicMock(side_effect=ValueError("bad"))
             mock_get.return_value = r
@@ -762,21 +762,21 @@ class TestFetchFng:
 
 class TestFetchCoingecko:
     def test_non_200(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.return_value = FakeResponse(status_code=429)
             total, _, err = macro._fetch_coingecko()
         assert total is None
         assert "429" in err
 
     def test_missing_total_market_cap(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.return_value = FakeResponse(payload={"data": {"total_market_cap": {}}})
             total, _, err = macro._fetch_coingecko()
         assert total is None
         assert "missing" in err
 
     def test_total_must_be_positive(self):
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.return_value = FakeResponse(payload={"data": {"total_market_cap": {"usd": -1}}})
             total, _, err = macro._fetch_coingecko()
         assert total is None

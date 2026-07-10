@@ -73,7 +73,7 @@ Live alongside the indicator / data layer. Used by L3 strategies and the cron pi
 |--------|---------|
 | [analysis/contracts.py](./analysis/contracts.py) | TypedDict shapes (`L1Result`, `L2Result`, `L2Pattern`, `L3Result`, `L3Idea`, `RegimeSignal`) + sanity helpers `l2_fired()`, `l2_classification()`, `validate_l3_tp_ladder()`, `conviction_version()` |
 | [analysis/chop.py](./analysis/chop.py) | L3 idea history + `chop_score` conviction-calibration indicator (fraction of recent ideas at conviction ≤ 2). JSON store at `$XDG_DATA_HOME/market-skills/l3_idea_history.json`. Consumed by `bug-scan` to surface the "transition zone" signal |
-| [analysis/macro.py](./analysis/macro.py) | Cross-asset macro fetcher + classifier. `fetch_regime()` returns a `RegimeSignal` (F&G, VIX, DXY, US10Y, BTC.D, total mcap → 3-axis `regime` labels + `regime_note`). In-process TTL cache (300s) and ring buffer at `$XDG_DATA_HOME/market-skills/macro_history.json` (200-entry cap). Best-effort + error-isolated: a single source failure records into `errors[]` and the rest of the signal still returns. |
+| [analysis/macro/](./analysis/macro/__init__.py) | Cross-asset macro fetcher + classifier. `fetch_regime()` returns a `RegimeSignal` (F&G, VIX, DXY, US10Y, BTC.D, total mcap → 3-axis `regime` labels + `regime_note`). Split into `fetchers.py`, `classify.py`, `cache.py`, `history.py`. In-process TTL cache (300s) and ring buffer at `$XDG_DATA_HOME/market-skills/macro_history.json` (200-entry cap). Best-effort + error-isolated: a single source failure records into `errors[]` and the rest of the signal still returns. |
 | [analysis/valuation.py](./analysis/valuation.py) | SP500 Shiller CAPE z-score fetcher. `fetch_valuation()` returns a `ValuationSignal` (Shiller CAPE + z-score → 5-band `regime` + `regime_note`). In-process TTL cache (3600s) and ring buffer at `$XDG_DATA_HOME/market-skills/valuation_history.json` (200-entry cap). Same best-effort + error-isolated contract as macro. Narrate-only; consumed as a soft `veto_reasons` tag by `strategy-mean-reversion`. |
 | [analysis/decision.py](./analysis/decision.py) | Decision tracing — `DecisionContext` TypedDict (L3 idea, regime, risk verdict, override) + pure-function builder + validator. Records one decision per `intent_id` in the `decisions` table (system of record). |
 
@@ -241,7 +241,7 @@ L1 Indicator Skills
 Cross-asset environment (singleton context, runs alongside per-ticker stack):
   market-macro              F&G + VIX + DXY + US10Y + BTC.D + total mcap → RegimeSignal
         │
-  analysis/macro.py         fetch_regime (TTL-cached) + classify_regime + history store
+  analysis/macro/           fetch_regime (TTL-cached) + classify_regime + history store
 
   market-valuation          SP500 + Shiller CAPE → ValuationSignal (z-score + regime)
         │
@@ -309,7 +309,7 @@ uv run skills/market-ema/scripts/run.py yf:AAPL --json
 
 ## Macro sources (network)
 
-`analysis/macro.py` reads from three external endpoints (no API keys required):
+`analysis/macro/fetchers.py` reads from three external endpoints (no API keys required):
 
 | Source | Used for | Notes |
 |--------|----------|-------|

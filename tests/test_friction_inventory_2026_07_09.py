@@ -491,8 +491,8 @@ class TestMACRO1StructuredMissingInputs:
         fast_info, _setter, fake_ticker_cls = _import_macro_helpers()
         macro.clear_cache()
         fast_info.clear()
-        monkeypatch.setattr("analysis.macro.yf.Ticker", fake_ticker_cls)
-        monkeypatch.setattr("analysis.macro.requests.get", _fng_cg_double(20, "Fear", 2_000_000_000_000, 55))
+        monkeypatch.setattr("analysis.macro.fetchers.yf.Ticker", fake_ticker_cls)
+        monkeypatch.setattr("analysis.macro.fetchers.requests.get", _fng_cg_double(20, "Fear", 2_000_000_000_000, 55))
         _set_fixtures_for_clean_signal()
         sig = macro.fetch_regime(ttl_seconds=0, write_history=False)
 
@@ -506,9 +506,9 @@ class TestMACRO1StructuredMissingInputs:
         fast_info, _setter, fake_ticker_cls = _import_macro_helpers()
         macro.clear_cache()
         fast_info.clear()
-        monkeypatch.setattr("analysis.macro.yf.Ticker", fake_ticker_cls)
+        monkeypatch.setattr("analysis.macro.fetchers.yf.Ticker", fake_ticker_cls)
         monkeypatch.setattr(
-            "analysis.macro.requests.get",
+            "analysis.macro.fetchers.requests.get",
             _fng_cg_double(60, "Greed", 2_000_000_000_000, 50.0),
         )
         _set_fixtures_no_vix()
@@ -526,8 +526,8 @@ class TestMACRO1StructuredMissingInputs:
         fast_info, _setter, fake_ticker_cls = _import_macro_helpers()
         macro.clear_cache()
         fast_info.clear()
-        monkeypatch.setattr("analysis.macro.yf.Ticker", fake_ticker_cls)
-        monkeypatch.setattr("analysis.macro.requests.get", _fng_then_429())
+        monkeypatch.setattr("analysis.macro.fetchers.yf.Ticker", fake_ticker_cls)
+        monkeypatch.setattr("analysis.macro.fetchers.requests.get", _fng_then_429())
         _set_fixtures_no_mcap()
         sig = macro.fetch_regime(ttl_seconds=0, write_history=False)
 
@@ -648,7 +648,7 @@ class TestMACRO2MarketStateRefreshFlag:
 
         macro.clear_cache()
 
-        with patch("analysis.macro.requests.get") as mock_get:
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
                 MagicMock(
                     status_code=200,
@@ -664,7 +664,7 @@ class TestMACRO2MarketStateRefreshFlag:
                     },
                 ),
             ] * 2
-            with patch("analysis.macro.yf.Ticker"):
+            with patch("analysis.macro.fetchers.yf.Ticker"):
                 # Wire fixtures
                 from test_macro import _set_fast_info
 
