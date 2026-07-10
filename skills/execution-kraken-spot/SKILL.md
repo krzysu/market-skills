@@ -183,7 +183,7 @@ field through.
 ## Portfolio wiring
 
 Successful fills (`status="filled"` or `status="partial"`) auto-write a
-row to the portfolio-mgmt SQLite DB (`portfolio/db.py:add_transaction`)
+row to the portfolio-mgmt SQLite DB (`portfolio.db.add_transaction`)
 when `--portfolio <name|id>` is supplied. The asset notation is
 `kraken:<PAIR>` (e.g. `kraken:HYPEUSD`) — same convention the data
 provider uses, so `prices refresh` works without a registry update.

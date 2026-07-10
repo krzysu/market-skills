@@ -246,7 +246,7 @@ TP manually.
 ## Portfolio wiring
 
 Successful fills (`status="filled"` or `status="partial"`) auto-write a
-row to portfolio-mgmt's SQLite DB (`portfolio/db.py:add_transaction`)
+row to portfolio-mgmt's SQLite DB (`portfolio.db.add_transaction`)
 when `--portfolio` is supplied. Asset notation is `kraken:<PAIR>`,
 matching the spot adapter. Side mirrors the intent direction: `BUY`
 for long perps / `SELL` for short perps. The `notes` JSON carries:
