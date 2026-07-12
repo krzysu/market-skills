@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from analysis import macro
+from analysis.macro.fetchers import _fetch_yf_market_cap, _fetch_yf_price
 
 # --- Fakes for yfinance.fast_info --------------------------------------------
 
@@ -781,3 +782,83 @@ class TestFetchCoingecko:
             total, _, err = macro._fetch_coingecko()
         assert total is None
         assert "missing" in err
+
+
+# --- _fetch_yf_* lazy property crash guards ----------------------------------
+
+
+class TestYfLazyPropertyCrash:
+    """Per-fix fixture for BUGS-2026-07-10: yfinance ``fast_info`` is a
+    lazy proxy — ``yf.Ticker(symbol).fast_info`` returns a ``FastInfo``
+    object without fetching data. The actual network call + metadata
+    parse happens when a property like ``.last_price`` or ``.market_cap``
+    is accessed, which is a ``@property`` getter that can raise
+    ``KeyError('exchangeTimezoneName')`` for symbols like ``^VIX`` whose
+    history metadata is incomplete.
+
+    Pre-fix code only guarded ``yf.Ticker(symbol).fast_info`` (the
+    constructor), not the subsequent property access — so the
+    ``KeyError`` propagated out of ``_fetch_yf_price`` /
+    ``_fetch_yf_market_cap`` and crashed every downstream consumer
+    (morning-brief, swing-scan, daily-trade-pick, run-all-l3 macro
+    envelope). Post-fix code extends the ``try`` block to cover the
+    property access so the function honours its error-isolated return
+    contract: ``(None, str)`` tuples, never an exception.
+    """
+
+    def test_fetch_yf_price_lazy_property_crash(self):
+        """``_fetch_yf_price`` catches KeyError raised inside the
+        ``last_price`` property getter, returns (None, err)."""
+
+        class BrokenFastInfo:
+            @property
+            def last_price(self):
+                raise KeyError("exchangeTimezoneName")
+
+            @property
+            def market_cap(self):
+                raise KeyError("exchangeTimezoneName")
+
+        # Register a BrokenFastInfo under a fresh symbol so the
+        # autouse-mocked FakeTicker returns it. ``^VIX-BROKEN`` is
+        # never touched by the rest of the suite.
+        _FAST_INFO_BY_SYMBOL["^VIX-BROKEN"] = BrokenFastInfo()
+
+        price, err = _fetch_yf_price("^VIX-BROKEN", "vix")
+        assert price is None
+        assert err is not None
+        assert "KeyError" in err
+
+        cap, cap_err = _fetch_yf_market_cap("^VIX-BROKEN", "vix")
+        assert cap is None
+        assert cap_err is not None
+        assert "KeyError" in cap_err
+
+    def test_fetch_yf_price_value_error_in_getter(self):
+        """``_fetch_yf_price`` catches generic ``ValueError`` raised in
+        the property getter — same shape, different exception class."""
+
+        class NaNPropertyFastInfo:
+            @property
+            def last_price(self):
+                raise ValueError("simulated yfinance internal failure")
+
+        _FAST_INFO_BY_SYMBOL["^NAN-BROKEN"] = NaNPropertyFastInfo()
+        price, err = _fetch_yf_price("^NAN-BROKEN", "vix")
+        assert price is None
+        assert "ValueError" in err
+
+    def test_fetch_yf_price_happy_path_unchanged(self):
+        """Sanity: post-fix code still returns the price for the
+        normal path — only the try/except boundary moved, the happy
+        path is byte-identical in behaviour."""
+        _set_fast_info("^VIX-OK", last_price=18.5)
+        price, err = _fetch_yf_price("^VIX-OK", "vix")
+        assert price == 18.5
+        assert err is None
+
+    def test_fetch_yf_market_cap_happy_path_unchanged(self):
+        _set_fast_info("BTC-USD-OK", market_cap=1_100_000_000_000.0)
+        cap, err = _fetch_yf_market_cap("BTC-USD-OK", "btc_mcap")
+        assert cap == 1_100_000_000_000.0
+        assert err is None

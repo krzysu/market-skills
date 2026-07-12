@@ -50,9 +50,9 @@ def _fetch_fng(timeout_s: int = _FNG_TIMEOUT_S) -> tuple[float | None, str | Non
 def _fetch_yf_price(symbol: str, label: str) -> tuple[float | None, str | None]:
     try:
         info = yf.Ticker(symbol).fast_info
+        raw = getattr(info, "last_price", None)
     except Exception as e:  # yfinance raises many subclasses of Exception
         return None, f"{label}: {type(e).__name__}"
-    raw = getattr(info, "last_price", None)
     if raw is None:
         return None, f"{label}: no data"
     try:
@@ -67,9 +67,9 @@ def _fetch_yf_price(symbol: str, label: str) -> tuple[float | None, str | None]:
 def _fetch_yf_market_cap(symbol: str, label: str) -> tuple[float | None, str | None]:
     try:
         info = yf.Ticker(symbol).fast_info
+        raw = getattr(info, "market_cap", None)
     except Exception as e:
         return None, f"{label}: {type(e).__name__}"
-    raw = getattr(info, "market_cap", None)
     if raw is None:
         return None, f"{label}: no data"
     try:
