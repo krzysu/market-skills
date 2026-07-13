@@ -44,7 +44,6 @@ from analysis.macro.classify import (
     _classify_risk_appetite,
     _classify_sentiment,
     _format_regime_note,
-    _missing_inputs_from_errors,
 )
 from analysis.macro.fetchers import (
     _fetch_coingecko,
@@ -94,14 +93,6 @@ def fetch_regime(
         if e:
             errors.append(e)
 
-    risk_appetite = _classify_risk_appetite(vix, dxy, us10y)
-    liquidity = _classify_liquidity(us10y, vix)
-    sentiment = _classify_sentiment(fng_value)
-
-    incomplete = bool(errors)
-    if incomplete and risk_appetite != "UNKNOWN":
-        risk_appetite = "UNKNOWN"
-
     inputs_payload: dict[str, Any] = {
         "fng": fng_value,
         "fng_label": fng_label,
@@ -112,6 +103,27 @@ def fetch_regime(
         "btc_dominance_source": btc_dominance_source,
         "total_mcap_usd": total_mcap,
     }
+
+    # Resolve missing canonical inputs from the final payload, not from
+    # raw error diagnostics. A primary-source error whose fallback has
+    # already populated the canonical value (e.g. btc_mcap error but
+    # coingecko supplied btc_dominance) must not mark the regime
+    # incomplete — that would poison the fallback-success path with a
+    # false UNKNOWN headline and a [REGIME INCOMPLETE] note prefix.
+    missing_inputs = [
+        name
+        for name in ("fng", "vix", "dxy", "us10y", "btc_dominance", "total_mcap_usd")
+        if inputs_payload.get(name) is None
+    ]
+
+    risk_appetite = _classify_risk_appetite(vix, dxy, us10y)
+    liquidity = _classify_liquidity(us10y, vix)
+    sentiment = _classify_sentiment(fng_value)
+
+    incomplete = bool(missing_inputs)
+    if incomplete and risk_appetite != "UNKNOWN":
+        risk_appetite = "UNKNOWN"
+
     regime_payload: dict[str, str] = {
         "risk_appetite": risk_appetite,
         "liquidity": liquidity,
@@ -119,9 +131,7 @@ def fetch_regime(
     }
     note = _format_regime_note(risk_appetite, liquidity, sentiment, inputs_payload)
     if incomplete and not note.startswith("[REGIME INCOMPLETE"):
-        note = f"[REGIME INCOMPLETE — {len(errors)} input(s) missing] " + note
-
-    missing_inputs = _missing_inputs_from_errors(errors)
+        note = f"[REGIME INCOMPLETE — {len(missing_inputs)} input(s) missing] " + note
 
     signal: dict[str, Any] = {
         "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),

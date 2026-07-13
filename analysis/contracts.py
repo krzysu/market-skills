@@ -120,23 +120,33 @@ class RegimeSignal(TypedDict):
     ``regime_note`` is a one-liner the LLM can drop into its narration
     verbatim; the structured ``regime`` block is for programmatic use.
 
-    ``incomplete`` is ``True`` whenever ``errors`` is non-empty — the
-    canonical "regime degraded" signal for downstream consumers
-    (run-all-l3 stdout, regime_consistency policy). When ``True``,
-    ``regime.risk_appetite`` is downgraded to ``"UNKNOWN"`` so naive
-    consumers that read only the label never see a partial regime
-    mislabelled as RISK_ON / RISK_OFF. The downstream policy that
-    treats UNKNOWN as adverse (regime_consistency) fires accordingly.
+    ``incomplete`` is ``True`` whenever a canonical macro input is
+    genuinely missing from ``inputs`` — the canonical "regime degraded"
+    signal for downstream consumers (run-all-l3 stdout,
+    regime_consistency policy). When ``True``, ``regime.risk_appetite``
+    is downgraded to ``"UNKNOWN"`` so naive consumers that read only
+    the label never see a partial regime mislabelled as RISK_ON /
+    RISK_OFF. The downstream policy that treats UNKNOWN as adverse
+    (regime_consistency) fires accordingly.
 
-    ``missing_inputs`` is the structured mirror of ``errors``: a list
-    of input names that failed (``fng`` / ``vix`` / ``dxy`` / ``us10y``
-    / ``btc_dominance`` / ``total_mcap_usd``). Lets LLM agents ask
-    "which input failed?" without parsing ``regime_note`` or
-    string-matching ``errors[]``. Always a list (empty when the regime
-    is complete), matching the AXI envelope's structured-errors
-    principle. ``btc_dominance`` / ``total_mcap_usd`` share the
-    CoinGecko upstream; either appearing here means the CoinGecko
-    HTTP call (or its total-mcap field) failed.
+    Completeness is derived from the resolved ``inputs`` payload after
+    every fallback has run, not from the raw ``errors`` list. A
+    primary-source diagnostic whose fallback has already populated the
+    canonical value (e.g. yfinance BTC mcap error but CoinGecko
+    supplied btc_dominance) does NOT mark the regime incomplete — that
+    would poison the fallback-success path with a false UNKNOWN
+    headline and a [REGIME INCOMPLETE] note prefix.
+
+    ``missing_inputs`` is the structured mirror of the canonical-input
+    gap: a list of input names whose resolved value is ``None``
+    (``fng`` / ``vix`` / ``dxy`` / ``us10y`` / ``btc_dominance`` /
+    ``total_mcap_usd``). Lets LLM agents ask "which input is actually
+    missing?" without parsing ``regime_note`` or string-matching
+    ``errors[]``. Always a list (empty when the regime is complete),
+    matching the AXI envelope's structured-errors principle.
+    ``btc_dominance`` / ``total_mcap_usd`` share the CoinGecko
+    upstream; either appearing here means the canonical value could
+    not be resolved through either provider.
     """
 
     timestamp: str
