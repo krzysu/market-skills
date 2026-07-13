@@ -502,6 +502,18 @@ class TestFetchRegimeErrorIsolation:
     def test_btc_dominance_falls_back_to_coingecko_when_yfinance_mcap_missing(self):
         """yfinance often returns None for crypto market_cap; CoinGecko's
         pre-computed market_cap_percentage.btc is the fallback path.
+
+        Per-fix fixture for BUGS-2026-07-13 macro_fallback_success_marks_incomplete:
+        primary-source error (btc_mcap) must NOT poison the regime once
+        the fallback has populated the canonical input. Specifically:
+
+          - missing_inputs == []
+          - incomplete is False
+          - risk_appetite keeps its native classifier output (NEUTRAL,
+            not downgraded to UNKNOWN)
+          - regime_note does NOT start with [REGIME INCOMPLETE
+          - errors[] retains the raw primary-source diagnostic so a
+            human can still see WHY yfinance failed
         """
         with patch("analysis.macro.fetchers.requests.get") as mock_get:
             mock_get.side_effect = [
@@ -521,6 +533,60 @@ class TestFetchRegimeErrorIsolation:
         assert sig["inputs"]["btc_dominance"] == pytest.approx(54.7, abs=0.01)
         assert sig["inputs"]["btc_dominance_source"] == "coingecko"
         assert sig["inputs"]["total_mcap_usd"] == 2_000_000_000_000.0
+        # Raw primary-source diagnostic retained for humans
+        assert any("btc_mcap" in e for e in sig["errors"])
+        # The fix: canonical inputs are non-null → missing_inputs empty
+        # and the headline regime keeps its native classification.
+        assert sig["missing_inputs"] == []
+        assert sig["incomplete"] is False
+        # VIX 18 + DXY 102 + US10Y 4.0 → NEUTRAL band; no downgrade.
+        assert sig["regime"]["risk_appetite"] == "NEUTRAL"
+        # No [REGIME INCOMPLETE] prefix on the note.
+        assert not sig["regime_note"].startswith("[REGIME INCOMPLETE")
+        assert sig["regime_note"].startswith("Macro: ")
+
+    def test_btc_dominance_missing_when_both_providers_fail(self):
+        """Negative counterpart of the fallback-success fixture:
+        when BOTH yfinance BTC-USD market_cap AND CoinGecko's
+        BTC dominance are unavailable, the canonical input is genuinely
+        missing — incomplete must stay True, risk_appetite must be
+        downgraded to UNKNOWN, and the [REGIME INCOMPLETE] prefix
+        must remain on the regime note.
+        """
+        with patch("analysis.macro.fetchers.requests.get") as mock_get:
+            # CoinGecko returns 200 but with total_mcap_usd=0 — that's
+            # rejected by the fetcher as "missing total_market_cap.usd".
+            # btc_mcap also missing → both paths exhausted.
+            cg_payload = {
+                "data": {
+                    "active_cryptocurrencies": 12000,
+                    "total_market_cap": {"usd": None, "btc": None},
+                    "total_volume": {"usd": 50_000_000_000.0},
+                    "market_cap_percentage": {"btc": None, "eth": 17.0},
+                    "market_cap_change_percentage_24h_usd": 1.2,
+                }
+            }
+            mock_get.side_effect = [
+                FakeResponse(payload=_fng_payload(50)),
+                FakeResponse(payload=cg_payload),
+            ]
+            _set_fast_info("^VIX", last_price=18.0)
+            _set_fast_info("DX-Y.NYB", last_price=102.0)
+            _set_fast_info("^TNX", last_price=4.0)
+            _set_fast_info("BTC-USD", last_price=65000.0)  # no market_cap
+
+            sig = macro.fetch_regime(ttl_seconds=0, write_history=False)
+
+        assert sig["inputs"]["btc_dominance"] is None
+        assert sig["inputs"]["btc_dominance_source"] is None
+        assert sig["inputs"]["total_mcap_usd"] is None
+        # Genuine canonical-input gap → conservative behaviour holds.
+        assert "btc_dominance" in sig["missing_inputs"]
+        assert "total_mcap_usd" in sig["missing_inputs"]
+        assert sig["incomplete"] is True
+        assert sig["regime"]["risk_appetite"] == "UNKNOWN"
+        assert sig["regime_note"].startswith("[REGIME INCOMPLETE")
+        # Raw diagnostics still surfaced.
         assert any("btc_mcap" in e for e in sig["errors"])
 
     def test_all_sources_down_returns_safe_defaults(self):

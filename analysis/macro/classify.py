@@ -1,39 +1,5 @@
 """Cross-asset macro regime classifiers — pure functions, no I/O."""
 
-from analysis.macro._constants import (
-    _LABEL_BTC_MCAP,
-    _LABEL_COINGECKO,
-    _LABEL_DXY,
-    _LABEL_FNG,
-    _LABEL_US10Y,
-    _LABEL_VIX,
-)
-
-
-def _missing_inputs_from_errors(errors: list[str]) -> list[str]:
-    if not errors:
-        return []
-    label_to_inputs: dict[str, tuple[str, ...]] = {
-        _LABEL_FNG: ("fng",),
-        _LABEL_VIX: ("vix",),
-        _LABEL_DXY: ("dxy",),
-        _LABEL_US10Y: ("us10y",),
-        _LABEL_BTC_MCAP: ("btc_dominance",),
-        _LABEL_COINGECKO: ("btc_dominance", "total_mcap_usd"),
-    }
-    seen: set[str] = set()
-    out: list[str] = []
-    for err in errors:
-        if not isinstance(err, str) or ":" not in err:
-            continue
-        label = err.split(":", 1)[0].strip()
-        for canonical in label_to_inputs.get(label, ()):
-            if canonical in seen:
-                continue
-            seen.add(canonical)
-            out.append(canonical)
-    return out
-
 
 def _classify_risk_appetite(vix: float | None, dxy: float | None, us10y: float | None) -> str:
     if vix is None:
