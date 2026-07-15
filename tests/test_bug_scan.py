@@ -258,7 +258,7 @@ class TestCrossTfContradiction:
                 }
             }
         }
-        findings = lib._scan_cross_tf_contradictions(tickers)
+        findings = lib._scan_cross_tf_contradictions({"tickers": tickers}, {"tickers": {}})
         assert len(findings) == 1
         assert findings[0]["shape"] == lib.SHAPE_CROSS_TF_CONTRADICTION
         assert findings[0]["ticker"] == "AEROUSD"
@@ -297,7 +297,7 @@ class TestCrossTfContradiction:
                 }
             }
         }
-        findings = lib._scan_cross_tf_contradictions(tickers)
+        findings = lib._scan_cross_tf_contradictions({"tickers": tickers}, {"tickers": {}})
         assert findings == []
 
     def test_vvv_1d_4h_split_works(self):
@@ -332,8 +332,193 @@ class TestCrossTfContradiction:
                 }
             }
         }
-        findings = lib._scan_cross_tf_contradictions(tickers)
+        findings = lib._scan_cross_tf_contradictions({"tickers": tickers}, {"tickers": {}})
         assert len(findings) == 1
+
+
+# -- cross-TF direction conflict (L3-only --from-json) ----------------------
+
+
+class TestCrossTfFromJsonL3Only:
+    """The from-json bug: an L3-only envelope produced zero findings
+    because the cross-TF detector only walked the L2 axis (and the call
+    lived inside scan_l2, which saw an empty tickers dict). These lock in
+    that scan() now runs the cross-TF detector over both tiers.
+    """
+
+    def test_from_json_l3_only_runs_cross_tf_direction_conflict(self):
+        lib = _load_lib()
+        envelope = {
+            "tickers": {
+                "HYPEUSD": {
+                    "tfs": {
+                        "1h": {
+                            "strategies": {"strategy-trend-follow": {"ideas": [{"direction": "long", "conviction": 4}]}}
+                        },
+                        "4h": {
+                            "strategies": {
+                                "strategy-trend-follow": {"ideas": [{"direction": "short", "conviction": 3}]}
+                            }
+                        },
+                    }
+                }
+            }
+        }
+        result = lib.scan(envelope)
+        assert result["ok"] is True
+        conflicts = [f for f in result["findings"] if f["shape"] == lib.SHAPE_CROSS_TF_DIRECTION_CONFLICT]
+        assert len(conflicts) >= 1
+        f = conflicts[0]
+        assert f["tag"] == "[INFO]"
+        assert f["ticker"] == "HYPEUSD"
+        assert f["strategy"] == "strategy-trend-follow"
+        # Both TFs reflected in the tf field.
+        assert "1h" in f["tf"] and "4h" in f["tf"]
+
+    def test_from_json_l2_only_still_runs_cross_tf_classification(self):
+        """Regression guard: the L2 healthy-vs-weakening path is not broken
+        by the signature change to _scan_cross_tf_contradictions.
+        """
+        lib = _load_lib()
+        envelope = {
+            "tickers": {
+                "AEROUSD": {
+                    "tfs": {
+                        "4h": {
+                            "skills": {
+                                "market-trend-quality": {
+                                    "pattern": {
+                                        "present": True,
+                                        "classification": "HEALTHY_UPTREND",
+                                        "confidence": 4,
+                                    },
+                                    "signals": {},
+                                }
+                            }
+                        },
+                        "1d": {
+                            "skills": {
+                                "market-trend-quality": {
+                                    "pattern": {
+                                        "present": True,
+                                        "classification": "WEAKENING",
+                                        "confidence": 2,
+                                    },
+                                    "signals": {},
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        }
+        result = lib.scan(envelope)
+        assert result["ok"] is True
+        contra = [f for f in result["findings"] if f["shape"] == lib.SHAPE_CROSS_TF_CONTRADICTION]
+        assert len(contra) == 1
+        assert contra[0]["ticker"] == "AEROUSD"
+
+    def test_from_json_l3_only_direction_no_conflict_when_same_side(self):
+        """Two TFs with the same dominant direction must NOT emit a
+        direction conflict — the conflict is only meaningful when the
+        directions disagree.
+        """
+        lib = _load_lib()
+        envelope = {
+            "tickers": {
+                "XUSD": {
+                    "tfs": {
+                        "1h": {
+                            "strategies": {"strategy-trend-follow": {"ideas": [{"direction": "long", "conviction": 4}]}}
+                        },
+                        "4h": {
+                            "strategies": {"strategy-trend-follow": {"ideas": [{"direction": "long", "conviction": 3}]}}
+                        },
+                    }
+                }
+            }
+        }
+        result = lib.scan(envelope)
+        assert result["ok"] is True
+        conflicts = [f for f in result["findings"] if f["shape"] == lib.SHAPE_CROSS_TF_DIRECTION_CONFLICT]
+        assert conflicts == []
+
+    def test_scan_calls_cross_tf_for_both_l2_and_l3(self):
+        """A merged envelope with contradicting L2 classifications AND
+        contradicting L3 directions must surface BOTH finding shapes —
+        the scan does not raise and does not silently drop one tier.
+        """
+        lib = _load_lib()
+        envelope = {
+            "tickers": {
+                "MERGED": {
+                    "tfs": {
+                        "1h": {
+                            "skills": {
+                                "market-trend-quality": {
+                                    "pattern": {
+                                        "present": True,
+                                        "classification": "HEALTHY_UPTREND",
+                                        "confidence": 4,
+                                    },
+                                    "signals": {},
+                                }
+                            },
+                            "strategies": {
+                                "strategy-trend-follow": {"ideas": [{"direction": "long", "conviction": 4}]}
+                            },
+                        },
+                        "4h": {
+                            "skills": {
+                                "market-trend-quality": {
+                                    "pattern": {
+                                        "present": True,
+                                        "classification": "WEAKENING",
+                                        "confidence": 2,
+                                    },
+                                    "signals": {},
+                                }
+                            },
+                            "strategies": {
+                                "strategy-trend-follow": {"ideas": [{"direction": "short", "conviction": 3}]}
+                            },
+                        },
+                    }
+                }
+            }
+        }
+        result = lib.scan(envelope)
+        assert result["ok"] is True
+        shapes = {f["shape"] for f in result["findings"]}
+        assert lib.SHAPE_CROSS_TF_CONTRADICTION in shapes
+        assert lib.SHAPE_CROSS_TF_DIRECTION_CONFLICT in shapes
+
+    def test_l3_direction_conflict_filters_low_conviction(self):
+        """A direction conflict where one TF only carries ideas with
+        conviction < 2 must NOT emit a finding — the noise floor filters
+        weak ideas out of the cross-TF direction comparison.
+        """
+        lib = _load_lib()
+        envelope = {
+            "tickers": {
+                "XUSD": {
+                    "tfs": {
+                        "1h": {
+                            "strategies": {"strategy-trend-follow": {"ideas": [{"direction": "long", "conviction": 4}]}}
+                        },
+                        "4h": {
+                            "strategies": {
+                                "strategy-trend-follow": {"ideas": [{"direction": "short", "conviction": 1}]}
+                            }
+                        },
+                    }
+                }
+            }
+        }
+        result = lib.scan(envelope)
+        assert result["ok"] is True
+        conflicts = [f for f in result["findings"] if f["shape"] == lib.SHAPE_CROSS_TF_DIRECTION_CONFLICT]
+        assert conflicts == []
 
 
 # -- top-level scan dispatch -------------------------------------------------
