@@ -19,7 +19,14 @@ external scanners stop missing the same anomalies that swing-scan catches.
 ## When to use
 
 - After running `run-all-l2` or `run-all-l3` — pipe the envelope through
-  `--from-json` to surface bugs the brief would otherwise miss.
+  `--from-json` to surface bugs the brief would otherwise miss. An L3-only
+  envelope now also surfaces cross-TF *direction* conflicts (a `long`
+  dominant idea on one TF vs a `short` on another for the same strategy),
+  not just the L2 healthy-vs-weakening contradictions — so a merged
+  multi-timeframe `run-all-l3` envelope no longer reports zero findings.
+  Set `BUG_SCAN_FROM_JSON_DEBUG=1` to print a `bug-scan from-json:
+  l2_keys=<n>, l3_keys=<n>` line to stderr before the scan runs, which
+  makes future "empty findings" regressions surface immediately.
 - Offline (no network): `--from-state` reads the existing swing-scan
   state tracker and translates its open_findings into the bug-scan
   envelope.
@@ -43,6 +50,7 @@ external scanners stop missing the same anomalies that swing-scan catches.
 | `weight_drift` | `[DRIFT]` | sub-signal weights sum outside 1.0 ± 0.05 | medium |
 | `l3_calibration_skew` | `[INFO]` | ≥6 ideas, zero with conviction ≥ 4 | low (regime signal) |
 | `cross_tf_contradiction` | `[INFO]` | same ticker + L2 skill, healthy vs weakening across TFs | medium |
+| `cross_tf_direction_conflict` | `[INFO]` | same ticker + L3 strategy, long dominant idea on one TF vs short on another (both ideas conviction ≥ 2) | medium |
 
 The first three shapes are the recurring `Pattern B` family: classifier
 anomaly + L1 absence + non-null classification (ghost-classifier

@@ -31,12 +31,18 @@ Detection rules (all wired here, single source of truth):
   - Cross-TF classification contradiction: same ticker + same L2 skill
     shows HEALTHY_UPTREND on one TF and WEAKENING on another. The
     AERO 4h/1d, VVV 1d/4h case from 2026-06-23.
+  - Cross-TF direction conflict: same ticker + same L3 strategy shows a
+    long dominant idea on one TF and a short dominant idea on another
+    (both ideas conviction >= 2). Surfaces in L3-only envelopes piped via
+    --from-json, which previously produced zero findings because the
+    cross-TF detector only walked the L2 axis.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Any
 
 from analysis.contracts import l2_classification, l2_fired
@@ -49,6 +55,7 @@ SHAPE_PATTERN_B_3 = "pattern_b_3"  # ghost (present=False, classification popula
 SHAPE_WEIGHT_DRIFT = "weight_drift"
 SHAPE_L3_CALIBRATION_SKEW = "l3_calibration_skew"
 SHAPE_CROSS_TF_CONTRADICTION = "cross_tf_contradiction"
+SHAPE_CROSS_TF_DIRECTION_CONFLICT = "cross_tf_direction_conflict"
 SHAPE_CHOP_SCORE = "chop_score"
 
 TAG_BUG = "[BUG]"
@@ -70,6 +77,10 @@ WEIGHT_SUM_TOLERANCE = 0.05
 L3_CALIBRATION_MIN_IDEAS = 6
 L3_CALIBRATION_MAX_HIGH_CONV = 0  # zero ideas with conviction >= 4
 L3_CALIBRATION_HIGH_CONV = 4
+
+# Cross-TF direction conflict: only compare ideas whose conviction is
+# strong enough to be meaningful — weaker ideas are noise across TFs.
+L3_DIRECTION_MIN_CONVICTION = 2
 
 # L2 skills whose pattern data the bug-scan inspects.
 L2_SKILLS = (
@@ -214,6 +225,22 @@ def _cross_tf_finding(*, ticker: str, skill: str, tf_a: str, class_a: str, tf_b:
     }
 
 
+def _cross_tf_direction_finding(*, ticker: str, strategy: str, tf_a: str, dir_a: str, tf_b: str, dir_b: str) -> dict:
+    return {
+        "tag": TAG_INFO,
+        "shape": SHAPE_CROSS_TF_DIRECTION_CONFLICT,
+        "ticker": ticker,
+        "tf": f"{tf_a}/{tf_b}",
+        "strategy": strategy,
+        "summary": (f"Cross-TF direction conflict: {tf_a}={dir_a} vs {tf_b}={dir_b}"),
+        "tf_a": tf_a,
+        "tf_b": tf_b,
+        "direction_a": dir_a,
+        "direction_b": dir_b,
+        "severity": "medium",
+    }
+
+
 def _chop_score_finding(*, score: float, window_ticks: int, ideas_count: int, low_count: int) -> dict:
     severity = "low"
     if score > 0.70:
@@ -317,24 +344,76 @@ def scan_l2(l2_data: dict) -> list[dict]:
             for skill, skill_result in skills.items():
                 findings.extend(_scan_l2_skill(skill_result, ticker=ticker, tf=tf, skill=skill))
 
-    # Cross-TF contradiction: same (ticker, skill) classified differently
-    # across TFs. A HEALTHY_* on one TF and a WEAKENING/DEGRADING on
-    # another is the recurring AERO/VVV case.
-    findings.extend(_scan_cross_tf_contradictions(tickers))
-
     return findings
 
 
-def _scan_cross_tf_contradictions(tickers: dict) -> list[dict]:
-    """For each (ticker, skill), flag pairs of TFs whose classifications
-    disagree along the healthy-vs-weakening axis.
+def _dominant_idea_direction(ideas: list[dict]) -> str | None:
+    """Return the dominant direction among ideas with conviction >= the
+    cross-TF noise floor, or ``None`` when there is no clear winner.
+
+    Sums conviction per direction (``long`` / ``short``) over ideas whose
+    conviction is at least :data:`L3_DIRECTION_MIN_CONVICTION`; returns the
+    direction with the highest total. Ties return ``None`` — an ambiguous
+    TF contributes no signal to the cross-TF direction comparison rather
+    than fabricating a conflict.
+    """
+    tallies: dict[str, int] = {}
+    for idea in ideas or []:
+        if not isinstance(idea, dict):
+            continue
+        conviction = idea.get("conviction")
+        if not isinstance(conviction, (int, float)) or isinstance(conviction, bool):
+            continue
+        if conviction < L3_DIRECTION_MIN_CONVICTION:
+            continue
+        direction = idea.get("direction")
+        if direction not in ("long", "short"):
+            continue
+        tallies[direction] = tallies.get(direction, 0) + int(conviction)
+    if not tallies:
+        return None
+    best = max(tallies.values())
+    leaders = [d for d, v in tallies.items() if v == best]
+    if len(leaders) != 1:
+        return None
+    return leaders[0]
+
+
+def _scan_cross_tf_contradictions(l2_norm: dict, l3_norm: dict) -> list[dict]:
+    """Flag cross-timeframe contradictions across BOTH tiers.
+
+    Two independent axes:
+
+    - **L2 axis** — for each ``(ticker, skill)``, flag pairs of TFs whose
+      classifications disagree along the healthy-vs-weakening axis. The
+      AERO 4h/1d, VVV 1d/4h case. Walks
+      ``l2_norm["tickers"][*].tfs[*].skills[*]`` via
+      :func:`analysis.contracts.l2_classification`.
+
+    - **L3 axis** — for each ``(ticker, strategy)``, flag pairs of TFs
+      whose dominant idea *direction* disagrees (``long`` on one TF,
+      ``short`` on the other), considering only ideas with conviction >=
+      :data:`L3_DIRECTION_MIN_CONVICTION` to filter noise. Walks
+      ``l3_norm["tickers"][*].tfs[*].strategies[*].ideas[*]``.
+
+    The two axes emit distinguishable shapes
+    (:data:`SHAPE_CROSS_TF_CONTRADICTION` vs
+    :data:`SHAPE_CROSS_TF_DIRECTION_CONFLICT`) so callers can route them
+    separately. ``scan()`` calls this once, after both :func:`scan_l2` and
+    :func:`scan_l3`, so an L3-only envelope still reaches the L3 axis
+    (the original bug — the call lived inside ``scan_l2`` and saw an empty
+    ``tickers`` dict for L3-only input).
     """
     findings: list[dict] = []
     bullish = {"HEALTHY_UPTREND", "HEALTHY_PULLBACK_UPTREND"}
     bearish = {"HEALTHY_DOWNTREND"}
     weakening = {"WEAKENING", "DEGRADING"}
 
-    for ticker, t_entry in tickers.items():
+    l2_tickers = (l2_norm or {}).get("tickers") or {}
+    l3_tickers = (l3_norm or {}).get("tickers") or {}
+
+    # --- L2 axis: healthy-vs-weakening classification contradiction ---
+    for ticker, t_entry in l2_tickers.items():
         tfs = (t_entry or {}).get("tfs") or {}
         # Build skill -> {tf: classification} map.
         skill_to_tf_class: dict[str, dict[str, str | None]] = {}
@@ -382,6 +461,38 @@ def _scan_cross_tf_contradictions(tickers: dict) -> list[dict]:
                                 class_b=cls_b,
                             )
                         )
+
+    # --- L3 axis: cross-TF direction conflict ---
+    for ticker, t_entry in l3_tickers.items():
+        tfs = (t_entry or {}).get("tfs") or {}
+        # Build strategy -> {tf: dominant_direction} map.
+        strat_to_tf_dir: dict[str, dict[str, str]] = {}
+        for tf, tf_entry in tfs.items():
+            for strategy, strategy_result in (tf_entry or {}).get("strategies", {}).items():
+                ideas = (strategy_result or {}).get("ideas") or []
+                dom = _dominant_idea_direction(ideas)
+                if dom is None:
+                    continue
+                strat_to_tf_dir.setdefault(strategy, {})[tf] = dom
+
+        for strategy, tf_dir in strat_to_tf_dir.items():
+            tf_list = sorted(tf_dir.keys())
+            for i, tf_a in enumerate(tf_list):
+                dir_a = tf_dir[tf_a]
+                for tf_b in tf_list[i + 1 :]:
+                    dir_b = tf_dir[tf_b]
+                    if dir_a == dir_b:
+                        continue
+                    findings.append(
+                        _cross_tf_direction_finding(
+                            ticker=ticker,
+                            strategy=strategy,
+                            tf_a=tf_a,
+                            dir_a=dir_a,
+                            tf_b=tf_b,
+                            dir_b=dir_b,
+                        )
+                    )
     return findings
 
 
@@ -476,14 +587,51 @@ def normalize_l3_envelope(envelope: dict) -> dict:
 def envelope_from_json(payload: dict) -> tuple[dict, dict]:
     """Auto-detect tier and return (l2_normalized, l3_normalized).
 
+    Accepts two input shapes:
+
+    - **Flat single-interval** (``run-all-l2`` / ``run-all-l3`` output)::
+          ``{"interval": "1h", "tickers": {T: {"skills": ..., "strategies": ...}}}``
+      Every ticker lands under a single TF key (the envelope's
+      ``interval``).
+
+    - **Already-normalized multi-TF** (a merged envelope that already
+      carries per-TF structure, e.g. several ``run-all-l3`` runs joined
+      across intervals)::
+          ``{"tickers": {T: {"tfs": {"1h": {"skills": ...}, "4h": {"strategies": ...}}}}}``
+      Each ``tfs`` entry is threaded through untouched, so a multi-TF
+      envelope keeps its distinct timeframes — which is what the
+      cross-TF detectors need to compare across TFs.
+
     Some envelopes (e.g. run-watchlist) carry both ``skills`` and
     ``strategies`` per ticker — both are returned populated when present.
     Crons can pipe a run-watchlist envelope through here.
+
+    If a single ticker carries both shapes (a ``tfs`` block *and*
+    direct ``skills``/``strategies``), the multi-TF shape wins: the
+    direct fields are silently skipped for that ticker. The two shapes
+    are documented as mutually exclusive, so this only matters for a
+    merged envelope that left stray top-level fields on a ticker.
     """
     l2_out: dict[str, Any] = {"tickers": {}}
     l3_out: dict[str, Any] = {"tickers": {}}
     interval = payload.get("interval", "?")
     for ticker, t_entry in (payload.get("tickers") or {}).items():
+        # Already-normalized multi-TF shape: tickers.<T>.tfs.<TF>.{skills,strategies}
+        tfs = (t_entry or {}).get("tfs") or {}
+        if tfs:
+            for tf, tf_entry in tfs.items():
+                skills = (tf_entry or {}).get("skills") or {}
+                strategies = (tf_entry or {}).get("strategies") or {}
+                if skills:
+                    l2_out["tickers"].setdefault(ticker, {"tfs": {}})
+                    l2_out["tickers"][ticker]["tfs"].setdefault(tf, {"skills": {}})
+                    l2_out["tickers"][ticker]["tfs"][tf]["skills"] = skills
+                if strategies:
+                    l3_out["tickers"].setdefault(ticker, {"tfs": {}})
+                    l3_out["tickers"][ticker]["tfs"].setdefault(tf, {"strategies": {}})
+                    l3_out["tickers"][ticker]["tfs"][tf]["strategies"] = strategies
+            continue
+        # Flat single-interval shape: tickers.<T>.{skills,strategies}
         skills = (t_entry or {}).get("skills") or {}
         strategies = (t_entry or {}).get("strategies") or {}
         if skills:
@@ -565,6 +713,10 @@ def scan(input_data: dict) -> dict:
     findings: list[dict] = []
     findings.extend(scan_l2(l2_norm))
     findings.extend(scan_l3(l3_norm))
+    # Cross-TF detectors run AFTER both tiers so they see the full merged
+    # picture — an L3-only envelope still reaches the L3 direction axis
+    # (the call used to live inside scan_l2 and saw an empty tickers dict).
+    findings.extend(_scan_cross_tf_contradictions(l2_norm, l3_norm))
     return {"ok": True, "findings": findings}
 
 
@@ -692,7 +844,13 @@ def run_scan(
             envelope["findings"].extend(_chop_score_findings())
         return envelope
     if from_json:
-        envelope = scan(_read_json(from_json))
+        payload = _read_json(from_json)
+        if os.environ.get("BUG_SCAN_FROM_JSON_DEBUG") == "1":
+            l2_norm, l3_norm = envelope_from_json(payload)
+            l2_keys = len((l2_norm or {}).get("tickers") or {})
+            l3_keys = len((l3_norm or {}).get("tickers") or {})
+            print(f"  bug-scan from-json: l2_keys={l2_keys}, l3_keys={l3_keys}", file=sys.stderr)
+        envelope = scan(payload)
         if with_chop_score:
             envelope["findings"].extend(_chop_score_findings())
         return envelope
@@ -712,7 +870,7 @@ def run_scan(
                 "error": f"interval/period count mismatch: {intervals} vs {periods}",
             }
     l2_data, l3_data = fetch_l2_l3_for(tickers, intervals=intervals, periods=periods, source=source)
-    findings = scan_l2(l2_data) + scan_l3(l3_data)
+    findings = scan_l2(l2_data) + scan_l3(l3_data) + _scan_cross_tf_contradictions(l2_data, l3_data)
     if with_chop_score:
         # Persist the current tick's ideas to history, then read the
         # chop_score from the now-updated rolling window.
