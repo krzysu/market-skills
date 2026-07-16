@@ -54,6 +54,25 @@ def test_analyze_raises_without_env(monkeypatch):
         lib.analyze()
 
 
+def test_default_db_path_unset_message_is_actionable(monkeypatch):
+    """Regression: 2026-07-12 cold-start agent hit bare OSError with no
+    hint of how to recover. The error must (a) name the env var and
+    (b) suggest a concrete next step (export or --db=PATH) without
+    embedding a literal host path that triggers the scrub guard.
+    """
+    monkeypatch.delenv("MARKET_SKILLS_PORTFOLIO_DB", raising=False)
+    lib = load_skill("portfolio-mgmt")
+    with pytest.raises(OSError) as exc_info:
+        lib.default_db_path()
+    msg = str(exc_info.value)
+    # Names the env var so the agent knows which one is missing.
+    assert "MARKET_SKILLS_PORTFOLIO_DB" in msg
+    # Tells the agent what to do (export / --db).
+    assert "--db" in msg
+    # Scrub guard compatibility: no literal `~/.market-skills` in code.
+    assert "~/.market-skills" not in msg
+
+
 def test_analyze_with_explicit_path_works(monkeypatch, tmp_path):
     monkeypatch.delenv("MARKET_SKILLS_PORTFOLIO_DB", raising=False)
     db = tmp_path / "p.db"
