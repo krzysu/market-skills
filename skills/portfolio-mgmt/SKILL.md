@@ -281,3 +281,11 @@ reconcile --portfolio 1 --balance-file snapshot.json
 ```
 
 Status legend: `=` exact match, `!=` quantity mismatch, `+` asset in snapshot but not in DB, `-` asset in DB but not in snapshot.
+
+## Troubleshooting
+
+**`OSError: MARKET_SKILLS_PORTFOLIO_DB is not set`** — the env var is missing from the current shell. Either export it to the path of your portfolio SQLite database:
+
+    export MARKET_SKILLS_PORTFOLIO_DB=/absolute/path/to/portfolio.db
+
+or source the profile shell-init file that defines it (one of `~/.hermes/profiles/*/.env`). Pass `--db=PATH` to override the env var for a single invocation. The contract is documented in `skills/portfolio-mgmt/lib.py::default_db_path()`.

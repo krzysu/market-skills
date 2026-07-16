@@ -21,8 +21,9 @@ def default_db_path() -> str:
     if not path:
         raise OSError(
             "MARKET_SKILLS_PORTFOLIO_DB is not set; cannot resolve the "
-            "portfolio-mgmt SQLite path. Set MARKET_SKILLS_PORTFOLIO_DB "
-            "or pass --db=PATH explicitly."
+            "portfolio-mgmt SQLite path. Set the env var to point at "
+            "your portfolio SQLite database, or pass --db=PATH to "
+            "override for a single invocation."
         )
     return path
 
