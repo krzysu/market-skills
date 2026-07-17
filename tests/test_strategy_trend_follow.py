@@ -110,15 +110,15 @@ class TestHypeFixture:
     def test_hype_fixture_returns_long_idea(self):
         mod = _load_strat_lib()
         candles = _load_hype_fixture()
-        result = mod.analyze(candles, ticker="HYPE", interval="4h", period="6mo")
+        result = mod.analyze(candles, ticker="<PRIVATE_PERP>", interval="4h", period="6mo")
 
         assert "ideas" in result
         assert "narrative" in result
         assert isinstance(result["ideas"], list)
-        assert len(result["ideas"]) >= 1, f"Expected at least one idea for HYPE, got {result}"
+        assert len(result["ideas"]) >= 1, f"Expected at least one idea for <PRIVATE_PERP>, got {result}"
 
         long_ideas = [i for i in result["ideas"] if i["direction"] == "long"]
-        assert len(long_ideas) >= 1, f"Expected a long idea for HYPE uptrend, got {result['ideas']}"
+        assert len(long_ideas) >= 1, f"Expected a long idea for <PRIVATE_PERP> uptrend, got {result['ideas']}"
 
         idea = long_ideas[0]
         assert idea["direction"] == "long"
@@ -210,7 +210,7 @@ class TestPatternS:
     swing-scan cron applies downstream. Tag the idea with ``veto_reasons`` and
     downgrade conviction accordingly.
 
-    Catches cases like an 80%-extended AERO 4h LONG where late chase-risk would
+    Catches cases like an 80%-extended <PRIVATE_DEX> 4h LONG where late chase-risk would
     otherwise be emitted as `conv=4` with no maturity signal. With Pattern S
     inlined, that same setup emits conv=2 with veto_reasons=['late-move', ...].
     """

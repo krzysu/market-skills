@@ -30,7 +30,7 @@ Detection rules (all wired here, single source of truth):
     signal that something is off with conviction scoring.
   - Cross-TF classification contradiction: same ticker + same L2 skill
     shows HEALTHY_UPTREND on one TF and WEAKENING on another. The
-    AERO 4h/1d, VVV 1d/4h case from 2026-06-23.
+    cross-TF classification-contradiction case from 2026-06-23.
   - Cross-TF direction conflict: same ticker + same L3 strategy shows a
     long dominant idea on one TF and a short dominant idea on another
     (both ideas conviction >= 2). Surfaces in L3-only envelopes piped via
@@ -385,8 +385,7 @@ def _scan_cross_tf_contradictions(l2_norm: dict, l3_norm: dict) -> list[dict]:
     Two independent axes:
 
     - **L2 axis** — for each ``(ticker, skill)``, flag pairs of TFs whose
-      classifications disagree along the healthy-vs-weakening axis. The
-      AERO 4h/1d, VVV 1d/4h case. Walks
+      classifications disagree along the healthy-vs-weakening axis. Walks
       ``l2_norm["tickers"][*].tfs[*].skills[*]`` via
       :func:`analysis.contracts.l2_classification`.
 

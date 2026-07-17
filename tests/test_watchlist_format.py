@@ -22,8 +22,7 @@ SAMPLE = {
             "ETHUSD": {"tier": 2, "source": "kraken", "label": "ETH"},
         },
         "crypto_alts": {
-            "HYPEUSD": {"tier": 1, "source": "kraken", "label": "Hyperliquid"},
-            "hl:LIT": {"tier": 1, "source": "hyperliquid", "label": "Lighter"},
+            "hl:<PRIVATE_PERP>": {"tier": 1, "source": "hyperliquid", "label": "Lighter"},
         },
         "macro_refs": {
             "SPYUSD": {"source": "yfinance", "yfinance_ticker": "SPY", "tracking_only": True, "sector": "stocks"},
@@ -72,8 +71,8 @@ def test_all_tickers_dedup():
     out = all_tickers(SAMPLE)
     assert "BTCUSD" in out
     assert "ETHUSD" in out
-    assert "HYPEUSD" in out
-    assert "hl:LIT" in out
+    assert "hl:<PRIVATE_PERP>" in out
+    assert "hl:<PRIVATE_PERP>" in out
     assert "SPYUSD" in out
     assert "IWMUSD" in out
     assert len(out) == len(set(out))
@@ -81,7 +80,7 @@ def test_all_tickers_dedup():
 
 def test_metadata_for_known():
     assert metadata_for(SAMPLE, "BTCUSD")["source"] == "kraken"
-    assert metadata_for(SAMPLE, "hl:LIT")["source"] == "hyperliquid"
+    assert metadata_for(SAMPLE, "hl:<PRIVATE_PERP>")["source"] == "hyperliquid"
 
 
 def test_metadata_for_unknown():
@@ -89,7 +88,7 @@ def test_metadata_for_unknown():
 
 
 def test_provider_for_explicit_prefix():
-    assert provider_for(SAMPLE, "hl:LIT") == "hyperliquid"
+    assert provider_for(SAMPLE, "hl:<PRIVATE_PERP>") == "hyperliquid"
 
 
 def test_provider_for_via_source():
@@ -112,9 +111,10 @@ def test_bare_aliases_xlexusd():
 
 
 def test_bare_aliases_hl_prefix():
-    aliases = _bare_aliases("hl:LIT")
-    assert "hl:lit" in aliases
-    assert "lit" in aliases
+    aliases = _bare_aliases("hl:<PRIVATE_PERP>")
+    # The bare alias is the lowercased part after `hl:`, plus the full prefix form.
+    assert "hl:<private_perp>" in aliases
+    assert "<private_perp>" in aliases
 
 
 def test_resolve_btc():
@@ -130,8 +130,10 @@ def test_resolve_xle_unknown_in_sample():
     assert resolve(SAMPLE, "xle") is None
 
 
-def test_resolve_lit_matches_hl_lit():
-    assert resolve(SAMPLE, "lit") == "hl:LIT"
+def test_resolve_perp_via_bare_alias():
+    # resolve() should find the bare-alias form ("<private_perp>") that the
+    # SAMPLE entry "hl:<PRIVATE_PERP>" registers under.
+    assert resolve(SAMPLE, "<private_perp>") == "hl:<PRIVATE_PERP>"
 
 
 def test_resolve_unknown():

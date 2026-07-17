@@ -95,6 +95,31 @@ can demote to `[INFO]` based on the `veto_reasons` tags. The reasoning field is
 appended with `Pattern S: <tags>.` so the rationale is visible in human-readable
 output.
 
+## Conviction gate (entry-side filter)
+
+After the Pattern S downward-conviction adjustments above, this strategy
+applies an entry-side floor: any idea whose final conviction is below the
+configured threshold is dropped before `analyze()` returns. The threshold
+is per-(`strategy`, `ticker`, `interval`) and lives in
+[`analysis/conviction_thresholds.py`](../../analysis/conviction_thresholds.py) —
+read via `lookup_min_conviction("strategy-trend-follow", ticker, interval)`.
+The lookup fall-through is `GLOBAL_MIN_CONVICTION_TO_EMIT = 1` (no-op; preserves
+legacy emit-all behaviour for unknown combinations).
+
+| Value | Effect |
+|-------|--------|
+| `0`   | Opt-out — every analyzed idea is emitted regardless of conviction. |
+| `1`   | No-op — formula floor is `>= 1`, so all surviving ideas pass. |
+| `>= 2`| Drops ideas with conviction strictly below the floor. |
+
+Per-(ticker, interval) overrides live outside the open-source repo in the
+JSON file pointed to by `$MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH`. A/B
+backtest evidence (per-tuner; specific tickers/interval values are
+private) lives there. The shipped source ships with an empty override
+table; without the env var, every combination resolves to the global
+default (1, no-op). To add a per-(ticker, interval) entry, write it into
+the external JSON rather than editing this lib file.
+
 ## Output envelope (AXI)
 
 `--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.

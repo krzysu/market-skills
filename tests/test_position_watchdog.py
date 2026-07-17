@@ -27,9 +27,9 @@ evaluate_levels = _pw_lib.evaluate_levels
 evaluate_signals = _pw_lib.evaluate_signals
 
 
-HYPE_WATCH = {
-    "name": "HYPE",
-    "monitor_provider": "kraken:HYPEEUR",
+TICKER_WATCH = {
+    "name": "<PRIVATE_PERP>",
+    "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
     "entry_price": 60.15,
     "position_size": 1.66,
     "levels": [
@@ -61,37 +61,37 @@ def _events_of(events, etype):
 
 
 def test_stop_breach_alerts_once():
-    events, state = evaluate_levels(HYPE_WATCH, 48.0, None)
+    events, state = evaluate_levels(TICKER_WATCH, 48.0, None)
     stops = _events_of(events, "stop")
     assert len(stops) == 1
     assert stops[0]["current_price"] == 48.0
     assert stops[0]["stop_price"] == 49.71
     assert state["alerted_levels"][_level_id({"type": "stop", "price": 49.71})] == "fired"
 
-    events2, _ = evaluate_levels(HYPE_WATCH, 47.0, state)
+    events2, _ = evaluate_levels(TICKER_WATCH, 47.0, state)
     assert _events_of(events2, "stop") == []
 
 
 def test_tp_ladder_in_priority_order():
     state = None
-    events, state = evaluate_levels(HYPE_WATCH, 90.0, state)
+    events, state = evaluate_levels(TICKER_WATCH, 90.0, state)
     tps = _events_of(events, "tp")
     assert len(tps) == 1
     assert tps[0]["tp_price"] == 88.21
 
-    events, state = evaluate_levels(HYPE_WATCH, 102.0, state)
+    events, state = evaluate_levels(TICKER_WATCH, 102.0, state)
     tps = _events_of(events, "tp")
     assert len(tps) == 1
     assert tps[0]["tp_price"] == 100.58
 
-    events, state = evaluate_levels(HYPE_WATCH, 120.0, state)
+    events, state = evaluate_levels(TICKER_WATCH, 120.0, state)
     tps = _events_of(events, "tp")
     assert len(tps) == 1
     assert tps[0]["tp_price"] == 119.14
 
 
 def test_tp_exit_qty_calculated():
-    events, _ = evaluate_levels(HYPE_WATCH, 90.0, None)
+    events, _ = evaluate_levels(TICKER_WATCH, 90.0, None)
     tp1 = _events_of(events, "tp")[0]
     # 1.66 * 33 / 100 = 0.5478 → 4dp; 2dp display is the formatter's job.
     assert tp1["exit_pct"] == 33
@@ -101,8 +101,8 @@ def test_tp_exit_qty_calculated():
 
 def test_tp_without_exit_pct_omits_qty():
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "entry_price": 60.15,
         "position_size": 1.66,
         "levels": [{"type": "tp", "price": 80.0}],
@@ -115,13 +115,13 @@ def test_tp_without_exit_pct_omits_qty():
 
 def test_drop_warnings_escalate():
     state = None
-    events, state = evaluate_levels(HYPE_WATCH, 57.0, state)
+    events, state = evaluate_levels(TICKER_WATCH, 57.0, state)
     drops = _events_of(events, "drop")
     assert len(drops) == 1
     assert drops[0]["threshold_pct"] == -5
     assert drops[0]["severity"] == "warn"
 
-    events, state = evaluate_levels(HYPE_WATCH, 53.0, state)
+    events, state = evaluate_levels(TICKER_WATCH, 53.0, state)
     drops = _events_of(events, "drop")
     assert any(d["threshold_pct"] == -10 and d["severity"] == "critical" for d in drops)
 
@@ -135,11 +135,11 @@ def test_recovery_after_two_ticks_above_entry():
         "above_entry_streak": 0,
         "prev_price": 53.0,
     }
-    events, state = evaluate_levels(HYPE_WATCH, 61.0, state)
+    events, state = evaluate_levels(TICKER_WATCH, 61.0, state)
     assert _events_of(events, "recovery") == []
     assert state["above_entry_streak"] == 1
 
-    events, state = evaluate_levels(HYPE_WATCH, 61.5, state)
+    events, state = evaluate_levels(TICKER_WATCH, 61.5, state)
     rec = _events_of(events, "recovery")
     assert len(rec) == 1
     assert rec[0]["current_price"] == 61.5
@@ -154,12 +154,12 @@ def test_first_tick_at_same_price_as_state_drop_does_not_re_alert():
         "above_entry_streak": 0,
         "prev_price": 57.0,
     }
-    events, _ = evaluate_levels(HYPE_WATCH, 57.0, state)
+    events, _ = evaluate_levels(TICKER_WATCH, 57.0, state)
     assert _events_of(events, "drop") == []
 
 
 def test_drop_levels_skipped_when_no_entry_price():
-    watch_no_entry = {k: v for k, v in HYPE_WATCH.items() if k != "entry_price"}
+    watch_no_entry = {k: v for k, v in TICKER_WATCH.items() if k != "entry_price"}
     watch_no_entry["levels"] = [lv for lv in watch_no_entry["levels"] if lv["type"] != "recovery"]
     events, _ = evaluate_levels(watch_no_entry, 53.0, None)
     assert _events_of(events, "drop") == []
@@ -172,8 +172,8 @@ def test_drop_pct_must_be_negative():
     the canonical (negative) usage and the event shape that flows from it.
     """
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "entry_price": 60.15,
         "levels": [
             {"type": "drop", "pct": -5},
@@ -192,8 +192,8 @@ def test_drop_pct_must_be_negative():
 
 def test_drop_event_carries_pct_from_entry():
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "entry_price": 100.0,
         "levels": [{"type": "drop", "pct": -5}],
     }
@@ -259,7 +259,7 @@ def test_no_levels_returns_empty():
 
 def test_signal_below_conviction_threshold_silent():
     sg_watch = {
-        "name": "HYPE",
+        "name": "<PRIVATE_PERP>",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 4, "cooldown_hours": 0}],
     }
     ideas = {"trend-follow": [{"direction": "long", "conviction": 3, "entry_price": 60.0, "stop_loss": 55.0}]}
@@ -269,7 +269,7 @@ def test_signal_below_conviction_threshold_silent():
 
 def test_signal_alerts_at_or_above_threshold():
     sg_watch = {
-        "name": "HYPE",
+        "name": "<PRIVATE_PERP>",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
     }
     ideas = {"trend-follow": [{"direction": "long", "conviction": 4, "entry_price": 60.0, "stop_loss": 55.0}]}
@@ -286,7 +286,7 @@ def test_signal_alerts_at_or_above_threshold():
 
 def test_signal_passes_through_extended_idea_fields():
     sg_watch = {
-        "name": "HYPE",
+        "name": "<PRIVATE_PERP>",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
     }
     ideas = {
@@ -315,7 +315,7 @@ def test_signal_passes_through_extended_idea_fields():
 
 def test_signal_defaults_extended_fields_when_missing():
     sg_watch = {
-        "name": "HYPE",
+        "name": "<PRIVATE_PERP>",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
     }
     ideas = {"trend-follow": [{"direction": "long", "conviction": 4, "entry_price": 60.0, "stop_loss": 55.0}]}
@@ -330,7 +330,7 @@ def test_signal_defaults_extended_fields_when_missing():
 
 def test_signal_cooldown_prevents_re_alert():
     sg_watch = {
-        "name": "HYPE",
+        "name": "<PRIVATE_PERP>",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 2}],
     }
     ideas = {"trend-follow": [{"direction": "long", "conviction": 4, "entry_price": 60.0, "stop_loss": 55.0}]}
@@ -345,7 +345,7 @@ def test_signal_cooldown_prevents_re_alert():
 
 def test_signal_cooldown_expires():
     sg_watch = {
-        "name": "HYPE",
+        "name": "<PRIVATE_PERP>",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 2}],
     }
     ideas = {"trend-follow": [{"direction": "long", "conviction": 4, "entry_price": 60.0, "stop_loss": 55.0}]}
@@ -359,7 +359,7 @@ def test_signal_cooldown_expires():
 
 def test_multiple_strategies_in_signal_block():
     sg_watch = {
-        "name": "HYPE",
+        "name": "<PRIVATE_PERP>",
         "signals": [
             {
                 "strategies": ["trend-follow", "mean-reversion"],
@@ -412,7 +412,7 @@ def test_signal_direction_filter_is_case_insensitive():
 
 def test_signal_no_direction_filter_keeps_both_directions():
     sg_watch = {
-        "name": "HYPE",
+        "name": "<PRIVATE_PERP>",
         "signals": [{"strategies": ["trend-follow", "mean-reversion"], "min_conviction": 3, "cooldown_hours": 0}],
     }
     ideas = {
@@ -434,7 +434,7 @@ def test_level_id_is_stable_across_calls():
 def test_event_has_iso_triggered_at():
     """All emitted events stamp ``triggered_at`` as an ISO string."""
     fixed = dt.datetime(2026, 6, 20, 12, 0, 0, tzinfo=dt.UTC)
-    events, _ = evaluate_levels(HYPE_WATCH, 48.0, None, now=fixed)
+    events, _ = evaluate_levels(TICKER_WATCH, 48.0, None, now=fixed)
     assert events, "expected at least one event from stop breach"
     for e in events:
         assert "triggered_at" in e
@@ -459,7 +459,7 @@ def test_stale_state_silent_first_tick_does_not_re_alert(monkeypatch, tmp_path):
         "levels": {"alerted_levels": {}, "above_entry_streak": 0, "prev_price": None},
         "signals": {},
     }
-    state_file = tmp_path / "HYPE_state.json"
+    state_file = tmp_path / "<PRIVATE_PERP>_state.json"
     state_file.write_text(json.dumps(stale_state))
     monkeypatch.setattr(_run_mod, "DATA_DIR", str(tmp_path))
 
@@ -469,8 +469,8 @@ def test_stale_state_silent_first_tick_does_not_re_alert(monkeypatch, tmp_path):
     monkeypatch.setattr(_run_mod, "_current_price", _fake_price)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "entry_price": 60.15,
         "position_size": 1.66,
         "levels": [{"type": "stop", "price": 49.71}],
@@ -480,6 +480,15 @@ def test_stale_state_silent_first_tick_does_not_re_alert(monkeypatch, tmp_path):
 
     assert alerts == []
     assert new_state["levels"]["alerted_levels"][_level_id({"type": "stop", "price": 49.71})] == "fired"
+    # Per-fix: confirm the seeded fixture is actually loaded by _state_path(),
+    # not silently treated as missing. The runtime reads
+    # ``<sanitized(name)>_state.json``; if the fixture filename doesn't match,
+    # this test silently exercises the missing-state path instead of the
+    # stale-state path it claims to test.
+    assert _run_mod._load_state("<PRIVATE_PERP>") is not None, (
+        "fixture file at _state_path(<PRIVATE_PERP>) must be loadable — "
+        "rename to '<PRIVATE_PERP>_state.json' if this assertion fails"
+    )
 
 
 def test_stale_state_silent_for_signals_too(monkeypatch, tmp_path):
@@ -498,7 +507,7 @@ def test_stale_state_silent_for_signals_too(monkeypatch, tmp_path):
         "levels": {},
         "signals": {},
     }
-    state_file = tmp_path / "HYPE_state.json"
+    state_file = tmp_path / "<PRIVATE_PERP>_state.json"
     state_file.write_text(json.dumps(stale_state))
     monkeypatch.setattr(_run_mod, "DATA_DIR", str(tmp_path))
 
@@ -512,8 +521,8 @@ def test_stale_state_silent_for_signals_too(monkeypatch, tmp_path):
     )
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 4}],
     }
     now = dt.datetime.now(dt.UTC)
@@ -521,6 +530,9 @@ def test_stale_state_silent_for_signals_too(monkeypatch, tmp_path):
 
     assert alerts == []
     assert "trend-follow:long" in new_state["signals"]["last_signal_alert_at"]
+    # Per-fix: confirm the seeded fixture is actually loaded by _state_path();
+    # otherwise the test silently exercises the missing-state path.
+    assert _run_mod._load_state("<PRIVATE_PERP>") is not None
 
 
 def test_env_var_overrides_default_config(monkeypatch, tmp_path):
@@ -634,16 +646,16 @@ def test_four_h_default_for_interval(monkeypatch, tmp_path):
     monkeypatch.setattr(_run_mod, "_run_strategies", fake_run_strategies)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "levels": [{"type": "stop", "price": 49.71}],
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
     }
     now = dt.datetime.now(dt.UTC)
     alerts, new_state = _run_mod._process_watch(watch, dry_run=False, now=now)
 
-    assert captured["price"] == ("kraken:HYPEEUR", "4h", "6mo")
-    assert captured["strategies"] == (["trend-follow"], "kraken:HYPEEUR", "4h", "6mo")
+    assert captured["price"] == ("kraken:<PRIVATE_PERP>EUR", "4h", "6mo")
+    assert captured["strategies"] == (["trend-follow"], "kraken:<PRIVATE_PERP>EUR", "4h", "6mo")
     assert new_state is not None
 
 
@@ -667,8 +679,8 @@ def test_per_watch_interval_override(monkeypatch, tmp_path):
     monkeypatch.setattr(_run_mod, "_run_strategies", fake_run_strategies)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "interval": "1h",
         "period": "3mo",
         "levels": [{"type": "stop", "price": 49.71}],
@@ -677,8 +689,8 @@ def test_per_watch_interval_override(monkeypatch, tmp_path):
     now = dt.datetime.now(dt.UTC)
     _run_mod._process_watch(watch, dry_run=False, now=now)
 
-    assert captured["price"] == ("kraken:HYPEEUR", "1h", "3mo")
-    assert captured["strategies"] == (["trend-follow"], "kraken:HYPEEUR", "1h", "3mo")
+    assert captured["price"] == ("kraken:<PRIVATE_PERP>EUR", "1h", "3mo")
+    assert captured["strategies"] == (["trend-follow"], "kraken:<PRIVATE_PERP>EUR", "1h", "3mo")
 
 
 def test_invalid_interval_prints_friendly_error(monkeypatch, tmp_path, capsys):
@@ -697,8 +709,8 @@ def test_invalid_interval_prints_friendly_error(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(_run_mod, "_run_strategies", fake_run_strategies)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "interval": "2x",
         "period": "6mo",
         "levels": [{"type": "stop", "price": 49.71}],
@@ -710,7 +722,7 @@ def test_invalid_interval_prints_friendly_error(monkeypatch, tmp_path, capsys):
     assert new_state is None
 
     captured = capsys.readouterr()
-    assert "HYPE" in captured.err
+    assert "<PRIVATE_PERP>" in captured.err
     assert "'2x'" in captured.err
     assert "invalid timeframe" in captured.err
 
@@ -731,8 +743,8 @@ def test_invalid_period_skips_watch(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(_run_mod, "_run_strategies", fake_run_strategies)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "interval": "4h",
         "period": "12mo",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
@@ -744,7 +756,7 @@ def test_invalid_period_skips_watch(monkeypatch, tmp_path, capsys):
     assert new_state is None
 
     captured = capsys.readouterr()
-    assert "HYPE" in captured.err
+    assert "<PRIVATE_PERP>" in captured.err
     assert "'12mo'" in captured.err
     assert "invalid timeframe" in captured.err
 
@@ -760,7 +772,7 @@ def test_validate_watch_rejects_legacy_provider_field():
     """The legacy ``provider`` field is no longer accepted — only ``monitor_provider``."""
     _run_mod = _load_run_mod("position_watchdog_v_legacy_rejected")
     errs = _run_mod._validate_watch(
-        {"name": "X", "enabled": True, "provider": "kraken:HYPEEUR", "levels": [{"type": "stop", "price": 1}]}
+        {"name": "X", "enabled": True, "provider": "kraken:<PRIVATE_PERP>EUR", "levels": [{"type": "stop", "price": 1}]}
     )
     assert any("monitor_provider" in e for e in errs)
 
@@ -784,9 +796,9 @@ def test_validate_watch_accepts_monitor_only():
     _run_mod = _load_run_mod("position_watchdog_v_monitor_only")
     errs = _run_mod._validate_watch(
         {
-            "name": "HYPE",
+            "name": "<PRIVATE_PERP>",
             "enabled": True,
-            "monitor_provider": "kraken:HYPEUSD",
+            "monitor_provider": "kraken:<PRIVATE_PERP>USD",
             "levels": [{"type": "stop", "price": 49.71}],
         }
     )
@@ -802,10 +814,10 @@ def test_validate_watch_rejects_execution_provider():
     _run_mod = _load_run_mod("position_watchdog_v_split")
     errs = _run_mod._validate_watch(
         {
-            "name": "HYPE",
+            "name": "<PRIVATE_PERP>",
             "enabled": True,
-            "monitor_provider": "kraken:HYPEUSD",
-            "execution_provider": "kraken:HYPEEUR",
+            "monitor_provider": "kraken:<PRIVATE_PERP>USD",
+            "execution_provider": "kraken:<PRIVATE_PERP>EUR",
             "levels": [{"type": "stop", "price": 49.71}],
         }
     )
@@ -832,12 +844,12 @@ def test_process_watch_uses_monitor_provider_for_fetch_and_strategies(monkeypatc
     monkeypatch.setattr(_run_mod, "_current_price", fake_current_price)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEUSD",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>USD",
         "levels": [{"type": "stop", "price": 90.0}],
     }
     _run_mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
-    assert captured == ["kraken:HYPEUSD"]
+    assert captured == ["kraken:<PRIVATE_PERP>USD"]
 
 
 def test_process_watch_skips_tick_when_monitor_fetch_fails(monkeypatch, tmp_path, capsys):
@@ -856,15 +868,15 @@ def test_process_watch_skips_tick_when_monitor_fetch_fails(monkeypatch, tmp_path
     monkeypatch.setattr(_run_mod, "_current_price", fake_current_price)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEUSD",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>USD",
         "levels": [{"type": "stop", "price": 90.0}],
     }
     alerts, _ = _run_mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
     assert alerts == []
     captured = capsys.readouterr()
     assert "fetch failed" in captured.err
-    assert "kraken:HYPEUSD" in captured.err
+    assert "kraken:<PRIVATE_PERP>USD" in captured.err
 
 
 def test_process_watch_l3_uses_monitor_provider(monkeypatch, tmp_path):
@@ -888,19 +900,66 @@ def test_process_watch_l3_uses_monitor_provider(monkeypatch, tmp_path):
     monkeypatch.setattr(_run_mod, "_run_strategies", fake_run_strategies)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEUSD",
-        "execution_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>USD",
+        "execution_provider": "kraken:<PRIVATE_PERP>EUR",
         "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
     }
     _run_mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
-    assert captured["strategies"] == (["trend-follow"], "kraken:HYPEUSD")
+    assert captured["strategies"] == (["trend-follow"], "kraken:<PRIVATE_PERP>USD")
+
+
+def test_run_strategies_passes_qualified_provider_ticker_to_analyze(monkeypatch, tmp_path):
+    """Per-fix fixture for the watchdog L3 threshold-lookup bug.
+
+    ``_run_strategies`` previously stripped the provider prefix before calling
+    ``analyze(...)``, so a watch with ``monitor_provider='kraken:LIT'`` would
+    see ``ticker='LIT'`` inside the strategy. That made
+    ``lookup_min_conviction('strategy-trend-follow', ticker, interval)`` miss
+    any configured gate keyed on ``provider:ticker`` — the lookup fell
+    through to ``GLOBAL_MIN_CONVICTION_TO_EMIT`` (=1 = no-op). The fix passes
+    the qualified ``provider_ticker`` through unchanged.
+    """
+    _run_mod = _load_run_mod("position_watchdog_l3_qualified")
+    monkeypatch.setattr(_run_mod, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(_run_mod, "_state_is_stale", lambda _s: False)
+    monkeypatch.setattr(_run_mod, "_current_price", lambda *_a, **_kw: 100.0)
+    # _run_strategies calls fetch_ohlc and bails when candles are empty;
+    # stub it with enough rows to drive the analyze() path.
+    monkeypatch.setattr(
+        _run_mod,
+        "fetch_ohlc",
+        lambda *_a, **_kw: [[i, 100.0, 101.0, 99.0, 100.5, 1000.0] for i in range(60)],
+    )
+
+    captured: list[dict] = []
+
+    class _StubStrategy:
+        def analyze(self, candles, *, ticker, **kwargs):
+            captured.append({"ticker": ticker, "kwargs": kwargs})
+            return {"ideas": []}
+
+    monkeypatch.setattr(_run_mod, "load_skill", lambda name: _StubStrategy())
+
+    watch = {
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>USD",
+        "signals": [{"strategies": ["trend-follow"], "min_conviction": 1, "cooldown_hours": 0}],
+    }
+    _run_mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
+
+    assert captured, "strategy analyze() was not called"
+    assert captured[0]["ticker"] == "kraken:<PRIVATE_PERP>USD", (
+        f"strategy must receive the qualified provider:ticker so "
+        f"lookup_min_conviction() can match configured gates; "
+        f"got {captured[0]['ticker']!r}"
+    )
 
 
 def test_bare_ticker_extracts_after_colon():
     _run_mod = _load_run_mod("position_watchdog_bare")
-    assert _run_mod._bare_ticker("kraken:HYPEUSD") == "HYPEUSD"
-    assert _run_mod._bare_ticker("hl:LIT") == "LIT"
+    assert _run_mod._bare_ticker("kraken:<PRIVATE_PERP>USD") == "<PRIVATE_PERP>USD"
+    assert _run_mod._bare_ticker("hl:<PRIVATE_PERP>") == "<PRIVATE_PERP>"
     # No colon: return the whole string (shouldn't happen post-validation).
     assert _run_mod._bare_ticker("BARE") == "BARE"
 
@@ -915,8 +974,8 @@ def test_run_process_watch_default_style_is_compact_for_watches_json(monkeypatch
     monkeypatch.setattr(_run_mod, "_current_price", lambda *_a, **_kw: 48.0)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "levels": [{"type": "stop", "price": 49.71}],
     }
     cfg = "/tmp/watches.json"
@@ -936,15 +995,15 @@ def test_run_process_watch_default_style_is_default_for_open_positions(monkeypat
     monkeypatch.setattr(_run_mod, "_current_price", lambda *_a, **_kw: 48.0)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "levels": [{"type": "stop", "price": 49.71}],
     }
     cfg = "/tmp/open-positions.json"
     alerts, _ = _run_mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC), config_path=cfg)
     assert alerts, "expected at least one alert"
     # default style stop uses different wording than compact.
-    assert any("STOP BREACHED — HYPE" in a for a in alerts)
+    assert any("STOP BREACHED — <PRIVATE_PERP>" in a for a in alerts)
 
 
 def test_run_process_watch_watch_level_format_style_overrides_default(monkeypatch, tmp_path):
@@ -957,8 +1016,8 @@ def test_run_process_watch_watch_level_format_style_overrides_default(monkeypatc
     monkeypatch.setattr(_run_mod, "_current_price", lambda *_a, **_kw: 48.0)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "format_style": "compact",
         "levels": [{"type": "stop", "price": 49.71}],
     }

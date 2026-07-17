@@ -8,9 +8,12 @@ from analysis.contracts import (
     l3_tp3_dead_zone_floor,
     validate_l3_tp_ladder_silent,
 )
+from analysis.conviction_thresholds import lookup_min_conviction
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
+
+_STRATEGY_NAME = "strategy-liquidity-sweep"
 
 
 def conviction_from_confidences(sweep_conf: int, accum_conf: int, *, mode: str = "current") -> int:
@@ -45,31 +48,30 @@ def conviction_from_confidences(sweep_conf: int, accum_conf: int, *, mode: str =
     return min(5, raw)
 
 
-# Entry-gate tightening (bead market-skills-96y): the L3 used to emit every
-# sweep-classified idea regardless of conviction. Per
-# `market-skills-trend-follow`'s MIN_CONVICTION_TO_EMIT pattern, expose the
-# gate as a module-level constant so per-ticker thresholds can override
-# without touching analyze(). Default 1 = no filter (the formula's natural
-# floor for ``current`` mode on integer L2 confidences is 1; with
-# ``max_plus_one`` the floor rises to 2 for asymmetric inputs). Raising
-# this constant is the lever for per-ticker conviction tuning once liq-sweep
-# journal data accumulates; for now the per-band backtest evidence
-# (see 96y description) suggests HYPE/VVV benefit from tightening while
-# BTC/TAO are harmed, so any default raise should be ticker-aware.
-MIN_CONVICTION_TO_EMIT = 1
+# Entry-gate tightening (bead market-skills-96y, market-skills-oin): the L3
+# used to emit every sweep-classified idea regardless of conviction. Bead
+# ``oin`` moved the per-strategy ``MIN_CONVICTION_TO_EMIT`` integer default
+# into ``analysis.conviction_thresholds`` so per-(ticker, interval) overrides
+# can be shipped in one place without editing this file. Default 1 (no
+# filter) is preserved as ``GLOBAL_MIN_CONVICTION_TO_EMIT`` in the table; the
+# formula's natural floor for ``current`` mode on integer L2 confidences is
+# 1, so this is the legacy no-op. Raising the floor to ``>= 2`` drops
+# low-conviction ideas. Per-band backtest evidence (see ``oin`` description
+# and ``96y`` notes) suggests some perp_dex / ai_infra tokens benefit from
+# tightening while others are harmed, so overrides are ticker-aware via the
+# central table.
 
 
-def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None,
-            conviction_mode: str | None = None):
+def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None, conviction_mode: str | None = None):
     """Run the liq-sweep L3 emit pipeline.
 
     Optional ``conviction_mode`` forwards to
     :func:`conviction_from_confidences` (one of ``"current"``,
     ``"add"``, ``"add_minus_one"``, ``"max_plus_one"``). When ``None`` (the
-    default) the formula kwarg's own default applies — currently
-    ``"current"``. The kwarg is the lever for backtest-engine formula A/B
-    comparison (bead market-skills-7eq): run ``analyze`` with each mode in
-    turn and compare Sharpe through ``FillSimulator``.
+    default) ``"current"`` is used — the formula's own default. The kwarg
+    is the lever for backtest-engine formula A/B comparison (bead
+    market-skills-7eq): run ``analyze`` with each mode in turn and
+    compare Sharpe through ``FillSimulator``.
     """
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
@@ -110,7 +112,7 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None,
         conviction = conviction_from_confidences(
             sweep_pattern.get("confidence", 3),
             accum_pattern.get("confidence", 3),
-            **(dict(mode=conviction_mode) if conviction_mode is not None else {}),
+            mode=conviction_mode if conviction_mode is not None else "current",
         )
         # BUGS-2026-07-08-3: clamp TP3 at the 5% boundary so low-vol sweeps
         # still produce an idea.
@@ -196,11 +198,13 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None,
                 stop_2pct_rejection = rej
         ideas = filtered
 
-    # Tighten entry gate (bead market-skills-96y): drop low-conviction noise.
-    if ideas and MIN_CONVICTION_TO_EMIT > 1:
-        ideas = [
-            i for i in ideas if i.get("conviction", 0) >= MIN_CONVICTION_TO_EMIT
-        ]
+    # Tighten entry gate (bead market-skills-96y, market-skills-oin):
+    # drop low-conviction noise. Threshold comes from the per-(ticker,
+    # interval) table in `analysis.conviction_thresholds`; ``1`` is the
+    # no-op floor and any ``>= 2`` value drops low-conviction ideas.
+    _min_conv = lookup_min_conviction(_STRATEGY_NAME, ticker, interval)
+    if ideas and _min_conv > 1:
+        ideas = [i for i in ideas if i.get("conviction", 0) >= _min_conv]
 
     if ideas:
         narrative = f"Liquidity sweep setup: long. {sweep_result.get('narrative', '')}"

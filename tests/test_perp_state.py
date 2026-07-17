@@ -188,7 +188,6 @@ class TestGetMmRate:
     def test_returns_mapped_rate(self) -> None:
         assert get_mm_rate("BTCUSD") == 0.005
         assert get_mm_rate("SOLUSD") == 0.01
-        assert get_mm_rate("HYPEUSD") == 0.01
 
     def test_xbt_alias(self) -> None:
         assert get_mm_rate("XBTUSD") == 0.005

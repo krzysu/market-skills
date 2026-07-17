@@ -34,7 +34,7 @@ TypeError: bad operand type for abs(): 'NoneType'
 
 **Trigger**: `actual_return_pct` is `None` on a closed idea. The skill SKILL.md schema lists it as `float or null`, but the verifier expects a number.
 
-**Fix at write time**: when no Kraken price can be fetched (HL perp-DEX ticker, delisted pair, API down), set `actual_return_pct=0.0`, `hit_target=False`, `outcome_verdict='expired'`, `status='closed'` (NOT `status='expired'`, see FAIL#3). Verified 2026-07-05 10:00 CEST tick on 3 ideas (hl:LIT, hl:XPL, hl:FARTCOIN).
+**Fix at write time**: when no Kraken price can be fetched (HL perp-DEX ticker, delisted pair, API down), set `actual_return_pct=0.0`, `hit_target=False`, `outcome_verdict='expired'`, `status='closed'` (NOT `status='expired'`, see FAIL#3). Verified 2026-07-05 10:00 CEST tick on 3 HL perp-DEX ideas.
 
 **Producer fix (pending)**: guard line 115 with `if i.get("actual_return_pct") is None: continue` so expired-but-no-price ideas don't trigger the crash. Track in a Kanban ticket.
 
@@ -67,11 +67,11 @@ FAIL: new idea <PAIR> picked=true (verify cooldown + bar)
 
 **Trigger**: a NEW scan contains an idea with `met_bar=true` or `picked=true`. The verifier silently assumes every tick is silent.
 
-**This is a verifier bug, not a journal bug.** The SKILL.md schema explicitly allows `met_bar=true, picked=true` for the picked idea (mirrors the 2026-06-30 PUMP scan — the only prior picked idea in 19 scans of journal history). When this FAIL fires with exit 1, the journal write is correct per spec.
+**This is a verifier bug, not a journal bug.** The SKILL.md schema explicitly allows `met_bar=true, picked=true` for the picked idea (mirrors an earlier `<MEMECOIN>` short pick — the only prior picked idea in 19 scans of journal history). When this FAIL fires with exit 1, the journal write is correct per spec.
 
 **Fix**: do NOT "fix" the journal by flipping `met_bar=false` on the picked idea. That corrupts the audit trail and silently turns the legitimate bar pass into a fake rejection. Surface the FAIL as an `[INFO]` in the cron response body and move on. Kanban ticket needed to teach the verifier that `met_bar=true AND picked=true` is the canonical pick shape.
 
-**Worked case 2026-07-05 10:00 CEST**: hl:LIT LONG was the only met_bar candidate; verifier emitted `FAIL: new idea hl:LIT met_bar=true` and exited 1. Journal was correct per skill spec; the canonical pick shape (matching 2026-06-30 PUMP short) was preserved.
+**Worked case 2026-07-05 10:00 CEST**: an HL perp-DEX LONG was the only met_bar candidate; verifier emitted `FAIL: new idea ... met_bar=true` and exited 1. Journal was correct per skill spec; the canonical pick shape (matching an earlier `<MEMECOIN>` short) was preserved.
 
 ### FAIL#5 — Bad rejection_reason format
 

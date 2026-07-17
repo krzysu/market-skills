@@ -9,9 +9,12 @@ from analysis.contracts import (
     l3_tp3_dead_zone_floor,
     validate_l3_tp_ladder_silent,
 )
+from analysis.conviction_thresholds import lookup_min_conviction
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
+
+_STRATEGY_NAME = "strategy-trend-follow"
 
 # Asset-class multipliers for Pattern S maturity thresholds.
 # Each multiplier scales the default 30% (mature-move) / 50% (late-move) floors.
@@ -24,15 +27,17 @@ _ASSET_CLASS_MULTIPLIERS: dict[str, float] = {
 
 # Entry-gate tightening (bead market-skills-hem): the L3 used to emit every
 # trend-classified idea regardless of conviction, producing 70-150 trades per
-# ticker on 1d/1y with mostly negative Sharpe (only VVVUSD positive). Filter to
-# conviction >= N before emit; default N=1 keeps the legacy behavior (the L3
-# already floors conviction at 1). The capability is exposed; tune by raising
-# the constant and validating against backtest-engine (--fill-sim --metrics)
-# before shipping a higher default. The bead hypothesised N=4 was the fix;
-# empirical run on the HYPE 4h fixture shows pre-fix conviction distribution
-# sits at 1-3, so N=4 would zero out the strategy — too aggressive without
-# first raising the upstream conviction range.
-MIN_CONVICTION_TO_EMIT = 1
+# ticker on 1d/1y with mostly negative Sharpe. Filter to conviction >= N
+# before emit; default N=1 keeps the legacy behavior (the L3 already floors
+# conviction at 1). Bead market-skills-oin moved the per-strategy
+# ``MIN_CONVICTION_TO_EMIT`` integer default into
+# ``analysis.conviction_thresholds`` so per-(ticker, interval) overrides can be
+# shipped in one place without editing this file. Test fixtures that still want
+# the legacy single-int knob can monkey-patch
+# ``MIN_CONVICTION_TO_EMIT_BY_STRATEGY`` directly. The bead hypothesised N=4
+# was the fix; per-tuner A/B evidence (loaded from
+# ``$MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH``) selects the right floor per
+# (ticker, interval).
 
 
 def _detect_intact_bullish_structure(tq_result):
@@ -327,9 +332,13 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
                 stop_2pct_rejection = rej
         ideas = filtered
 
-    # Tighten entry gate (bead market-skills-hem): drop low-conviction noise.
-    if ideas and MIN_CONVICTION_TO_EMIT > 0:
-        ideas = [i for i in ideas if i.get("conviction", 0) >= MIN_CONVICTION_TO_EMIT]
+    # Tighten entry gate (bead market-skills-hem, market-skills-oin):
+    # drop low-conviction noise. Threshold comes from the per-(ticker,
+    # interval) table in `analysis.conviction_thresholds`; ``1`` is the
+    # no-op floor and any ``>= 2`` value drops low-conviction ideas.
+    _min_conv = lookup_min_conviction(_STRATEGY_NAME, ticker, interval)
+    if ideas and _min_conv > 1:
+        ideas = [i for i in ideas if i.get("conviction", 0) >= _min_conv]
 
     if ideas:
         dirs = ", ".join(i["direction"] for i in ideas)

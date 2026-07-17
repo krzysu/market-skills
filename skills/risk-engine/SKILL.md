@@ -161,9 +161,9 @@ portfolios:
     cooldown_hours: 4
     daily_budget: 15
 
-# Per-pair overrides (case-insensitive bare-ticker match — HYPEUSD matches HYPE-USD).
+# Per-pair overrides (case-insensitive bare-ticker match — <PRIVATE_PERP>-USD matches <PRIVATE_PERP>USD).
 pairs:
-  HYPEUSD:
+  <PRIVATE_PERP>USD:
     max_position_pct: 5
 ```
 

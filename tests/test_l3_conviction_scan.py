@@ -140,7 +140,7 @@ def test_extract_ideas_tolerates_l3_wrapper():
     """run-watchlist wraps strategies under ``l3`` rather than ``strategies``."""
     payload = {
         "tickers": {
-            "HYPEUSD": {
+            "<PRIVATE_PERP>USD": {
                 "metadata": {"tier": 2, "asset_class": "perp_dex"},
                 "l3": {
                     "strategy-trend-follow": {

@@ -4,7 +4,7 @@ Unit-tests :func:`enforce_min_stop_distance` directly (the contract), then
 smoke-tests each of the 6 L3 strategies to confirm the guard is wired in
 (strategies import it from ``analysis.contracts`` and the filtered-ideas
 branch is reachable). The per-strategy "rejected under tiny ATR" integration
-test uses the HYPE 4h fixture and a tiny patched ATR — a strategy that
+test uses the <PRIVATE_PERP> 4h fixture and a tiny patched ATR — a strategy that
 naturally emits an idea under the fixture will see its idea dropped by the
 guard; a strategy that doesn't emit a natural idea simply returns the empty
 list and the test still confirms the import + filter path doesn't crash.
@@ -79,7 +79,7 @@ class TestEnforceMinStopDistance:
         assert "2% swing minimum" in narrative2
 
     def test_vvv_drift_repro_1_86pct(self):
-        """VVV 1h mean-reversion repro: 1.86% stop must be rejected."""
+        """<PRIVATE_AI> 1h mean-reversion repro: 1.86% stop must be rejected."""
         ok, narrative = enforce_min_stop_distance({"entry_price": 1.0, "stop_loss": 0.9814})
         assert ok is False
         assert "1.86%" in narrative
@@ -129,7 +129,7 @@ class TestStrategyWiring:
 
 
 class TestStrategyNaturalStopsRespectGuard:
-    """Smoke test: run each strategy on the HYPE 4h fixture and verify that
+    """Smoke test: run each strategy on the <PRIVATE_PERP> 4h fixture and verify that
     any emitted idea has a stop distance >= the 2% swing minimum. This
     catches "wiring is wrong, guard never runs" regressions. Strategies
     that don't emit an idea on the fixture naturally fall through the
@@ -141,7 +141,7 @@ class TestStrategyNaturalStopsRespectGuard:
     def test_any_emitted_idea_has_wide_enough_stop(self, strategy_dir: str):
         mod = _load_strat_lib(strategy_dir)
         candles = _load_hype_fixture()
-        result = mod.analyze(candles, ticker="HYPE", interval="4h", period="6mo")
+        result = mod.analyze(candles, ticker="<PRIVATE_PERP>", interval="4h", period="6mo")
 
         assert "ideas" in result
         assert "narrative" in result

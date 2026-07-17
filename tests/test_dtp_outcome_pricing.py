@@ -12,10 +12,12 @@ from unittest.mock import patch
 
 import pytest
 
-# Reproducer: HYPEUSD long that touched TP1 by wick but opened below entry
-HYPE_WICK_HIT_DATA = {
+# Reproducer: a long that touched TP1 by wick but opened below entry.
+# Tickers are generic placeholders; the actual asset symbol is irrelevant
+# to the price-priority bug being tested.
+WICK_HIT_DATA = {
     "scan_id": "2026-06-29-003",
-    "pair": "HYPEUSD",
+    "pair": "<TICKER1>USD",
     "direction": "long",
     "entry_price": 63.68,
     "tp1": 79.83,
@@ -25,30 +27,30 @@ HYPE_WICK_HIT_DATA = {
     "actual_return_pct_buggy": (57.56 - 63.68) / 63.68 * 100,  # -9.61%
 }
 
-# The 9 wick-hit longs from the journal review
+# The 9 wick-hit longs from the journal review (tickers genericized)
 WICK_HIT_LONGS = [
-    ("2026-06-29-003", "HYPEUSD", 63.68, 57.56, 65.20),
-    ("2026-07-03-001", "VVVUSD", 14.01, 13.044, 14.30),
-    ("2026-07-03-002", "VVVUSD", 14.01, 12.323, 14.30),
-    ("2026-07-05-001", "RPLUSD", 2.04, 1.877, 2.08),
-    ("2026-07-05-001", "hl:XPL", 0.1063, 0.10, 0.108),
-    ("2026-07-05-002", "ADA", 0.1893, 0.1798, 0.192),
-    ("2026-07-05-002", "RPL", 1.98, 1.823, 2.00),
-    ("2026-07-06-001", "HYPEUSD", 70.99, 61.81, 72.00),
-    ("2026-07-06-001", "ADAUSD", 0.1844, 0.1711, 0.186),
+    ("2026-06-29-003", "<TICKER1>USD", 63.68, 57.56, 65.20),
+    ("2026-07-03-001", "<TICKER2>USD", 14.01, 13.044, 14.30),
+    ("2026-07-03-002", "<TICKER2>USD", 14.01, 12.323, 14.30),
+    ("2026-07-05-001", "<TICKER3>USD", 2.04, 1.877, 2.08),
+    ("2026-07-05-001", "hl:<PERP1>", 0.1063, 0.10, 0.108),
+    ("2026-07-05-002", "<TICKER4>", 0.1893, 0.1798, 0.192),
+    ("2026-07-05-002", "<TICKER5>", 1.98, 1.823, 2.00),
+    ("2026-07-06-001", "<TICKER1>USD", 70.99, 61.81, 72.00),
+    ("2026-07-06-001", "<TICKER4>USD", 0.1844, 0.1711, 0.186),
 ]
 
 # Scan-specific next-bar-open lookups for pairs that appear in multiple scans
 SCAN_NEXT_BAR: dict[tuple[str, str], float] = {
-    ("2026-06-29-003", "HYPEUSD"): 65.20,
-    ("2026-07-03-001", "VVVUSD"): 14.30,
-    ("2026-07-03-002", "VVVUSD"): 14.30,
-    ("2026-07-05-001", "RPLUSD"): 2.08,
-    ("2026-07-05-001", "hl:XPL"): 0.108,
-    ("2026-07-05-002", "ADA"): 0.192,
-    ("2026-07-05-002", "RPL"): 2.00,
-    ("2026-07-06-001", "HYPEUSD"): 72.00,
-    ("2026-07-06-001", "ADAUSD"): 0.186,
+    ("2026-06-29-003", "<TICKER1>USD"): 65.20,
+    ("2026-07-03-001", "<TICKER2>USD"): 14.30,
+    ("2026-07-03-002", "<TICKER2>USD"): 14.30,
+    ("2026-07-05-001", "<TICKER3>USD"): 2.08,
+    ("2026-07-05-001", "hl:<PERP1>"): 0.108,
+    ("2026-07-05-002", "<TICKER4>"): 0.192,
+    ("2026-07-05-002", "<TICKER5>"): 2.00,
+    ("2026-07-06-001", "<TICKER1>USD"): 72.00,
+    ("2026-07-06-001", "<TICKER4>USD"): 0.186,
 }
 
 
@@ -66,7 +68,7 @@ def fetch_last_trade(pair: str) -> float:
     for _, p, _, wick_px, _ in WICK_HIT_LONGS:
         if p == pair:
             return wick_px
-    return HYPE_WICK_HIT_DATA["kraken_ticker_price"]
+    return WICK_HIT_DATA["kraken_ticker_price"]
 
 
 def outcome_price_correct(scan_id: str, pair: str) -> float:
@@ -80,11 +82,11 @@ def outcome_price_correct(scan_id: str, pair: str) -> float:
         return fetch_last_trade(pair)
 
 
-def test_hype_wick_hit_uses_next_bar_open() -> None:
-    """The HYPEUSD long must use the next-bar-open, not the wick."""
-    px = outcome_price_correct("2026-06-29-003", "HYPEUSD")
+def test_wick_hit_uses_next_bar_open() -> None:
+    """The <TICKER1>USD long must use the next-bar-open, not the wick."""
+    px = outcome_price_correct("2026-06-29-003", "<TICKER1>USD")
     assert abs(px - 65.20) < 0.01
-    assert px != HYPE_WICK_HIT_DATA["kraken_ticker_price"]
+    assert px != WICK_HIT_DATA["kraken_ticker_price"]
 
 
 @pytest.mark.parametrize("scan_id,pair,entry,wick_px,correct_next_open", WICK_HIT_LONGS)
@@ -100,5 +102,5 @@ def test_wick_hit_long_uses_next_bar_open(
 def test_falls_back_to_ticker_when_ohlc_empty() -> None:
     """When kraken ohlc returns empty, fall back to ticker."""
     with patch(f"{__name__}.fetch_next_bar_open", return_value=0.0):
-        px = outcome_price_correct("2026-06-29-003", "HYPEUSD")
+        px = outcome_price_correct("2026-06-29-003", "<TICKER1>USD")
         assert px == 57.56  # ticker fallback path

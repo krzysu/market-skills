@@ -548,12 +548,12 @@ def _kraken_pairs_payload() -> dict:
             "status": "online",
             "wsname": "GRT/USD",
         },
-        "HYPEUSD": {
-            "altname": "HYPEUSD",
-            "base": "HYPE",
+        "<PRIVATE_PERP>USD": {
+            "altname": "<PRIVATE_PERP>USD",
+            "base": "<PRIVATE_PERP>",
             "quote": "ZUSD",
             "status": "online",
-            "wsname": "HYPE/USD",
+            "wsname": "<PRIVATE_PERP>/USD",
         },
         "XBTUSDT": {
             "altname": "XBTUSDT",

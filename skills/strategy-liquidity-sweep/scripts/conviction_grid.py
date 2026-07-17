@@ -141,7 +141,16 @@ def _print_histograms(per_mode, branch2_count, modes):
     print("(the negative-EV band per the journal evidence).")
 
 
-def _validate_journal(modes, *, strategy: str | None = None):
+def _pnl(row: dict) -> float | None:
+    """Read a journal row's realized pnl. ``actual_return_pct`` is the
+    current field name; ``pnl`` is the legacy fallback."""
+    v = row.get("actual_return_pct")
+    if v is None:
+        v = row.get("pnl")
+    return v if isinstance(v, (int, float)) else None
+
+
+def _validate_journal(*, strategy: str | None = None):
     """Report per-conviction-band hit rate from the operator journal.
 
     The journal path is read from ``LIQ_SWEEP_JOURNAL_PATH``; we raise if unset
@@ -201,9 +210,7 @@ def _validate_journal(modes, *, strategy: str | None = None):
     else:
         before = len(ideas)
         ideas = [i for i in ideas if i.get("strategy") == strategy]
-        print(
-            f"Strategy filter: --strategy={strategy} ({before} -> {len(ideas)} ideas)"
-        )
+        print(f"Strategy filter: --strategy={strategy} ({before} -> {len(ideas)} ideas)")
 
     bands: dict[int, list[dict]] = {k: [] for k in range(1, 6)}
     for idea in ideas:
@@ -214,21 +221,10 @@ def _validate_journal(modes, *, strategy: str | None = None):
     for k in range(1, 6):
         rows = bands[k]
         closed = [r for r in rows if r.get("status") == "closed"]
-
-        def _pnl(r: dict) -> float | None:
-            v = r.get("actual_return_pct")
-            if v is None:
-                v = r.get("pnl")
-            return v if isinstance(v, (int, float)) else None
-
         hits = sum(1 for r in closed if ((_pnl(r) or 0) > 0))
         rate = hits / len(closed) if closed else 0.0
-        avg = (
-            sum((_pnl(r) or 0) for r in closed) / len(closed) if closed else 0.0
-        )
-        print(
-            f"  conv={k}: n={len(rows)} closed={len(closed)} hit_rate={rate:.1%} avg_pnl={avg:+.2f}"
-        )
+        avg = sum((_pnl(r) or 0) for r in closed) / len(closed) if closed else 0.0
+        print(f"  conv={k}: n={len(rows)} closed={len(closed)} hit_rate={rate:.1%} avg_pnl={avg:+.2f}")
 
 
 def _parse_argv(argv: list[str]) -> argparse.Namespace:
@@ -264,7 +260,7 @@ def main() -> None:
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
 
     if args.validate_journal:
-        _validate_journal(modes, strategy=args.strategy)
+        _validate_journal(strategy=args.strategy)
 
     # Build one candle series per ticker (or a single demo series).
     if args.demo:
@@ -298,7 +294,6 @@ def main() -> None:
         frac = 0.0
         tag = "FULL SAMPLE (in-sample — use --holdout to validate out-of-sample before selecting a formula)"
 
-
     def start_of(n: int) -> int:
         return int(n * frac)
 
@@ -307,8 +302,12 @@ def main() -> None:
     for candles in series:
         si = start_of(len(candles))
         pm, b2 = _fired_convictions_per_mode(
-            candles, interval=args.interval, period=args.period,
-            warmup=args.warmup, modes=modes, start_index=si,
+            candles,
+            interval=args.interval,
+            period=args.period,
+            warmup=args.warmup,
+            modes=modes,
+            start_index=si,
         )
         for m in modes:
             per_mode[m].extend(pm[m])

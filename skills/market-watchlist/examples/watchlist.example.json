@@ -7,10 +7,10 @@
     "crypto_alts": {
       "<TICKER1>USD": {"tier": 3, "source": "kraken", "label": "<tier3 alts label>"},
       "<TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<tier3 alts label>"},
-      "<TICKER1>USD": {"tier": 1, "source": "kraken", "label": "<tier1 hl perp label>", "asset_class": "perp_dex"},
+      "<TICKER1>USD": {"tier": 1, "source": "kraken", "label": "<tier1 perp_dex label>", "asset_class": "perp_dex"},
       "<TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<tier3 alts label>"},
       "<TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<tier3 alts label>"},
-      "hl:LIT":  {"tier": 1, "source": "hyperliquid", "label": "Lighter Perp DEX", "asset_class": "perp_dex"}
+      "hl:<PERP>":  {"tier": 1, "source": "hyperliquid", "label": "<tier1 hl perp label>", "asset_class": "perp_dex"}
     },
     "crypto_ai": {
       "<AI_TICKER1>USD": {"tier": 1, "source": "kraken", "label": "<ai infra label>", "asset_class": "ai_infra"},

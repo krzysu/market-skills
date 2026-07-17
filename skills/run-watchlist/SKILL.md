@@ -76,7 +76,7 @@ Same shape as running `run-all-l2` and `run-all-l3` separately per ticker, merge
 
 ## Why notes are on by default
 
-A "morning brief" is meaningless without the agent's prior context. L3 says LONG conv 4 on HYPE, but there's an active "wait for $502 breakout" note — that should appear together so the agent brain can reconcile.
+A "morning brief" is meaningless without the agent's prior context. L3 says LONG conv 4 on `<TICKER>`, but there's an active "wait for $502 breakout" note — that should appear together so the agent brain can reconcile.
 
 If you're running this from a hot loop where notes are noise (e.g. backtest data prep), pass `--no-notes`.
 

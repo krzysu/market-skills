@@ -32,7 +32,7 @@ class TestPatternB1AbsentWithSubs:
                 "volume_confirmation": {"present": True, "weight": 0.15},
             },
         }
-        findings = lib._scan_l2_skill(result, ticker="HYPEUSD", tf="1h", skill="market-trend-quality")
+        findings = lib._scan_l2_skill(result, ticker="<PRIVATE_PERP>USD", tf="1h", skill="market-trend-quality")
         shape_b1 = [f for f in findings if f["shape"] == lib.SHAPE_PATTERN_B_1]
         assert len(shape_b1) == 1
         assert shape_b1[0]["tag"] == "[BUG]"
@@ -85,7 +85,7 @@ class TestPatternB1AbsentWithSubs:
                 "volume_confirmation": {"present": True, "weight": 0.15},
             },
         }
-        findings = lib._scan_l2_skill(result, ticker="HYPEUSD", tf="1h", skill="market-trend-quality")
+        findings = lib._scan_l2_skill(result, ticker="<PRIVATE_PERP>USD", tf="1h", skill="market-trend-quality")
         shape_b1 = [f for f in findings if f["shape"] == lib.SHAPE_PATTERN_B_1]
         assert len(shape_b1) == 1
         assert shape_b1[0]["wsum"] == pytest.approx(0.60)
@@ -107,7 +107,7 @@ class TestPatternB2Silent:
                 "ema_alignment": {"present": True, "weight": 0.25},
             },
         }
-        findings = lib._scan_l2_skill(result, ticker="HYPEUSD", tf="1h", skill="market-test")
+        findings = lib._scan_l2_skill(result, ticker="<PRIVATE_PERP>USD", tf="1h", skill="market-test")
         shape_b2 = [f for f in findings if f["shape"] == lib.SHAPE_PATTERN_B_2]
         assert len(shape_b2) == 1
         assert shape_b2[0]["tag"] == "[BUG]"
@@ -229,7 +229,7 @@ class TestCrossTfContradiction:
     def test_fires_on_aero_style_4h_vs_1d_split(self):
         lib = _load_lib()
         tickers = {
-            "AEROUSD": {
+            "<PRIVATE_DEX>USD": {
                 "tfs": {
                     "4h": {
                         "skills": {
@@ -261,7 +261,7 @@ class TestCrossTfContradiction:
         findings = lib._scan_cross_tf_contradictions({"tickers": tickers}, {"tickers": {}})
         assert len(findings) == 1
         assert findings[0]["shape"] == lib.SHAPE_CROSS_TF_CONTRADICTION
-        assert findings[0]["ticker"] == "AEROUSD"
+        assert findings[0]["ticker"] == "<PRIVATE_DEX>USD"
         assert findings[0]["classification_a"] in ("HEALTHY_UPTREND", "WEAKENING")
         assert findings[0]["classification_b"] in ("HEALTHY_UPTREND", "WEAKENING")
 
@@ -303,7 +303,7 @@ class TestCrossTfContradiction:
     def test_vvv_1d_4h_split_works(self):
         lib = _load_lib()
         tickers = {
-            "VVVUSD": {
+            "<PRIVATE_AI>USD": {
                 "tfs": {
                     "1d": {
                         "skills": {
@@ -350,7 +350,7 @@ class TestCrossTfFromJsonL3Only:
         lib = _load_lib()
         envelope = {
             "tickers": {
-                "HYPEUSD": {
+                "<PRIVATE_PERP>USD": {
                     "tfs": {
                         "1h": {
                             "strategies": {"strategy-trend-follow": {"ideas": [{"direction": "long", "conviction": 4}]}}
@@ -370,7 +370,7 @@ class TestCrossTfFromJsonL3Only:
         assert len(conflicts) >= 1
         f = conflicts[0]
         assert f["tag"] == "[INFO]"
-        assert f["ticker"] == "HYPEUSD"
+        assert f["ticker"] == "<PRIVATE_PERP>USD"
         assert f["strategy"] == "strategy-trend-follow"
         # Both TFs reflected in the tf field.
         assert "1h" in f["tf"] and "4h" in f["tf"]
@@ -382,7 +382,7 @@ class TestCrossTfFromJsonL3Only:
         lib = _load_lib()
         envelope = {
             "tickers": {
-                "AEROUSD": {
+                "<PRIVATE_DEX>USD": {
                     "tfs": {
                         "4h": {
                             "skills": {
@@ -416,7 +416,7 @@ class TestCrossTfFromJsonL3Only:
         assert result["ok"] is True
         contra = [f for f in result["findings"] if f["shape"] == lib.SHAPE_CROSS_TF_CONTRADICTION]
         assert len(contra) == 1
-        assert contra[0]["ticker"] == "AEROUSD"
+        assert contra[0]["ticker"] == "<PRIVATE_DEX>USD"
 
     def test_from_json_l3_only_direction_no_conflict_when_same_side(self):
         """Two TFs with the same dominant direction must NOT emit a
@@ -533,7 +533,7 @@ class TestScanDispatch:
                 {
                     "key": "test_key",
                     "tag": "[BUG]",
-                    "summary": "HYPEUSD 1h market-trend-quality: 3 subs w=0.60",
+                    "summary": "<PRIVATE_PERP>USD 1h market-trend-quality: 3 subs w=0.60",
                     "ticks_seen": 2,
                 }
             ],

@@ -8,7 +8,7 @@ Covers:
   5. --status renders the above_entry_streak annotation when state has a non-zero streak.
   6. --status treats stale state (>24h old) as empty; streak from stale state is NOT rendered.
   7. --status with a watch that has no entry_price omits the % from entry clause.
-  8. Per-watch smoke test over six real-config snippets (ETH, HYPE, NEAR, PAXG, VVV, ZEC).
+  8. Per-watch smoke test over six real-config snippets (ETH, <PRIVATE_PERP>, NEAR, PAXG, <PRIVATE_AI>, ZEC).
   9. Provider mismatch warning when watch name prefix != monitor_provider prefix.
 
 Two test categories:
@@ -44,9 +44,9 @@ def _load_module(name: str, path: str):
 
 
 def _ctx(
-    name: str = "VVV",
+    name: str = "<TICKER>",
     primary_quote: str = "USD",
-    monitor_provider: str = "hl:VVVUSD",
+    monitor_provider: str = "hl:<TICKER>USD",
     price: float | None = 10.39,
 ) -> dict:
     return {
@@ -58,10 +58,10 @@ def _ctx(
     }
 
 
-def _vvv_state() -> dict:
+def _ticker_state() -> dict:
     """Per-watch state matching the spec example: drops fired, streak=3, prev_price set."""
     return {
-        "name": "VVV",
+        "name": "<PRIVATE_AI>",
         "levels": {
             "alerted_levels": {
                 "drop:-10": "fired",
@@ -80,12 +80,12 @@ def _vvv_state() -> dict:
     }
 
 
-def _vvv_config() -> dict:
-    """VVV-style config: zones, invalidation, drops. Used by zone and drop tests."""
+def _ticker_config() -> dict:
+    """<PRIVATE_AI>-style config: zones, invalidation, drops. Used by zone and drop tests."""
     return {
-        "name": "VVV",
+        "name": "<TICKER>",
         "enabled": True,
-        "monitor_provider": "hl:VVVUSD",
+        "monitor_provider": "hl:<TICKER>USD",
         "interval": "4h",
         "period": "6mo",
         "entry_price": 15.73,
@@ -106,19 +106,19 @@ def _vvv_config() -> dict:
 
 
 def test_status_renders_zone_state() -> None:
-    """VVV @ $10.39 → line includes the active T2 zone, T1 next-zone hint, pct."""
+    """<PRIVATE_AI> @ $10.39 → line includes the active T2 zone, T1 next-zone hint, pct."""
     lib = _load_module("pw_status_lib_1", _LIB_PATH)
     fmt = _load_module("pw_status_fmt_1", _FMT_PATH)
 
     event = lib._status_summary(
-        name="VVV",
-        config=_vvv_config(),
-        state=_vvv_state(),
+        name="<PRIVATE_AI>",
+        config=_ticker_config(),
+        state=_ticker_state(),
         current_price=10.39,
     )
     line = fmt.format_as_default_status(event, _ctx())
 
-    assert line.startswith("[VVV] @ $10.39"), line
+    assert line.startswith("[<PRIVATE_AI>] @ $10.39"), line
     assert "🟡 T2 wait zone (no add)" in line, line
     assert "above T1 add zone" in line, line
     assert ("$7.50–$9.00" in line) or ("$7.50-$9.00" in line), line
@@ -177,7 +177,7 @@ def test_status_handles_fetch_failure(monkeypatch, tmp_path, capsys) -> None:
     cfg = tmp_path / "watches.json"
     watches = [
         {"name": "ETH", "enabled": True, "monitor_provider": "kraken:ETHUSD", "levels": []},
-        {"name": "HYPE", "enabled": True, "monitor_provider": "kraken:HYPEUSD", "levels": []},
+        {"name": "<PRIVATE_PERP>", "enabled": True, "monitor_provider": "kraken:<PRIVATE_PERP>USD", "levels": []},
     ]
     _write_watches_json(cfg, watches)
 
@@ -191,7 +191,7 @@ def test_status_handles_fetch_failure(monkeypatch, tmp_path, capsys) -> None:
     assert exit_code == 2, captured.err
     assert "<fetch failed>" in captured.out
     assert "[ETH]" in captured.out
-    assert "[HYPE]" in captured.out
+    assert "[<PRIVATE_PERP>]" in captured.out
 
 
 # ---------------------------------------------------------------------------
@@ -236,16 +236,18 @@ def test_status_renders_above_entry_streak() -> None:
     lib = _load_module("pw_status_lib_5", _LIB_PATH)
     fmt = _load_module("pw_status_fmt_5", _FMT_PATH)
 
-    config = _vvv_config()
-    state = _vvv_state()
-    event = lib._status_summary(name="VVV", config=config, state=state, current_price=10.39)
+    config = _ticker_config()
+    state = _ticker_state()
+    event = lib._status_summary(name="<PRIVATE_AI>", config=config, state=state, current_price=10.39)
     line = fmt.format_as_default_status(event, _ctx())
 
     assert line.endswith("; above entry streak=3"), line
 
     no_streak_state = dict(state)
     no_streak_state["above_entry_streak"] = 0
-    event_no_streak = lib._status_summary(name="VVV", config=config, state=no_streak_state, current_price=10.39)
+    event_no_streak = lib._status_summary(
+        name="<PRIVATE_AI>", config=config, state=no_streak_state, current_price=10.39
+    )
     line_no_streak = fmt.format_as_default_status(event_no_streak, _ctx())
     assert "above entry streak=" not in line_no_streak, line_no_streak
 
@@ -260,14 +262,14 @@ def test_status_ignores_stale_state(monkeypatch, tmp_path) -> None:
     run_mod = _load_module(f"pw_status_run_6_{os.urandom(4).hex()}", _RUN_PATH)
 
     cfg = tmp_path / "watches.json"
-    watches = [{"name": "VVV", "enabled": True, "monitor_provider": "hl:VVVUSD", "levels": []}]
+    watches = [{"name": "<PRIVATE_AI>", "enabled": True, "monitor_provider": "hl:<PRIVATE_AI>USD", "levels": []}]
     _write_watches_json(cfg, watches)
 
     stale_ts = (dt.datetime.now(dt.UTC) - dt.timedelta(hours=25)).isoformat()
-    (tmp_path / "VVV_state.json").write_text(
+    (tmp_path / "<PRIVATE_AI>_state.json").write_text(
         json.dumps(
             {
-                "name": "VVV",
+                "name": "<PRIVATE_AI>",
                 "alerted_levels": {"drop:-10": "fired"},
                 "above_entry_streak": 7,
                 "prev_price": 10.50,
@@ -286,8 +288,11 @@ def test_status_ignores_stale_state(monkeypatch, tmp_path) -> None:
     out = buf.getvalue()
 
     assert rc == 0, out
-    assert "[VVV]" in out
+    assert "[<PRIVATE_AI>]" in out
     assert "above entry streak=" not in out, f"stale streak leaked into output: {out!r}"
+    # Per-fix: confirm the seeded fixture is actually loaded by _state_path();
+    # otherwise the test silently exercises the missing-state path.
+    assert run_mod._load_state("<PRIVATE_AI>") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -322,8 +327,8 @@ def test_status_no_entry_price_omits_pct_block() -> None:
 # ---------------------------------------------------------------------------
 
 
-_HYPE_FIXTURE = {
-    "name": "HYPE",
+_TICKER1_FIXTURE = {
+    "name": "<TICKER>",
     "entry_price": 60.15,
     "position_size": 1.66,
     "levels": [
@@ -358,7 +363,7 @@ _PAXG_FIXTURE = {
     ],
 }
 
-_VVV_FIXTURE = _vvv_config()
+_TICKER2_FIXTURE = _ticker_config()
 
 _ETH_FIXTURE = {
     "name": "ETH",
@@ -388,8 +393,8 @@ def _render_one(config: dict, state: dict, current_price: float | None) -> str:
 
 
 def test_status_per_watch_hype() -> None:
-    line = _render_one(_HYPE_FIXTURE, {}, 68.35)
-    assert "[HYPE] @ $68.35" in line
+    line = _render_one(_TICKER1_FIXTURE, {}, 68.35)
+    assert "[<TICKER>] @ $68.35" in line
     assert "no active zone" in line
     assert "+13.6% from entry $60.15" in line
 
@@ -407,8 +412,8 @@ def test_status_per_watch_paxg_in_zone() -> None:
 
 
 def test_status_per_watch_vvv() -> None:
-    line = _render_one(_VVV_FIXTURE, _vvv_state(), 10.39)
-    assert "[VVV] @ $10.39" in line
+    line = _render_one(_TICKER2_FIXTURE, _ticker_state(), 10.39)
+    assert "[<TICKER>] @ $10.39" in line
     assert "🟡 T2 wait zone (no add)" in line
 
 
@@ -442,7 +447,7 @@ class TestProviderMismatchWarning:
 
     def test_hl_name_with_kraken_monitor_logs_warning(self, capsys):
         run = self._load_run()
-        watch = self._watch("hl:LIT", "kraken:LITUSD")
+        watch = self._watch("hl:<PRIVATE_PERP>", "kraken:LITUSD")
         with (
             patch.object(run, "_current_price", return_value=100.0),
             patch.object(run, "_load_state", return_value={}),
@@ -458,7 +463,7 @@ class TestProviderMismatchWarning:
 
     def test_matching_providers_no_warning(self, capsys):
         run = self._load_run()
-        watch = self._watch("hl:LIT", "hl:LITUSD")
+        watch = self._watch("hl:<PRIVATE_PERP>", "hl:LITUSD")
         with (
             patch.object(run, "_current_price", return_value=100.0),
             patch.object(run, "_load_state", return_value={}),

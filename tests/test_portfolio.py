@@ -101,7 +101,7 @@ def test_add_buy_transaction(db_path):
 
 def test_add_sell_transaction(db_path):
     pid = add_portfolio(db_path, "spot")
-    txid = add_transaction(db_path, pid, T0, "SELL", "kraken:HYPEEUR", qty=2.99, price=33.35)
+    txid = add_transaction(db_path, pid, T0, "SELL", "kraken:<PRIVATE_PERP>EUR", qty=2.99, price=33.35)
     tx = get_transaction(db_path, txid)
     assert round(tx["cost_quote"], 6) == round(2.99 * 33.35, 6)
 
@@ -122,11 +122,11 @@ def test_list_transactions_filters(db_path):
     pid = add_portfolio(db_path, "spot")
     add_transaction(db_path, pid, T0, "BUY", "kraken:BTCUSD", qty=1, price=100)
     add_transaction(db_path, pid, T1, "SELL", "kraken:BTCUSD", qty=0.3, price=150)
-    add_transaction(db_path, pid, T2, "BUY", "kraken:HYPEEUR", qty=2, price=33)
+    add_transaction(db_path, pid, T2, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=2, price=33)
 
     assert len(list_transactions(db_path, portfolio_id=pid)) == 3
     assert len(list_transactions(db_path, portfolio_id=pid, side="BUY")) == 2
-    assert len(list_transactions(db_path, portfolio_id=pid, asset="kraken:HYPEEUR")) == 1
+    assert len(list_transactions(db_path, portfolio_id=pid, asset="kraken:<PRIVATE_PERP>EUR")) == 1
     assert len(list_transactions(db_path, portfolio_id=pid, since=T1)) == 2
     assert len(list_transactions(db_path, portfolio_id=pid, limit=1)) == 1
 
@@ -275,7 +275,7 @@ def test_pnl_both_realized_and_unrealized(db_path):
 def test_pnl_multiple_assets(db_path):
     pid = add_portfolio(db_path, "spot")
     add_transaction(db_path, pid, T0, "BUY", "kraken:BTCUSD", qty=1, price=100)
-    add_transaction(db_path, pid, T1, "BUY", "kraken:HYPEEUR", qty=10, price=33)
+    add_transaction(db_path, pid, T1, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=10, price=33)
     pnl = compute_pnl(db_path, pid)
     assert len(pnl) == 2
 
@@ -424,12 +424,12 @@ def test_replay_remain_qty_fully_consumed(db_path):
 def test_replay_multi_asset_isolation(db_path):
     pid = add_portfolio(db_path, "spot")
     add_transaction(db_path, pid, T0, "BUY", "kraken:BTCUSD", qty=1, price=45000)
-    add_transaction(db_path, pid, T1, "BUY", "kraken:HYPEEUR", qty=10, price=33)
+    add_transaction(db_path, pid, T1, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=10, price=33)
     add_transaction(db_path, pid, T2, "SELL", "kraken:BTCUSD", qty=0.5, price=46000)
     events = replay_fifo(db_path, pid)
     assert len(events) == 3
     btc_buy = [e for e in events if e["asset"] == "kraken:BTCUSD" and e["side"] == "BUY"][0]
-    hype_buy = [e for e in events if e["asset"] == "kraken:HYPEEUR" and e["side"] == "BUY"][0]
+    hype_buy = [e for e in events if e["asset"] == "kraken:<PRIVATE_PERP>EUR" and e["side"] == "BUY"][0]
     assert btc_buy["remain_qty"] == 0.5  # 1.0 - 0.5 sold
     assert hype_buy["remain_qty"] == 10  # untouched
 
@@ -481,12 +481,12 @@ def test_reconcile_missing_external(db_path):
 def test_reconcile_mixed(db_path):
     pid = add_portfolio(db_path, "spot")
     add_transaction(db_path, pid, T0, "BUY", "kraken:BTCUSD", qty=1, price=45000)
-    add_transaction(db_path, pid, T1, "BUY", "kraken:HYPEEUR", qty=10, price=33)
-    diffs = reconcile(db_path, pid, {"kraken:BTCUSD": 1.0, "hl:LIT": 5.0})
+    add_transaction(db_path, pid, T1, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=10, price=33)
+    diffs = reconcile(db_path, pid, {"kraken:BTCUSD": 1.0, "hl:<PRIVATE_PERP>": 5.0})
     diffs_map = {d["asset"]: d for d in diffs}
     assert diffs_map["kraken:BTCUSD"]["status"] == "match"
-    assert diffs_map["kraken:HYPEEUR"]["status"] == "missing_external"
-    assert diffs_map["hl:LIT"]["status"] == "missing_computed"
+    assert diffs_map["kraken:<PRIVATE_PERP>EUR"]["status"] == "missing_external"
+    assert diffs_map["hl:<PRIVATE_PERP>"]["status"] == "missing_computed"
 
 
 # ── refresh_prices — spot price vs stale OHLC close ─────────────────────
@@ -519,17 +519,17 @@ def _kraken_ohlc_json(pair: str, candles: list[list]) -> str:
 def test_refresh_prices_uses_live_spot_not_ohlc_close(db_path, capsys):
     """Bug: refresh_prices used candles[-1][4] (daily close) instead of live spot.
 
-    Reproduction: HYPE live bid=60.10, but the prior daily candle's close was
+    Reproduction: <PRIVATE_PERP> live bid=60.10, but the prior daily candle's close was
     62.46 (off by ~4%). Fix routes through ``kraken ticker`` c[0] (last trade)
     so positions reflects the current price.
     """
     pid = add_portfolio(db_path, "spot", "EUR")
-    add_transaction(db_path, pid, T0, "BUY", "kraken:HYPEEUR", qty=1.66, price=60.15)
+    add_transaction(db_path, pid, T0, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=1.66, price=60.15)
 
-    spot_payload = _kraken_ticker_json("HYPEEUR", last=60.31, bid=60.10, ask=60.14)
+    spot_payload = _kraken_ticker_json("<PRIVATE_PERP>EUR", last=60.31, bid=60.10, ask=60.14)
     stale_close = 62.46  # the wrong number from the prior daily candle
     ohlc_payload = _kraken_ohlc_json(
-        "HYPEEUR",
+        "<PRIVATE_PERP>EUR",
         [[1769904000, "62.00", "63.00", "61.00", stale_close, "62.20", "100", 5]],
     )
 
@@ -545,10 +545,10 @@ def test_refresh_prices_uses_live_spot_not_ohlc_close(db_path, capsys):
     with patch("analysis.providers.data.kraken.subprocess.run", side_effect=fake_run):
         prices = refresh_prices(db_path)
 
-    assert prices["kraken:HYPEEUR"] == 60.31  # live last, NOT 62.46
+    assert prices["kraken:<PRIVATE_PERP>EUR"] == 60.31  # live last, NOT 62.46
 
     cached = get_cached_prices(db_path)
-    assert cached["kraken:HYPEEUR"] == 60.31
+    assert cached["kraken:<PRIVATE_PERP>EUR"] == 60.31
 
     positions = compute_positions(db_path, pid, prices)
     assert positions[0]["current_price"] == 60.31
@@ -561,10 +561,10 @@ def test_refresh_prices_uses_live_spot_not_ohlc_close(db_path, capsys):
 def test_refresh_prices_falls_back_to_ohlc_when_spot_unavailable(db_path, capsys):
     """When ``kraken ticker`` fails, fall back to the latest candle close and warn."""
     pid = add_portfolio(db_path, "spot", "EUR")
-    add_transaction(db_path, pid, T0, "BUY", "kraken:HYPEEUR", qty=1, price=60)
+    add_transaction(db_path, pid, T0, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=1, price=60)
 
     ohlc_payload = _kraken_ohlc_json(
-        "HYPEEUR",
+        "<PRIVATE_PERP>EUR",
         [[1769904000, "62.00", "63.00", "61.00", 62.46, "62.20", "100", 5]],
     )
 
@@ -580,20 +580,20 @@ def test_refresh_prices_falls_back_to_ohlc_when_spot_unavailable(db_path, capsys
     with patch("analysis.providers.data.kraken.subprocess.run", side_effect=fake_run):
         prices = refresh_prices(db_path)
 
-    assert prices["kraken:HYPEEUR"] == 62.46
+    assert prices["kraken:<PRIVATE_PERP>EUR"] == 62.46
     err = capsys.readouterr().err
     assert "stale" in err.lower() or "fell back" in err.lower()
-    assert "kraken:HYPEEUR" in err
+    assert "kraken:<PRIVATE_PERP>EUR" in err
 
 
 def test_refresh_prices_tracks_source_in_cache(db_path):
     """Cache ``source`` column distinguishes live spot from OHLC fallback."""
     pid = add_portfolio(db_path, "spot", "EUR")
-    add_transaction(db_path, pid, T0, "BUY", "kraken:HYPEEUR", qty=1, price=60)
+    add_transaction(db_path, pid, T0, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=1, price=60)
 
-    spot_payload = _kraken_ticker_json("HYPEEUR", last=60.0, bid=59.9, ask=60.1)
+    spot_payload = _kraken_ticker_json("<PRIVATE_PERP>EUR", last=60.0, bid=59.9, ask=60.1)
     ohlc_payload = _kraken_ohlc_json(
-        "HYPEEUR",
+        "<PRIVATE_PERP>EUR",
         [[1769904000, "60.00", "61.00", "59.00", 60.5, "60.10", "100", 5]],
     )
 
@@ -612,7 +612,7 @@ def test_refresh_prices_tracks_source_in_cache(db_path):
     from portfolio.db import get_db
 
     conn = get_db(db_path)
-    row = conn.execute("SELECT source FROM price_cache WHERE asset = 'kraken:HYPEEUR'").fetchone()
+    row = conn.execute("SELECT source FROM price_cache WHERE asset = 'kraken:<PRIVATE_PERP>EUR'").fetchone()
     conn.close()
     assert row["source"] == "kraken:ticker"
 
@@ -621,11 +621,11 @@ def test_refresh_prices_skips_assets_without_provider_prefix(db_path):
     """Assets like ``BTC`` (no ``provider:``) are skipped — manual price only."""
     pid = add_portfolio(db_path, "spot", "EUR")
     add_transaction(db_path, pid, T0, "BUY", "BTC", qty=0.1, price=100_000)
-    add_transaction(db_path, pid, T1, "BUY", "kraken:HYPEEUR", qty=1, price=60)
+    add_transaction(db_path, pid, T1, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=1, price=60)
 
-    spot_payload = _kraken_ticker_json("HYPEEUR", last=60.0, bid=59.9, ask=60.1)
+    spot_payload = _kraken_ticker_json("<PRIVATE_PERP>EUR", last=60.0, bid=59.9, ask=60.1)
     ohlc_payload = _kraken_ohlc_json(
-        "HYPEEUR",
+        "<PRIVATE_PERP>EUR",
         [[1769904000, "60.00", "61.00", "59.00", 60.5, "60.10", "100", 5]],
     )
 
@@ -642,7 +642,7 @@ def test_refresh_prices_skips_assets_without_provider_prefix(db_path):
         prices = refresh_prices(db_path)
 
     assert "BTC" not in prices
-    assert prices["kraken:HYPEEUR"] == 60.0
+    assert prices["kraken:<PRIVATE_PERP>EUR"] == 60.0
 
 
 # ── KrakenProvider.fetch_spot_price ─────────────────────────────────────
@@ -652,12 +652,12 @@ class TestKrakenProviderSpotPrice:
     def test_parses_last_trade(self):
         from analysis.providers.data.kraken import KrakenProvider
 
-        payload = _kraken_ticker_json("HYPEEUR", last=60.31, bid=60.10, ask=60.14)
+        payload = _kraken_ticker_json("<PRIVATE_PERP>EUR", last=60.31, bid=60.10, ask=60.14)
         with patch(
             "analysis.providers.data.kraken.subprocess.run",
             return_value=_completed(payload),
         ):
-            result = KrakenProvider().fetch_spot_price("HYPEEUR")
+            result = KrakenProvider().fetch_spot_price("<PRIVATE_PERP>EUR")
 
         assert result is not None
         assert result["price"] == 60.31
@@ -702,7 +702,7 @@ class TestKrakenProviderSpotPrice:
             "analysis.providers.data.kraken.subprocess.run",
             return_value=CompletedProcess(["kraken"], 1, stdout="", stderr="rate limited"),
         ):
-            assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
+            assert KrakenProvider().fetch_spot_price("<PRIVATE_PERP>EUR") is None
 
     def test_returns_none_on_bad_json(self):
         from subprocess import CompletedProcess
@@ -713,17 +713,17 @@ class TestKrakenProviderSpotPrice:
             "analysis.providers.data.kraken.subprocess.run",
             return_value=CompletedProcess(["kraken"], 0, stdout="not json", stderr=""),
         ):
-            assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
+            assert KrakenProvider().fetch_spot_price("<PRIVATE_PERP>EUR") is None
 
     def test_returns_none_when_no_price_fields(self):
         from analysis.providers.data.kraken import KrakenProvider
 
-        payload = json.dumps({"HYPEEUR": {"o": "60.0"}})
+        payload = json.dumps({"<PRIVATE_PERP>EUR": {"o": "60.0"}})
         with patch(
             "analysis.providers.data.kraken.subprocess.run",
             return_value=_completed(payload),
         ):
-            assert KrakenProvider().fetch_spot_price("HYPEEUR") is None
+            assert KrakenProvider().fetch_spot_price("<PRIVATE_PERP>EUR") is None
 
 
 # ── Decisions table CRUD ────────────────────────────────────────────────

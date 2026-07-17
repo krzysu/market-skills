@@ -92,7 +92,7 @@ class TestToonRoundTrip:
                 "conviction": {
                     "total": 2,
                     "top_ideas": [
-                        {"ticker": "HYPEUSD", "conviction": 5},
+                        {"ticker": "<PRIVATE_PERP>USD", "conviction": 5},
                         {"ticker": "SOLUSD", "conviction": 4},
                     ],
                 }
@@ -279,7 +279,7 @@ class TestMarketStateToonMode:
                 "baskets": ["tier_1"],
                 "total": 3,
                 "ideas": [
-                    {"ticker": "HYPEUSD", "strategy": "trend-follow", "conviction": 5, "narrative": "strong uptrend"},
+                    {"ticker": "<PERP>USD", "strategy": "trend-follow", "conviction": 5, "narrative": "strong uptrend"},
                     {"ticker": "SOLUSD", "strategy": "mean-reversion", "conviction": 4, "narrative": "oversold"},
                     {
                         "ticker": "BTCUSD",

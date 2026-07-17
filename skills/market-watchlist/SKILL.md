@@ -58,8 +58,8 @@ Default: `skills/market-watchlist/data/watchlist.json`. Override via:
       "ETHUSD": {"tier": 2, "source": "kraken", "label": "ETH"}
     },
     "crypto_alts": {
-      "HYPEUSD": {"tier": 1, "source": "kraken", "label": "Hyperliquid"},
-      "hl:LIT":  {"tier": 1, "source": "hyperliquid", "label": "Lighter Perp DEX"}
+      "<TICKER1>USD": {"tier": 1, "source": "kraken", "label": "<label>"},
+      "hl:<PERP>":  {"tier": 1, "source": "hyperliquid", "label": "<label>"}
     },
     "macro_refs": {
       "SPYUSD": {"source": "yfinance", "yfinance_ticker": "SPY", "tracking_only": true, "sector": "stocks"},
@@ -102,7 +102,7 @@ from analysis.watchlist import all_tickers, by_category, basket, categories
 from analysis.watchlist import metadata_for, provider_for, resolve, expand_tickers
 
 # Flat list across all baskets
-tickers = all_tickers()                                  # -> ["BTCUSD", "ETHUSD", "HYPEUSD", ...]
+tickers = all_tickers()                                  # -> ["BTCUSD", "ETHUSD", "<TICKER1>USD", ...]
 
 # One basket
 majors = by_category("crypto_majors")                    # -> ["BTCUSD", "ETHUSD"]
