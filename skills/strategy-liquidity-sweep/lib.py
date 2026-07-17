@@ -45,6 +45,20 @@ def conviction_from_confidences(sweep_conf: int, accum_conf: int, *, mode: str =
     return min(5, raw)
 
 
+# Entry-gate tightening (bead market-skills-96y): the L3 used to emit every
+# sweep-classified idea regardless of conviction. Per
+# `market-skills-trend-follow`'s MIN_CONVICTION_TO_EMIT pattern, expose the
+# gate as a module-level constant so per-ticker thresholds can override
+# without touching analyze(). Default 1 = no filter (the formula's natural
+# floor for ``current`` mode on integer L2 confidences is 1; with
+# ``max_plus_one`` the floor rises to 2 for asymmetric inputs). Raising
+# this constant is the lever for per-ticker conviction tuning once liq-sweep
+# journal data accumulates; for now the per-band backtest evidence
+# (see 96y description) suggests HYPE/VVV benefit from tightening while
+# BTC/TAO are harmed, so any default raise should be ticker-aware.
+MIN_CONVICTION_TO_EMIT = 1
+
+
 def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None,
             conviction_mode: str | None = None):
     """Run the liq-sweep L3 emit pipeline.
@@ -181,6 +195,12 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None,
             elif stop_2pct_rejection is None:
                 stop_2pct_rejection = rej
         ideas = filtered
+
+    # Tighten entry gate (bead market-skills-96y): drop low-conviction noise.
+    if ideas and MIN_CONVICTION_TO_EMIT > 1:
+        ideas = [
+            i for i in ideas if i.get("conviction", 0) >= MIN_CONVICTION_TO_EMIT
+        ]
 
     if ideas:
         narrative = f"Liquidity sweep setup: long. {sweep_result.get('narrative', '')}"
