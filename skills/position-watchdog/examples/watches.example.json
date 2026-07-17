@@ -1,9 +1,9 @@
 {
   "watches": [
     {
-      "name": "HYPE",
+      "name": "<TICKER>",
       "enabled": true,
-      "monitor_provider": "kraken:HYPEUSD",
+      "monitor_provider": "kraken:<TICKER>USD",
       "interval": "4h",
       "period": "6mo",
       "entry_price": 60.15,

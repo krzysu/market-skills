@@ -20,8 +20,7 @@ SAMPLE = {
             "ETHUSD": {"tier": 2, "source": "kraken", "label": "ETH"},
         },
         "crypto_alts": {
-            "HYPEUSD": {"tier": 1, "source": "kraken"},
-            "hl:LIT": {"tier": 1, "source": "hyperliquid"},
+            "hl:<PRIVATE_PERP>": {"tier": 1, "source": "hyperliquid"},
         },
         "macro_refs": {
             "SPYUSD": {"source": "yfinance", "yfinance_ticker": "SPY", "tracking_only": True},
@@ -44,7 +43,7 @@ def test_all_tickers(tmp_watchlist_path):
     wl_mod.save_raw(SAMPLE)
     out = wl_mod.all_tickers()
     assert "BTCUSD" in out
-    assert "hl:LIT" in out
+    assert "hl:<PRIVATE_PERP>" in out
     assert "XLExUSD" in out
 
 
@@ -72,7 +71,7 @@ def test_metadata_for(tmp_watchlist_path):
 
 def test_provider_for_explicit_prefix(tmp_watchlist_path):
     wl_mod.save_raw(SAMPLE)
-    assert wl_mod.provider_for("hl:LIT") == "hyperliquid"
+    assert wl_mod.provider_for("hl:<PRIVATE_PERP>") == "hyperliquid"
 
 
 def test_provider_for_via_metadata(tmp_watchlist_path):
@@ -85,7 +84,7 @@ def test_resolve(tmp_watchlist_path):
     wl_mod.save_raw(SAMPLE)
     assert wl_mod.resolve("btc") == "BTCUSD"
     assert wl_mod.resolve("eth") == "ETHUSD"
-    assert wl_mod.resolve("lit") == "hl:LIT"
+    assert wl_mod.resolve("<private_perp>") == "hl:<PRIVATE_PERP>"
     assert wl_mod.resolve("xle") == "XLExUSD"
 
 
@@ -109,11 +108,11 @@ def test_resolve_ambiguous_raises(tmp_watchlist_path):
 
 def test_expand_tickers_passthrough_unknown(tmp_watchlist_path):
     wl_mod.save_raw(SAMPLE)
-    out = wl_mod.expand_tickers(["btc", "ETHUSD", "hl:LIT", "NOPE"])
+    out = wl_mod.expand_tickers(["btc", "ETHUSD", "hl:<PRIVATE_PERP>", "NOPE"])
     # NOPE doesn't resolve → passes through unchanged
     assert "BTCUSD" in out
     assert "ETHUSD" in out
-    assert "hl:LIT" in out
+    assert "hl:<PRIVATE_PERP>" in out
     assert "NOPE" in out
 
 
@@ -131,8 +130,7 @@ def test_env_var_override(monkeypatch, tmp_path):
     assert wl_mod.all_tickers() == [
         "BTCUSD",
         "ETHUSD",
-        "HYPEUSD",
-        "hl:LIT",
+        "hl:<PRIVATE_PERP>",
         "SPYUSD",
         "XLExUSD",
     ]

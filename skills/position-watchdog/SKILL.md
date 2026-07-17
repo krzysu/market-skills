@@ -77,7 +77,7 @@ uv run skills/position-watchdog/scripts/run.py --dry-run
 This library renders alerts in a single currency — the monitor provider's
 quote. All level prices (`stop`, `tp`, `entry_price`, `invalidation.below`,
 `zone.low/high`) are in the **monitor's** quote. If you set
-`monitor_provider: "kraken:HYPEUSD"`, write your stop in USD.
+`monitor_provider: "kraken:<TICKER>USD"`, write your stop in USD.
 
 The library uses only `monitor_provider`. The historical `execution_provider`
 field is rejected at schema-validation time — a clean break to keep the
@@ -119,9 +119,9 @@ uv run skills/position-watchdog/scripts/run.py --formatter verbose
 {
   "watches": [
     {
-      "name": "HYPE",
+      "name": "<TICKER>",
       "enabled": true,
-      "monitor_provider": "kraken:HYPEUSD",
+      "monitor_provider": "kraken:<TICKER>USD",
       "interval": "4h",
       "period": "6mo",
       "entry_price": 60.15,
@@ -147,7 +147,7 @@ uv run skills/position-watchdog/scripts/run.py --formatter verbose
 |-------|----------|-------|
 | `name` | yes | Unique identifier; used in alert prefix and state filename |
 | `enabled` | yes | When false, watch is skipped silently |
-| `monitor_provider` | yes | `provider:ticker` notation — `kraken:HYPEUSD`, `hl:LIT`, `yf:AAPL`. Drives the live tick, candles, L3 evaluation, and the alert prices. All level prices in this watch are assumed to be in this provider's quote. |
+| `monitor_provider` | yes | `provider:ticker` notation — `kraken:<TICKER>USD`, `hl:<PERP>`, `yf:AAPL`. Drives the live tick, candles, L3 evaluation, and the alert prices. All level prices in this watch are assumed to be in this provider's quote. |
 | `execution_provider` | removed | Schema-rejected in this release. Use a second watch if you want a different pair's view. |
 | `interval` | optional, default `"4h"` | Candle interval for both live-price tick and L3 strategy evaluation. Validated against `analysis/intervals.py`. Common values: `15m`, `1h`, `4h`, `1d`. |
 | `period` | optional, default `"6mo"` | Candle lookback for both jobs. Validated against `analysis/intervals.py`. Common values: `1mo`, `3mo`, `6mo`, `1y`. |
@@ -165,7 +165,7 @@ Default `4h` / `6mo`. To watch on a different timeframe, set `interval` and `per
 
 Each entry has a `type` discriminator. Drop percentages **must be negative** (the lib uses `pct_from_entry <= pct` to fire; a positive value would fire on upward moves, which is a bug — see `tests/test_position_watchdog.py::test_drop_positive_pct_does_not_fire_on_up_moves`).
 
-All level prices are in the watch's **monitor quote** (e.g. USD if `monitor_provider: "kraken:HYPEUSD"`). Library renders a single currency in alerts.
+All level prices are in the watch's **monitor quote** (e.g. USD if `monitor_provider: "kraken:<TICKER>USD"`). Library renders a single currency in alerts.
 
 | `type` | Required fields | Fires when | Alert format (compact · default) |
 |--------|-----------------|------------|--------------|
@@ -180,13 +180,13 @@ The live `$X` in the "Now" / "Current" field is the monitor's last close.
 Static levels (`$Z`) render in the monitor's quote only — the skill never
 synthesizes a converted price from a live ratio.
 
-Full HYPE example (USD-monitored):
+Full example (USD-monitored):
 
 ```json
 {
-  "name": "HYPE",
+  "name": "<TICKER>",
   "enabled": true,
-  "monitor_provider": "kraken:HYPEUSD",
+  "monitor_provider": "kraken:<TICKER>USD",
   "interval": "4h",
   "period": "6mo",
   "entry_price": 60.15,
@@ -270,7 +270,7 @@ Stale state (>24h old) is treated as fresh on the first tick — no alerts fire,
 
 **Add a new position:**
 1. Open position on the exchange (manual, exchange UI)
-2. Edit `watches.json`: copy the HYPE template, set `enabled: true`, fill `monitor_provider` / `entry_price` / `position_size` / levels
+2. Edit `watches.json`: copy the `<TICKER>` template, set `enabled: true`, fill `monitor_provider` / `entry_price` / `position_size` / levels
 3. Next evaluation tick picks it up
 
 **Close a position:**
@@ -311,9 +311,9 @@ uv run skills/position-watchdog/scripts/run.py \
 Human output example:
 
 ```
-[VVV] @ $10.39 | 🟡 T2 wait zone (no add) — above T1 add zone ($7.50–$9.00); invalid <$8.00; drop −20.0%, −10.0% fired | −33.9% from entry $15.73; above entry streak=3
+[<TICKER1>] @ $10.39 | 🟡 T2 wait zone (no add) — above T1 add zone ($7.50–$9.00); invalid <$8.00; drop −20.0%, −10.0% fired | −33.9% from entry $15.73; above entry streak=3
 [ETH] @ <fetch failed> | no active zone; invalid <$1500.00 | (no live price; using last known $1538.42)
-[HYPE] @ $68.35 | no active zone | +13.6% from entry $60.15
+[<TICKER2>] @ $68.35 | no active zone | +13.6% from entry $60.15
 ```
 
 ### `--status --json` (machine-readable snapshot)
@@ -335,7 +335,7 @@ Envelope shape:
   "data": {
     "watches": [
       {
-        "name": "VVV",
+        "name": "<TICKER1>",
         "current_price": 10.39,
         "entry_price": 15.73,
         "prev_price": 10.50,
@@ -358,7 +358,7 @@ Envelope shape:
 ```
 
 Notes:
-- `--watch` is ignored when `--status` is set; status mode always renders every enabled watch (pipe to `grep VVV` to filter).
+- `--watch` is ignored when `--status` is set; status mode always renders every enabled watch (pipe to `grep <TICKER>` to filter).
 - Per-watch fetch failure renders as `<fetch failed>` in human mode and as `current_price: null` in JSON mode; lines still print with a fallback to the last `prev_price` from state for the `% from entry` clause.
 - Stale state (>24h old) is treated as empty so streaks and `alerted_levels` reflect only the current tick + config.
 - Exit codes: `0` clean (all live prices returned), `2` partial (one or more fetches failed but lines still print).

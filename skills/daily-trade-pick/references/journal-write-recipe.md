@@ -26,9 +26,9 @@ Every idea carries a `source` tag identifying which of the six sources produced 
 
 | `source` value | Meaning |
 |---|---|
-| `tier1` | Thesis universe tier 1 (BTC, ETH, HYPE, NEAR, ZEC, hl:LIT) |
+| `tier1` | Thesis universe tier 1 (BTC, ETH, plus the operator's private perp_dex + ai_infra tier 1s — see `MARKET_SKILLS_WATCHLIST_PATH`) |
 | `tier2` | Thesis universe tier 2 (SOL, XMR, PAXG) |
-| `swing_shortlist` | Tier 3 swing-scan shortlist (AERO, TAO, VVV, ALGO) |
+| `swing_shortlist` | Tier 3 swing-scan shortlist (the operator's tier 3 swing-scan universe — see `MARKET_SKILLS_WATCHLIST_PATH`) |
 | `coingecko_movers` | External CoinGecko gainers discovery (surf-mcp) |
 | `smart_money` | Nansen smart-money accumulation (paid MCP) |
 | `hl_narrative` | Hyperliquid-universe narrative (perp-only) |
@@ -277,7 +277,9 @@ def is_cooldown_ok(ticker: str, picks: list, now: datetime) -> bool:
 
 ```python
 tier_map = {
-    'BTC-USD': 1, 'ETH-USD': 1, 'HYPE-USD': 1, 'NEAR-USD': 1, 'ZEC-USD': 1, 'hl:LIT': 1,
+    # Operator-specific tier 1/2/3 mappings live in MARKET_SKILLS_WATCHLIST_PATH.
+    # This stub keeps the example runnable on the public tier 2 universe.
+    'BTC-USD': 1, 'ETH-USD': 1,
     'SOL-USD': 2, 'XMR-USD': 2, 'PAXG-USD': 2,
 }
 source_priority = {  # multi-source design (2026-06-29) — see references/multi-source-design.md

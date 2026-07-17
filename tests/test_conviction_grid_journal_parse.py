@@ -59,7 +59,7 @@ def _capture_validate_journal(mod, journal_obj, monkeypatch, tmp_path, *, strate
     real_stdout = sys.stdout
     try:
         sys.stdout = buf
-        mod._validate_journal(mod._MODES, strategy=strategy)
+        mod._validate_journal(strategy=strategy)
     finally:
         sys.stdout = real_stdout
     return buf.getvalue()
@@ -196,7 +196,7 @@ def test_unset_env_raises(monkeypatch):
     mod = _load_module()
     monkeypatch.delenv("LIQ_SWEEP_JOURNAL_PATH", raising=False)
     with pytest.raises(RuntimeError, match="LIQ_SWEEP_JOURNAL_PATH"):
-        mod._validate_journal(mod._MODES)
+        mod._validate_journal()
 
 
 class TestStrategyFilter:

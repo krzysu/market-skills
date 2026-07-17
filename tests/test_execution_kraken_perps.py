@@ -187,7 +187,7 @@ class TestLeverageCap:
         assert leverage_cap_for_pair("SOLUSD") == 2
 
     def test_alts_default_to_5x(self):
-        assert leverage_cap_for_pair("HYPEUSD") == DEFAULT_LEVERAGE_CAP
+        assert leverage_cap_for_pair("<PRIVATE_PERP>USD") == DEFAULT_LEVERAGE_CAP
         assert leverage_cap_for_pair("NEARUSD") == DEFAULT_LEVERAGE_CAP
 
     def test_leverage_caps_table(self):
@@ -560,7 +560,7 @@ class TestPerpsRiskPolicies:
             {
                 "intent_id": "x",
                 "venue": "kraken-perps",
-                "pair": "HYPEUSD",
+                "pair": "<PRIVATE_PERP>USD",
                 "side": "sell",
                 "order_type": "market",
                 "volume": 100,

@@ -38,11 +38,11 @@ format_as_verbose = _pw_fmt.format_as_verbose
 def _ctx(
     price=60.0,
     primary_quote="USD",
-    monitor_provider="kraken:HYPEUSD",
+    monitor_provider="kraken:<PRIVATE_PERP>USD",
     execution_provider=None,
     execution_price=None,
     format_style="compact",
-    name="HYPE",
+    name="<PRIVATE_PERP>",
 ):
     return {
         "name": name,
@@ -70,7 +70,7 @@ def _quote_from_provider(provider: str) -> str:
     return ""
 
 
-_EUR_CTX_KW = {"primary_quote": "EUR", "monitor_provider": "kraken:HYPEEUR"}
+_EUR_CTX_KW = {"primary_quote": "EUR", "monitor_provider": "kraken:<PRIVATE_PERP>EUR"}
 
 
 def _stop_event(current=48.0, stop=49.71):
@@ -225,8 +225,8 @@ def test_fmt_live_renders_only_monitor_price_when_execution_in_ctx():
     ctx = _ctx(
         price=48.0,
         primary_quote="USD",
-        monitor_provider="kraken:HYPEUSD",
-        execution_provider="kraken:HYPEEUR",
+        monitor_provider="kraken:<PRIVATE_PERP>USD",
+        execution_provider="kraken:<PRIVATE_PERP>EUR",
         execution_price=45.0,
     )
     assert _fmt_live(48.0, ctx) == "$48.00"
@@ -243,8 +243,8 @@ def test_fmt_live_ignores_execution_quote_in_ctx():
     ctx = _ctx(
         price=48.0,
         primary_quote="USD",
-        monitor_provider="kraken:HYPEUSD",
-        execution_provider="kraken:HYPEEUR",
+        monitor_provider="kraken:<PRIVATE_PERP>USD",
+        execution_provider="kraken:<PRIVATE_PERP>EUR",
         execution_price=45.0,
     )
     out = _fmt_live(48.0, ctx)
@@ -269,12 +269,12 @@ def test_fmt_pct_positive_uses_plus():
 
 
 def test_fmt_tp_qty_formats_two_decimals_with_name():
-    assert _fmt_tp_qty(1.66, 33, "HYPE") == "0.55 HYPE"
+    assert _fmt_tp_qty(1.66, 33, "<PRIVATE_PERP>") == "0.55 <PRIVATE_PERP>"
 
 
 def test_fmt_tp_qty_empty_when_inputs_missing():
-    assert _fmt_tp_qty(None, 33, "HYPE") == ""
-    assert _fmt_tp_qty(1.66, None, "HYPE") == ""
+    assert _fmt_tp_qty(None, 33, "<PRIVATE_PERP>") == ""
+    assert _fmt_tp_qty(1.66, None, "<PRIVATE_PERP>") == ""
 
 
 # --- compact style ---
@@ -291,8 +291,8 @@ def test_compact_stop_ignores_execution_context():
     ctx = _ctx(
         price=48.0,
         primary_quote="USD",
-        monitor_provider="kraken:HYPEUSD",
-        execution_provider="kraken:HYPEEUR",
+        monitor_provider="kraken:<PRIVATE_PERP>USD",
+        execution_provider="kraken:<PRIVATE_PERP>EUR",
         execution_price=45.0,
     )
     s = format_as_compact(_stop_event(), ctx)
@@ -304,7 +304,7 @@ def test_compact_stop_ignores_execution_context():
 def test_compact_tp_with_qty():
     s = format_as_compact(_tp_event(), _ctx(**_EUR_CTX_KW))
     assert "✅ TP hit (€88.21)" in s
-    assert "sell 0.55 HYPE" in s
+    assert "sell 0.55 <PRIVATE_PERP>" in s
     assert "~33%" in s
 
 
@@ -338,13 +338,13 @@ def test_compact_recovery_one_liner():
 
 def test_compact_zone_one_liner():
     s = format_as_compact(_zone_event(), _ctx(**_EUR_CTX_KW))
-    assert "🟢 T2 limit zone — HYPE @ €505.00" in s
+    assert "🟢 T2 limit zone — <PRIVATE_PERP> @ €505.00" in s
 
 
 def test_compact_invalidation_one_liner():
     s = format_as_compact(_invalidation_event(), _ctx(**_EUR_CTX_KW))
     assert "🔴 INVALIDATION" in s
-    assert "HYPE @ €480.00" in s
+    assert "<PRIVATE_PERP> @ €480.00" in s
     assert "below €486.00" in s
     assert "Do not average down." in s
 
@@ -357,8 +357,8 @@ def test_compact_signal_one_liner():
 
 
 def test_compact_usd_monitored_uses_dollar_symbol():
-    """A USD-monitored HYPE watch renders with $, not €."""
-    s = format_as_compact(_stop_event(), _ctx(primary_quote="USD", monitor_provider="kraken:HYPEUSD"))
+    """A USD-monitored <PRIVATE_PERP> watch renders with $, not €."""
+    s = format_as_compact(_stop_event(), _ctx(primary_quote="USD", monitor_provider="kraken:<PRIVATE_PERP>USD"))
     assert "$48.00" in s
     assert "$49.71" in s
     assert "€" not in s
@@ -369,7 +369,7 @@ def test_compact_usd_monitored_uses_dollar_symbol():
 
 def test_default_stop_includes_name_and_full_sentence():
     s = format_as_default(_stop_event(), _ctx(**_EUR_CTX_KW, format_style="default"))
-    assert "🔴 STOP BREACHED — HYPE" in s
+    assert "🔴 STOP BREACHED — <PRIVATE_PERP>" in s
     assert "Now €48.00" in s
     assert "Stop at €49.71" in s
 
@@ -383,8 +383,8 @@ def test_default_stop_ignores_execution_context():
     ctx = _ctx(
         price=48.0,
         primary_quote="USD",
-        monitor_provider="kraken:HYPEUSD",
-        execution_provider="kraken:HYPEEUR",
+        monitor_provider="kraken:<PRIVATE_PERP>USD",
+        execution_provider="kraken:<PRIVATE_PERP>EUR",
         execution_price=45.0,
         format_style="default",
     )
@@ -399,9 +399,9 @@ def test_default_stop_ignores_execution_context():
 
 def test_default_tp_includes_exit_pct_and_qty():
     s = format_as_default(_tp_event(), _ctx(**_EUR_CTX_KW, format_style="default"))
-    assert "✅ TP HIT — HYPE" in s
+    assert "✅ TP HIT — <PRIVATE_PERP>" in s
     assert "TP at €88.21" in s
-    assert "Exit 33% (0.55 HYPE)" in s
+    assert "Exit 33% (0.55 <PRIVATE_PERP>)" in s
 
 
 def test_default_drop_warn_full_sentence():
@@ -409,7 +409,7 @@ def test_default_drop_warn_full_sentence():
         _drop_event(threshold=-5, severity="warn"),
         _ctx(**_EUR_CTX_KW, format_style="default"),
     )
-    assert "🟡 DROP WARNING — HYPE" in s
+    assert "🟡 DROP WARNING — <PRIVATE_PERP>" in s
     assert "−5.2% from entry" in s or "−5" in s  # pct string can vary; check core content
     assert "Now €57.00" in s
 
@@ -419,25 +419,25 @@ def test_default_drop_critical_full_sentence():
         _drop_event(current=53.0, threshold=-10, severity="critical"),
         _ctx(**_EUR_CTX_KW, format_style="default"),
     )
-    assert "🔶 DEEP DROP — HYPE" in s
+    assert "🔶 DEEP DROP — <PRIVATE_PERP>" in s
     assert "Now €53.00" in s
 
 
 def test_default_recovery_full_sentence():
     s = format_as_default(_recovery_event(), _ctx(**_EUR_CTX_KW, format_style="default"))
-    assert "🟢 RECOVERED — HYPE" in s
+    assert "🟢 RECOVERED — <PRIVATE_PERP>" in s
     assert "Back above entry €60.15" in s
 
 
 def test_default_zone_full_sentence():
     s = format_as_default(_zone_event(), _ctx(**_EUR_CTX_KW, format_style="default"))
     assert "🟢 ZONE ENTRY — T2 limit zone" in s
-    assert "HYPE now €505.00" in s
+    assert "<PRIVATE_PERP> now €505.00" in s
 
 
 def test_default_invalidation_full_sentence():
     s = format_as_default(_invalidation_event(), _ctx(**_EUR_CTX_KW, format_style="default"))
-    assert "🔴 INVALIDATED — HYPE" in s
+    assert "🔴 INVALIDATED — <PRIVATE_PERP>" in s
     assert "Below invalidation €486.00" in s
     assert "Thesis dead" in s
 
@@ -495,12 +495,12 @@ def test_format_event_dispatches_by_ctx_format_style():
     s_compact = format_event(ev, _ctx(**_EUR_CTX_KW, format_style="compact"))
     s_default = format_event(ev, _ctx(**_EUR_CTX_KW, format_style="default"))
     assert "🔴 STOP BREACHED at" in s_compact
-    assert "🔴 STOP BREACHED — HYPE" in s_default
+    assert "🔴 STOP BREACHED — <PRIVATE_PERP>" in s_default
 
 
 def test_format_event_unknown_style_falls_back_to_default():
     s = format_event(_stop_event(), _ctx(**_EUR_CTX_KW, format_style="bogus"))
-    assert "🔴 STOP BREACHED — HYPE" in s
+    assert "🔴 STOP BREACHED — <PRIVATE_PERP>" in s
 
 
 def test_format_event_unknown_type_returns_none():
@@ -560,8 +560,8 @@ def test_end_to_end_evaluate_then_format_compact():
     spec.loader.exec_module(lib)
 
     watch = {
-        "name": "HYPE",
-        "monitor_provider": "kraken:HYPEEUR",
+        "name": "<PRIVATE_PERP>",
+        "monitor_provider": "kraken:<PRIVATE_PERP>EUR",
         "entry_price": 60.15,
         "position_size": 1.66,
         "levels": [{"type": "stop", "price": 49.71}],

@@ -31,7 +31,7 @@ ALIGNED_AVG_RETURN = -1.82  # % from N=116
 def test_macro_gate_no_longer_vetoes() -> None:
     """macro_aligned 1/3 rejection is removed from the bar."""
     idea = {
-        "pair": "VVVUSD",
+        "pair": "<PRIVATE_AI>USD",
         "direction": "short",
         "conviction": 3,
         "tp1_pct": 5.78,
@@ -60,7 +60,7 @@ def test_macro_gate_inversion_locked_in(scan_id: str, expected_avg: float) -> No
 def test_macro_note_preserved_for_narrative() -> None:
     """The macro context is preserved as a narrative note."""
     idea = {
-        "pair": "HYPEUSD",
+        "pair": "<PRIVATE_PERP>USD",
         "direction": "long",
         "conviction": 3,
         "_note": "macro: 1/3 (BTC4h=short, ETH4h=short, F&G=27=Fear)",

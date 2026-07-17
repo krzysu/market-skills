@@ -134,7 +134,7 @@ Shows in `list` output and `export`.
 
 ### `decision_context` — structured decision trace
 
-The **decision_context** sub-object captures the *state of the world at the moment you decided to take the trade* — what signals fired, what the risk verdict said, whether you overrode anything. It's the difference between "I bought HYPE at $60.15" (current data, already captured) and "I bought HYPE at $60.15 because L3 trend-follow LONG conv 4 fired under fear-recovery regime, macro regime was supportive, and I overrode the L3 stop from $49.71 to $50.50 because ZEC was already in the same direction" (decision trace, queryable later).
+The **decision_context** sub-object captures the *state of the world at the moment you decided to take the trade* — what signals fired, what the risk verdict said, whether you overrode anything. It's the difference between "I bought <TICKER> at $60.15" (current data, already captured) and "I bought <TICKER> at $60.15 because L3 trend-follow LONG conv 4 fired under fear-recovery regime, macro regime was supportive, and I overrode the L3 stop from $49.71 to $50.50 because ZEC was already in the same direction" (decision trace, queryable later).
 
 **System of record:** the `decisions` table in the portfolio SQLite DB (see `portfolio.db.schema`). Each row is keyed by `intent_id` (unique). For backward compat with tools that read the `transactions.notes` JSON, a copy is also embedded in `notes.decision_context` — but the `decisions` table is the authoritative source.
 
@@ -145,7 +145,7 @@ The canonical schema is the `DecisionContext` TypedDict in `analysis/decision.py
 ```json
 {
   "decision_context": {
-    "intent_id": "trend-follow-HYPEUSD-2026-06-22-001",
+    "intent_id": "trend-follow-<TICKER>USD-2026-06-22-001",
     "source_skill": "strategy-trend-follow",
     "l3_idea": {
       "direction": "long",
@@ -236,7 +236,7 @@ Pass `--json` for machine-readable replay events.
 When the user shares a Base / Arbitrum / StarkNet / Ethereum tx link for a DEX swap that lands in the defi portfolio, the auto-log shape is the same as Kraken:
 
 1. **Capture tx data** — try `web_extract` first. If the page is JS-rendered (empty placeholders), ask the user to paste the Transaction Action line + token-transfer amounts.
-2. **Pick asset key by data feed** — a Base-chain VVV buy is logged as `hl:VVV` (HL is the price feed). Chain info goes in notes only.
+2. **Pick asset key by data feed** — a Base-chain `<AI_TOKEN>` buy is logged as `hl:<AI_TOKEN>` (HL is the price feed). Chain info goes in notes only.
 3. **Cost basis** = total input ÷ qty received. Include gas if material.
 4. **Build notes JSON** with chain-specific fields:
    ```json
@@ -249,9 +249,9 @@ When the user shares a Base / Arbitrum / StarkNet / Ethereum tx link for a DEX s
      "filled_at": "2026-06-22T12:06:00Z",
      "input_token": "USDC",
      "input_amount": 5000,
-     "output_token": "VVV",
+     "output_token": "<AI_TOKEN>",
      "output_qty": 317.86,
-     "route_summary": "USDC->WETH->DIEM->VVV multi-hop",
+     "route_summary": "USDC->WETH->DIEM-><AI_TOKEN> multi-hop",
      "implied_price_per_unit_usd": 15.73,
      "thesis": "Multi-TF spring setup",
      "asset_class": "alt-l3",
@@ -264,7 +264,7 @@ When the user shares a Base / Arbitrum / StarkNet / Ethereum tx link for a DEX s
 
 **No auto-log for on-chain trades yet.** Unlike Kraken, the user has not directed auto-log for on-chain swaps. Each log is an explicit instruction.
 
-**Pitfall — note-key auto-attach requires asset-key match.** Logging `hl:VVV` when existing notes use `hl:VVV` means the note auto-attaches. Logging `base:VVV` orphans the note.
+**Pitfall — note-key auto-attach requires asset-key match.** Logging `hl:<AI_TOKEN>` when existing notes use `hl:<AI_TOKEN>` means the note auto-attaches. Logging `base:<AI_TOKEN>` orphans the note.
 
 ## Reconcile — external balance check
 
@@ -273,11 +273,11 @@ When the user shares a Base / Arbitrum / StarkNet / Ethereum tx link for a DEX s
 Snapshot format: `{"provider:ticker": qty, ...}` — only asset quantities, no cash balances.
 
 ```bash
-# snapshot.json: {"kraken:BTCUSD": 0.15, "kraken:HYPEEUR": 10}
+# snapshot.json: {"kraken:BTCUSD": 0.15, "kraken:<TICKER>EUR": 10}
 reconcile --portfolio 1 --balance-file snapshot.json
 #   =   kraken:BTCUSD    0.15000000    0.15000000  +0.0       match
-#   !=  kraken:HYPEEUR   10.00000000   9.50000000   +0.5       diff
-#   -   hl:LIT            5.00000000   0.00000000   +5.0       missing_external
+#   !=  kraken:<TICKER>EUR   10.00000000   9.50000000   +0.5       diff
+#   -   hl:<PERP>            5.00000000   0.00000000   +5.0       missing_external
 ```
 
 Status legend: `=` exact match, `!=` quantity mismatch, `+` asset in snapshot but not in DB, `-` asset in DB but not in snapshot.

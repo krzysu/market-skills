@@ -263,11 +263,11 @@ class TestKrakenPlaceOrder:
         assert fill["venue"] == "kraken"
 
     def test_no_wait_returns_submitted(self):
-        submit = {"txid": ["OLIVE-77777"], "descr": {"order": "buy 1.5 HYPEUSD @ limit 60.15"}}
+        submit = {"txid": ["OLIVE-77777"], "descr": {"order": "buy 1.5 <PRIVATE_PERP>USD @ limit 60.15"}}
         intent = {
             "intent_id": "test-002",
             "venue": "kraken",
-            "pair": "HYPEUSD",
+            "pair": "<PRIVATE_PERP>USD",
             "side": "buy",
             "order_type": "limit",
             "volume": 1.5,
@@ -284,12 +284,12 @@ class TestKrakenPlaceOrder:
         assert fill["fill_price"] is None
 
     def test_limit_order_sits_open_after_timeout(self):
-        submit = {"txid": ["OOPEN-99999"], "descr": {"order": "buy 1 HYPEUSD @ limit 50"}}
+        submit = {"txid": ["OOPEN-99999"], "descr": {"order": "buy 1 <PRIVATE_PERP>USD @ limit 50"}}
         query = {"OOPEN-99999": {"status": "open", "vol_exec": "0", "descr": {}}}
         intent = {
             "intent_id": "test-003",
             "venue": "kraken",
-            "pair": "HYPEUSD",
+            "pair": "<PRIVATE_PERP>USD",
             "side": "buy",
             "order_type": "limit",
             "volume": 1.0,
@@ -400,7 +400,7 @@ class TestKrakenReadOps:
                     "vol": "1.0",
                     "vol_exec": "0",
                     "descr": {
-                        "pair": "HYPEUSD",
+                        "pair": "<PRIVATE_PERP>USD",
                         "type": "buy",
                         "ordertype": "limit",
                         "price": "60.15",
@@ -415,7 +415,7 @@ class TestKrakenReadOps:
         assert len(orders) == 1
         o = orders[0]
         assert o["order_id"] == "OABC-1"
-        assert o["pair"] == "HYPEUSD"
+        assert o["pair"] == "<PRIVATE_PERP>USD"
         assert o["side"] == "buy"
         assert o["order_type"] == "limit"
         assert o["limit_price"] == pytest.approx(60.15)
@@ -476,7 +476,7 @@ class TestLibRenderers:
         intent: Intent = {
             "intent_id": "abc-123",
             "venue": "kraken",
-            "pair": "HYPEUSD",
+            "pair": "<PRIVATE_PERP>USD",
             "side": "buy",
             "order_type": "limit",
             "volume": 1.5,
@@ -487,7 +487,7 @@ class TestLibRenderers:
             "source_skills": ["market-accumulation", "market-trend"],
         }
         out = render_intent_summary(intent)
-        assert "HYPEUSD" in out
+        assert "<PRIVATE_PERP>USD" in out
         assert "BUY" in out
         assert "limit" in out
         assert "60.1500" in out
@@ -556,7 +556,7 @@ class TestLibIntentLoading:
         intent_from_direct_args = _load_lib().intent_from_direct_args
 
         args = {
-            "pair": "HYPEUSD",
+            "pair": "<PRIVATE_PERP>USD",
             "side": "buy",
             "order_type": "limit",
             "volume": 1.5,

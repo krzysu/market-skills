@@ -68,6 +68,7 @@ analytics-only (`run-all-l3`, `position-watchdog`).
 ┌────────▼───────────────────────────────┐
 │   analysis/ package                    │
 │   indicators/  contracts.py           │
+│   conviction_thresholds.py            │
 │   track_record.py  data.py            │
 │   providers/*                         │
 └────────────────────────────────────────┘
@@ -86,6 +87,7 @@ reasoning, and (with user approval) calling the next skill.
 - Macro → `RegimeSignal{timestamp, inputs, regime, errors, regime_note}` — 6 inputs (F&G, VIX, DXY, US10Y, BTC.D, total mcap), 3-axis derived labels (risk_appetite / liquidity / sentiment). Lives in `analysis/macro/` — fetches external cross-asset state.
 - Valuation → `ValuationSignal{timestamp, inputs, regime, errors, regime_note}` — SP500 spot + Shiller CAPE vs 50y mean/std → z-score + 5-band regime (OVEREXTENDED / ELEVATED / FAIR / DEPRESSED / OVERSOLD). Lives in `analysis/valuation.py`. Same best-effort + error-isolated contract as Macro. Narrate-only; consumed as a soft `veto_reasons` tag by `strategy-mean-reversion` when CAPE disagrees with the trade direction.
 - Conviction calibration → `chop_score{timestamp, ideas, score, window}` — fraction of recent L3 ideas at conviction ≤ 2. Lives in `analysis/chop.py` (was `regime.py` until the Macro/Regime name collision was resolved). Reads the L3 idea history store, not external market data.
+- Conviction gate → `lookup_min_conviction(strategy, ticker, interval) -> int` — per-(strategy, ticker, interval) minimum-conviction-to-emit floor for L3 ideas. Lives in `analysis/conviction_thresholds.py`; `MIN_CONVICTION_TO_EMIT_BY_STRATEGY` holds the overrides (loaded from `$MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH` so per-tuner evidence stays outside the open-source repo), `GLOBAL_MIN_CONVICTION_TO_EMIT = 1` is the no-op default. Read by `strategy-trend-follow` and `strategy-liquidity-sweep` at the end of `analyze()` to drop ideas whose conviction is below the threshold before emit.
 - Track record → `TrackRecord{hit_rate, n_closed, n_hits, n_misses, avg_return_pct, multiplier, eligible}` — per-ticker hit-rate signal from the DTP journal. Lives in `analysis/track_record.py`. Read-only, no I/O, no caching; consumer passes the parsed `picks.json` array. The `multiplier` (1.0–3.0) scales `suggested_size_eur` for picked ideas with a strong recent track record.
 - Strategy → `TradeIdea{pair, direction, entry_zone, stop, target, conviction, version, strategy_name}`
 - Risk → `RiskVerdict{intent_id, status, fragments[], concerns[], narrative_hint}` — advisory

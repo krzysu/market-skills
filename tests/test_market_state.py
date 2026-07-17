@@ -134,7 +134,7 @@ class TestComposeStateWithPartialCaches:
                 "cached_at": _now_iso(-1800),
                 "baskets": ["tier_1"],
                 "total": 3,
-                "ideas": [{"ticker": "HYPEUSD", "conviction": 5}],
+                "ideas": [{"ticker": "<PRIVATE_PERP>USD", "conviction": 5}],
                 "summary": "3 ideas",
             },
         )
@@ -143,7 +143,7 @@ class TestComposeStateWithPartialCaches:
             "market-notes",
             {
                 "cached_at": _now_iso(-90000),
-                "pairs": {"HYPEUSD": [{"note": "x"}], "BTCUSD": [{"note": "y"}]},
+                "pairs": {"<PRIVATE_PERP>USD": [{"note": "x"}], "BTCUSD": [{"note": "y"}]},
                 "summary": "2 active notes",
             },
         )
@@ -157,7 +157,7 @@ class TestComposeStateWithPartialCaches:
         assert state["sources"]["valuation"]["summary"] == "SP500 OVEREXTENDED (z=+2.60)"
         assert state["sources"]["movers"]["gainers_count"] == 3
         assert state["sources"]["watchlist"]["fired_skills_total"] == 5
-        assert state["sources"]["conviction"]["top_ideas"][0]["ticker"] == "HYPEUSD"
+        assert state["sources"]["conviction"]["top_ideas"][0]["ticker"] == "<PRIVATE_PERP>USD"
         assert state["sources"]["notes"]["pair_count"] == 2
 
 

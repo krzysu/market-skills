@@ -294,7 +294,7 @@ class TestDATA1HyperliquidFetchSpotPrice:
     """DATA-1: hyperliquid provider must expose ``fetch_spot_price``.
 
     Pre-fix: no ``fetch_spot_price`` on the HL provider, so portfolio
-    refresh fell back to a stale OHLC close for ``hl:LIT`` / ``hl:VVV``
+    refresh fell back to a stale OHLC close for ``hl:<PERP>`` tickers
     and produced misleading unrealized P&L. Post-fix: HL has a
     fetch_spot_price symmetric with Kraken's.
     """

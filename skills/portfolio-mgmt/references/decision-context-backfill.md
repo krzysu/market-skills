@@ -35,7 +35,7 @@ For each trade missing `decision_context`:
 5. Update via: `edit <tx_id> --field notes --value "$(jq -c '.decision_context = <blob>' <<<existing_notes)"`
 6. Verify: `view --portfolio <name> --no-refresh` shows the new field
 
-## Example: backfilling the HYPE 2026-06-22 entry
+## Example: backfilling a tier-1 trade entry
 
 Source data already in notes:
 ```json
@@ -54,7 +54,7 @@ Add decision_context:
 ```json
 {
   "decision_context": {
-    "intent_id": "trend-follow-HYPEUSD-2026-06-22-001",
+    "intent_id": "trend-follow-<TICKER>USD-2026-06-22-001",
     "source_skill": "strategy-trend-follow",
     "l3_idea": {
       "direction": "long",

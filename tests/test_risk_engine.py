@@ -40,7 +40,7 @@ def _intent(**overrides):
     base = {
         "intent_id": "test-intent-1",
         "venue": "kraken",
-        "pair": "HYPEUSD",
+        "pair": "<PRIVATE_PERP>USD",
         "side": "buy",
         "order_type": "limit",
         "volume": 1.5,
@@ -51,7 +51,7 @@ def _intent(**overrides):
 
 
 def _ctx(**overrides) -> RiskContext:
-    """Default portfolio: 10k USD total, 5k cash, 20% HYPE position, no drawdown."""
+    """Default portfolio: 10k USD total, 5k cash, 20% <PRIVATE_PERP> position, no drawdown."""
     base = RiskContext(
         portfolio_name="spot",
         base_ccy="USD",
@@ -59,7 +59,7 @@ def _ctx(**overrides) -> RiskContext:
         cash_available=5000.0,
         current_drawdown_pct=0.0,
         positions={
-            "kraken:HYPEUSD": {
+            "kraken:<PRIVATE_PERP>USD": {
                 "qty": 10.0,
                 "avg_price": 50.0,
                 "current_price": 60.0,
@@ -69,7 +69,7 @@ def _ctx(**overrides) -> RiskContext:
         },
         tier_exposure={"tier1": 600.0},
         tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
-        watchlist_metadata={"HYPEUSD": {"tier": "tier1"}},
+        watchlist_metadata={"<PRIVATE_PERP>USD": {"tier": "tier1"}},
         recent_trades=[],
         daily_trade_count=0,
         daily_trade_budget=10,
@@ -136,7 +136,7 @@ class TestPositionSizePolicy:
             "market_value": None,
             "tier": "tier1",
         }
-        ctx = _ctx(positions={"kraken:HYPEUSD": held})
+        ctx = _ctx(positions={"kraken:<PRIVATE_PERP>USD": held})
         intent = _intent(side="sell", volume=1.0)
         intent["order_type"] = "market"
         intent["limit_price"] = None
@@ -155,7 +155,7 @@ class TestPositionSizePolicy:
             "market_value": 600.0,
             "tier": "tier1",
         }
-        ctx = _ctx(positions={"kraken:HYPEUSD": held})
+        ctx = _ctx(positions={"kraken:<PRIVATE_PERP>USD": held})
         intent = _intent(side="sell", volume=1.0)
         intent["order_type"] = "market"
         intent["limit_price"] = None
@@ -201,7 +201,7 @@ class TestPortfolioDrawdownPolicy:
 class TestPerTierExposurePolicy:
     def test_buy_within_tier_cap_approved(self):
         ctx = _ctx(tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}})
-        ctx.watchlist_metadata = {"HYPEUSD": {"tier": "tier1"}}
+        ctx.watchlist_metadata = {"<PRIVATE_PERP>USD": {"tier": "tier1"}}
         f = per_tier_exposure_policy(_intent(volume=1.0, limit_price=60), ctx)
         assert f["status"] == "APPROVED"
 
@@ -213,7 +213,7 @@ class TestPerTierExposurePolicy:
             tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
             tier_exposure={"tier1": 5500.0},
         )
-        ctx.watchlist_metadata = {"HYPEUSD": {"tier": "tier1"}}
+        ctx.watchlist_metadata = {"<PRIVATE_PERP>USD": {"tier": "tier1"}}
         f = per_tier_exposure_policy(_intent(volume=10.0, limit_price=60), ctx)
         assert f["status"] == "SCALE"
         assert f["suggested_volume"] is not None
@@ -230,7 +230,7 @@ class TestPerTierExposurePolicy:
     def test_sell_always_approved_for_tier(self):
         # Selling reduces exposure — never over cap.
         ctx = _ctx(tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}})
-        ctx.watchlist_metadata = {"HYPEUSD": {"tier": "tier1"}}
+        ctx.watchlist_metadata = {"<PRIVATE_PERP>USD": {"tier": "tier1"}}
         f = per_tier_exposure_policy(_intent(side="sell"), ctx)
         assert f["status"] == "APPROVED"
 
@@ -241,7 +241,7 @@ class TestPerTierExposurePolicy:
             tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
             tier_exposure={"tier1": 11000.0},  # already 1000 over max_total
         )
-        ctx.watchlist_metadata = {"HYPEUSD": {"tier": "tier1"}}
+        ctx.watchlist_metadata = {"<PRIVATE_PERP>USD": {"tier": "tier1"}}
         f = per_tier_exposure_policy(_intent(volume=10.0, limit_price=60), ctx)
         assert f["status"] == "REJECT"
         assert f.get("suggested_volume") is None
@@ -253,7 +253,7 @@ class TestPerTierExposurePolicy:
             tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
             tier_exposure={"tier1": 9500.0},  # already over pct cap (6000)
         )
-        ctx.watchlist_metadata = {"HYPEUSD": {"tier": "tier1"}}
+        ctx.watchlist_metadata = {"<PRIVATE_PERP>USD": {"tier": "tier1"}}
         f = per_tier_exposure_policy(_intent(volume=10.0, limit_price=60), ctx)
         assert f["status"] == "REJECT"
         assert f.get("suggested_volume") is None
@@ -325,7 +325,7 @@ class TestPerPairCooldownPolicy:
         ctx = _ctx(
             recent_trades=[
                 {
-                    "pair": "HYPEUSD",
+                    "pair": "<PRIVATE_PERP>USD",
                     "side": "buy",
                     "intent_id": "prev-1",
                     "timestamp": (now - timedelta(hours=1)).isoformat(),
@@ -361,7 +361,7 @@ class TestPerPairCooldownPolicy:
         ctx = _ctx(
             recent_trades=[
                 {
-                    "pair": "HYPEUSD",
+                    "pair": "<PRIVATE_PERP>USD",
                     "side": "buy",
                     "intent_id": "prev-1",
                     "timestamp": (now - timedelta(hours=10)).isoformat(),
@@ -379,7 +379,7 @@ class TestPerPairCooldownPolicy:
         ctx = _ctx(
             recent_trades=[
                 {
-                    "pair": "HYPEUSD",
+                    "pair": "<PRIVATE_PERP>USD",
                     "side": "buy",
                     "intent_id": "prev-1",
                     "timestamp": (now - timedelta(hours=1)).isoformat(),
@@ -423,7 +423,7 @@ class TestVetComposition:
         ctx = _ctx(
             tier_limits={"tier1": {"max_pct": 10, "max_total": 1000}},
             tier_exposure={"tier1": 0.0},
-            watchlist_metadata={"HYPEUSD": {"tier": "tier1"}},
+            watchlist_metadata={"<PRIVATE_PERP>USD": {"tier": "tier1"}},
             max_position_pct=25.0,
         )
         v = vet(_intent(volume=50.0, limit_price=60), ctx)  # 3000 USD notional
@@ -442,7 +442,7 @@ class TestVetComposition:
         ctx = _ctx(
             tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
             tier_exposure={"tier1": 5500.0},  # under cap, but market buy pushes over
-            watchlist_metadata={"HYPEUSD": {"tier": "tier1"}},
+            watchlist_metadata={"<PRIVATE_PERP>USD": {"tier": "tier1"}},
         )
         intent = _intent(volume=1.0)
         intent["order_type"] = "market"
@@ -587,7 +587,7 @@ class TestRegimeConsistencyPolicy:
         ctx = _ctx(
             macro_regime_risk_appetite="CRISIS",
             positions={
-                "kraken:HYPEUSD": {
+                "kraken:<PRIVATE_PERP>USD": {
                     "qty": 10.0,
                     "avg_price": 50.0,
                     "current_price": 60.0,
@@ -607,7 +607,7 @@ class TestRegimeConsistencyPolicy:
         ctx = _ctx(
             macro_regime_risk_appetite="CRISIS",
             positions={
-                "kraken:HYPEUSD": {
+                "kraken:<PRIVATE_PERP>USD": {
                     "qty": -10.0,
                     "avg_price": 60.0,
                     "current_price": 50.0,
@@ -705,7 +705,7 @@ class TestRiskEngineCLI:
                 {
                     "intent_id": "cli-1",
                     "venue": "kraken",
-                    "pair": "HYPEUSD",
+                    "pair": "<PRIVATE_PERP>USD",
                     "side": "buy",
                     "order_type": "limit",
                     "volume": 1.0,
@@ -756,8 +756,8 @@ def _seed_db(tmp_path):
     pid = add_portfolio(db_path, "spot", base_ccy="EUR")
     # Cash position in EUR (prefixed).
     add_transaction(db_path, pid, "2026-06-22T08:00:00+00:00", "BUY", "kraken:EUR", qty=1000.0, price=1.0)
-    # Held position in HYPEUSD.
-    add_transaction(db_path, pid, "2026-06-22T08:05:00+00:00", "BUY", "kraken:HYPEUSD", qty=20.0, price=50.0)
+    # Held position in <PRIVATE_PERP>USD.
+    add_transaction(db_path, pid, "2026-06-22T08:05:00+00:00", "BUY", "kraken:<PRIVATE_PERP>USD", qty=20.0, price=50.0)
     return db_path, pid
 
 
@@ -770,7 +770,7 @@ class TestStripPrefix:
 
     def test_passthrough_when_no_prefix(self):
         lib = _load_risk_engine_lib()
-        assert lib._strip_prefix("HYPEUSD") == "HYPEUSD"
+        assert lib._strip_prefix("<PRIVATE_PERP>USD") == "<PRIVATE_PERP>USD"
 
     def test_handles_empty_string(self):
         lib = _load_risk_engine_lib()
@@ -793,7 +793,7 @@ class TestGetPositionPrices:
     def test_reads_from_cache_first(self, monkeypatch):
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 67.37, "kraken:BTCUSD": 95000.0},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 67.37, "kraken:BTCUSD": 95000.0},
         )
 
         # If we hit fetch_spot_price, the test fails. Set it to raise.
@@ -802,14 +802,14 @@ class TestGetPositionPrices:
 
         monkeypatch.setattr("analysis.data.fetch_spot_price", must_not_call)
         lib = _load_risk_engine_lib()
-        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:HYPEUSD"])
-        assert prices == {"kraken:HYPEUSD": 67.37}
-        assert sources == {"kraken:HYPEUSD": "cache"}
+        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:<PRIVATE_PERP>USD"])
+        assert prices == {"kraken:<PRIVATE_PERP>USD": 67.37}
+        assert sources == {"kraken:<PRIVATE_PERP>USD": "cache"}
 
     def test_falls_back_to_live_for_cache_misses(self, monkeypatch):
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 67.37},  # only HYPEUSD cached
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 67.37},  # only <PRIVATE_PERP>USD cached
         )
         calls = []
 
@@ -819,9 +819,9 @@ class TestGetPositionPrices:
 
         monkeypatch.setattr("analysis.data.fetch_spot_price", fake_fetch)
         lib = _load_risk_engine_lib()
-        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:HYPEUSD", "kraken:BTCUSD"])
-        assert prices == {"kraken:HYPEUSD": 67.37, "kraken:BTCUSD": 95000.0}
-        assert sources == {"kraken:HYPEUSD": "cache", "kraken:BTCUSD": "spot"}
+        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:<PRIVATE_PERP>USD", "kraken:BTCUSD"])
+        assert prices == {"kraken:<PRIVATE_PERP>USD": 67.37, "kraken:BTCUSD": 95000.0}
+        assert sources == {"kraken:<PRIVATE_PERP>USD": "cache", "kraken:BTCUSD": "spot"}
         assert calls == ["kraken:BTCUSD"]  # only the cache miss fetched live
 
     def test_refresh_flag_repopulates_cache_before_reading(self, monkeypatch):
@@ -829,17 +829,17 @@ class TestGetPositionPrices:
 
         def fake_refresh(db):
             refresh_calls.append(db)
-            return {"kraken:HYPEUSD": 100.0}
+            return {"kraken:<PRIVATE_PERP>USD": 100.0}
 
         monkeypatch.setattr("portfolio.db.refresh_prices", fake_refresh)
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 100.0},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 100.0},
         )
         lib = _load_risk_engine_lib()
-        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:HYPEUSD"], refresh=True)
+        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:<PRIVATE_PERP>USD"], refresh=True)
         assert refresh_calls == ["/tmp/db.db"]
-        assert prices == {"kraken:HYPEUSD": 100.0}
+        assert prices == {"kraken:<PRIVATE_PERP>USD": 100.0}
 
     def test_cache_read_failure_falls_back_to_live(self, monkeypatch, capsys):
         def boom(_):
@@ -851,9 +851,9 @@ class TestGetPositionPrices:
             lambda t: {"price": 50.0},
         )
         lib = _load_risk_engine_lib()
-        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:HYPEUSD"])
-        assert prices == {"kraken:HYPEUSD": 50.0}
-        assert sources == {"kraken:HYPEUSD": "spot"}
+        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:<PRIVATE_PERP>USD"])
+        assert prices == {"kraken:<PRIVATE_PERP>USD": 50.0}
+        assert sources == {"kraken:<PRIVATE_PERP>USD": "spot"}
         assert "price_cache read failed" in capsys.readouterr().err
 
     def test_live_fetch_failure_omits_asset(self, monkeypatch, capsys):
@@ -863,7 +863,7 @@ class TestGetPositionPrices:
             lambda t: (_ for _ in ()).throw(OSError("kraken CLI not installed")),
         )
         lib = _load_risk_engine_lib()
-        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:HYPEUSD"])
+        prices, sources = lib._get_position_prices("/tmp/db.db", ["kraken:<PRIVATE_PERP>USD"])
         assert prices == {}
         assert sources == {}
         assert "live spot price fetch failed" in capsys.readouterr().err
@@ -890,12 +890,12 @@ class TestBuildContext:
         _seed_db(tmp_path)
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 60.0},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 60.0},
         )
         lib = _load_risk_engine_lib()
         ctx = lib.build_context(self._args(tmp_path))
-        assert "kraken:HYPEUSD" in ctx.positions, ctx.positions
-        assert "kraken:kraken:HYPEUSD" not in ctx.positions
+        assert "kraken:<PRIVATE_PERP>USD" in ctx.positions, ctx.positions
+        assert "kraken:kraken:<PRIVATE_PERP>USD" not in ctx.positions
         # Same for the cash row.
         assert "kraken:EUR" in ctx.positions
 
@@ -904,11 +904,11 @@ class TestBuildContext:
         _seed_db(tmp_path)
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 67.37},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 67.37},
         )
         lib = _load_risk_engine_lib()
         ctx = lib.build_context(self._args(tmp_path))
-        hype = ctx.positions["kraken:HYPEUSD"]
+        hype = ctx.positions["kraken:<PRIVATE_PERP>USD"]
         assert hype["current_price"] == 67.37
         assert hype["market_value"] == round(20.0 * 67.37, 2)
         assert hype["avg_price"] == 50.0  # from avg_cost translation
@@ -918,7 +918,7 @@ class TestBuildContext:
         _seed_db(tmp_path)
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 60.0},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 60.0},
         )
         lib = _load_risk_engine_lib()
         ctx = lib.build_context(self._args(tmp_path))
@@ -929,11 +929,11 @@ class TestBuildContext:
         _seed_db(tmp_path)
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 50.0},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 50.0},
         )
         lib = _load_risk_engine_lib()
         ctx = lib.build_context(self._args(tmp_path))
-        # HYPEUSD: 20 * 50 = 1000; cash: 1000 EUR; total: 2000.
+        # <PRIVATE_PERP>USD: 20 * 50 = 1000; cash: 1000 EUR; total: 2000.
         assert ctx.total_value == 2000.0
 
     def test_empty_cache_falls_back_to_live_fetch(self, tmp_path, monkeypatch, capsys):
@@ -949,8 +949,8 @@ class TestBuildContext:
         monkeypatch.setattr("analysis.data.fetch_spot_price", fake_fetch)
         lib = _load_risk_engine_lib()
         ctx = lib.build_context(self._args(tmp_path))
-        assert ctx.positions["kraken:HYPEUSD"]["current_price"] == 60.0
-        assert calls == ["kraken:HYPEUSD"]
+        assert ctx.positions["kraken:<PRIVATE_PERP>USD"]["current_price"] == 60.0
+        assert calls == ["kraken:<PRIVATE_PERP>USD"]
 
     def test_live_fetch_failure_falls_back_to_cost_basis(self, tmp_path, monkeypatch, capsys):
         """Network/CLI failure: market_value falls back to cost_basis so
@@ -965,13 +965,13 @@ class TestBuildContext:
         monkeypatch.setattr("analysis.data.fetch_spot_price", fail)
         lib = _load_risk_engine_lib()
         ctx = lib.build_context(self._args(tmp_path))
-        # HYPEUSD position: current_price stays 0.0 (no live fetch
+        # <PRIVATE_PERP>USD position: current_price stays 0.0 (no live fetch
         # succeeded), but market_value is seeded from cost_basis
         # (qty * avg_cost = 20 * 50 = 1000). Conservative fallback — never
         # overstates holdings, and a fresh cron refresh of the price cache
         # replaces it with the real market value.
-        assert ctx.positions["kraken:HYPEUSD"]["current_price"] == 0.0
-        assert ctx.positions["kraken:HYPEUSD"]["market_value"] == 1000.0
+        assert ctx.positions["kraken:<PRIVATE_PERP>USD"]["current_price"] == 0.0
+        assert ctx.positions["kraken:<PRIVATE_PERP>USD"]["market_value"] == 1000.0
         # Cash-ccy row (kraken:EUR) is EXCLUDED from the market_value
         # fallback — its qty is already extracted to cash_available and
         # summing it again would double-count the cash leg.
@@ -979,7 +979,7 @@ class TestBuildContext:
         assert "live spot price fetch failed" in capsys.readouterr().err
         # cash_available should still work (it doesn't need live prices).
         assert ctx.cash_available == 1000.0
-        # total_value = HYPE cost_basis (1000) + cash (1000) = 2000.
+        # total_value = <PRIVATE_PERP> cost_basis (1000) + cash (1000) = 2000.
         # Insufficient_funds reads the real cost, not "have 0.00 EUR".
         assert ctx.total_value == 2000.0
 
@@ -996,7 +996,7 @@ class TestBuildContext:
         _seed_db(tmp_path)
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 100.0},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 100.0},
         )
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             _yaml.dump(
@@ -1026,7 +1026,7 @@ class TestBuildContext:
             overrides = load_policy_overrides(args.config)
             apply_global_overrides(ctx, overrides)
             apply_portfolio_overrides(ctx, overrides, "kraken")
-            apply_pair_overrides(ctx, overrides, "HYPEUSD")
+            apply_pair_overrides(ctx, overrides, "<PRIVATE_PERP>USD")
 
             # After apply_portfolio_overrides, ctx.max_position_pct must be
             # 25.0 (per-portfolio wins over the 30.0 global). This is what
@@ -1041,7 +1041,7 @@ class TestBuildContext:
                 {
                     "intent_id": "test-1",
                     "venue": "kraken",
-                    "pair": "HYPEUSD",
+                    "pair": "<PRIVATE_PERP>USD",
                     "side": "buy",
                     "order_type": "limit",
                     "volume": 0.28,  # 0.28 * 100 = 28 notional
@@ -1065,17 +1065,17 @@ class TestBuildContext:
 
         def fake_refresh(db):
             refresh_calls.append(db)
-            return {"kraken:HYPEUSD": 99.0}
+            return {"kraken:<PRIVATE_PERP>USD": 99.0}
 
         monkeypatch.setattr("portfolio.db.refresh_prices", fake_refresh)
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 99.0},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 99.0},
         )
         lib = _load_risk_engine_lib()
         ctx = lib.build_context(self._args(tmp_path, refresh_prices=True))
         assert refresh_calls == [str(tmp_path / "risk.db")]
-        assert ctx.positions["kraken:HYPEUSD"]["current_price"] == 99.0
+        assert ctx.positions["kraken:<PRIVATE_PERP>USD"]["current_price"] == 99.0
 
     def test_missing_portfolio_exits_2(self, tmp_path, monkeypatch, capsys):
         from portfolio.db import init_db
@@ -1092,7 +1092,7 @@ class TestBuildContext:
         _seed_db(tmp_path)
         monkeypatch.setattr(
             "portfolio.db.get_cached_prices",
-            lambda db: {"kraken:HYPEUSD": 60.0},
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 60.0},
         )
         wl_path = tmp_path / "watchlist.json"
         wl_path.write_text(
@@ -1100,7 +1100,7 @@ class TestBuildContext:
                 {
                     "baskets": {
                         "test": {
-                            "HYPEUSD": {"tier": "tier1"},
+                            "<PRIVATE_PERP>USD": {"tier": "tier1"},
                         },
                     },
                 }
@@ -1108,9 +1108,9 @@ class TestBuildContext:
         )
         lib = _load_risk_engine_lib()
         ctx = lib.build_context(self._args(tmp_path, watchlist=str(wl_path)))
-        # HYPEUSD at $60 * 20 qty = $1200 market value.
+        # <PRIVATE_PERP>USD at $60 * 20 qty = $1200 market value.
         assert ctx.tier_exposure == {"tier1": 1200.0}
-        assert ctx.positions["kraken:HYPEUSD"]["tier"] == "tier1"
+        assert ctx.positions["kraken:<PRIVATE_PERP>USD"]["tier"] == "tier1"
 
 
 # ───────────────────────────────────────────────────────────── policies loader
@@ -1169,14 +1169,14 @@ portfolios:
   defi:
     cooldown_hours: 4
 pairs:
-  HYPEUSD:
+  <PRIVATE_PERP>USD:
     max_position_pct: 5
 """
             ),
         )
         data = load_policy_overrides(path)
         assert data["portfolios"]["spot"]["max_position_pct"] == 25
-        assert data["pairs"]["HYPEUSD"]["max_position_pct"] == 5
+        assert data["pairs"]["<PRIVATE_PERP>USD"]["max_position_pct"] == 5
 
     def test_loads_tier_caps(self, tmp_path):
         from analysis.risk import load_policy_overrides
@@ -1317,8 +1317,8 @@ class TestApplyOverrides:
         # YAML key uses dash form; intent pair uses bare form. Should still match.
         apply_pair_overrides(
             ctx,
-            {"pairs": {"HYPE-USD": {"max_position_pct": 5}}},
-            "HYPEUSD",
+            {"pairs": {"<PRIVATE_PERP>-USD": {"max_position_pct": 5}}},
+            "<PRIVATE_PERP>USD",
         )
         assert ctx.max_position_pct == 5.0
 
@@ -1326,7 +1326,7 @@ class TestApplyOverrides:
         from analysis.risk import apply_pair_overrides
 
         ctx = self._ctx()
-        apply_pair_overrides(ctx, {"pairs": {"BTCUSD": {"max_position_pct": 1}}}, "HYPEUSD")
+        apply_pair_overrides(ctx, {"pairs": {"BTCUSD": {"max_position_pct": 1}}}, "<PRIVATE_PERP>USD")
         assert ctx.max_position_pct == 25.0  # unchanged
 
     def test_invalid_scalar_raises(self):
@@ -1362,12 +1362,12 @@ class TestPolicyPrecedence:
             "max_position_pct": 30,
             "max_drawdown_pct": 15,
             "portfolios": {"spot": {"max_position_pct": 25}},
-            "pairs": {"HYPEUSD": {"max_position_pct": 5}},
+            "pairs": {"<PRIVATE_PERP>USD": {"max_position_pct": 5}},
         }
         # class default 25 -> global 30 -> portfolio 25 -> pair 5
         apply_global_overrides(ctx, overrides)
         apply_portfolio_overrides(ctx, overrides, "spot")
-        apply_pair_overrides(ctx, overrides, "HYPEUSD")
+        apply_pair_overrides(ctx, overrides, "<PRIVATE_PERP>USD")
         assert ctx.max_position_pct == 5.0
         # max_drawdown_pct only set at global level (25 -> 15)
         assert ctx.max_drawdown_pct == 15.0
@@ -1382,11 +1382,11 @@ class TestPolicyPrecedence:
         ctx = self._ctx()
         overrides = {
             "portfolios": {"spot": {"max_position_pct": 25}},
-            "pairs": {"BTCUSD": {"max_position_pct": 5}},  # doesn't match HYPEUSD
+            "pairs": {"BTCUSD": {"max_position_pct": 5}},  # doesn't match <PRIVATE_PERP>USD
         }
         apply_global_overrides(ctx, overrides)
         apply_portfolio_overrides(ctx, overrides, "spot")
-        apply_pair_overrides(ctx, overrides, "HYPEUSD")
+        apply_pair_overrides(ctx, overrides, "<PRIVATE_PERP>USD")
         assert ctx.max_position_pct == 25.0  # portfolio wins, pair had no entry
 
 
@@ -1429,13 +1429,13 @@ class TestPerpsOverrides:
         from analysis.risk import apply_global_overrides, leverage_cap_policy
 
         ctx = self._ctx()
-        # Override ETHUSD only — HYPEUSD should still hit the code dict (5x default).
+        # Override ETHUSD only — <PRIVATE_PERP>USD should still hit the code dict (5x default).
         apply_global_overrides(ctx, {"perps": {"leverage_caps": {"ETHUSD": 7}}})
 
         intent = Intent(
             intent_id="t1",
             venue="kraken-perps",
-            pair="HYPEUSD",
+            pair="<PRIVATE_PERP>USD",
             side="buy",
             order_type="market",
             volume=1.0,
@@ -1462,7 +1462,7 @@ class TestPerpsOverrides:
         intent = Intent(
             intent_id="t1",
             venue="kraken-perps",
-            pair="HYPEUSD",  # not in code LEVERAGE_CAPS
+            pair="<PRIVATE_PERP>USD",  # not in code LEVERAGE_CAPS
             side="buy",
             order_type="market",
             volume=1.0,

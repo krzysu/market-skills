@@ -237,10 +237,10 @@ class TestHomeView:
             with patch.dict(os.environ, {"XDG_DATA_HOME": tmp}):
                 write_state_cache(
                     "market-trend",
-                    {"ticker": "HYPEUSD", "timestamp": "2026-07-07T15:00:00Z"},
+                    {"ticker": "<PRIVATE_PERP>USD", "timestamp": "2026-07-07T15:00:00Z"},
                 )
                 view = render_home_view("market-trend")
-        assert "HYPEUSD" in view
+        assert "<PRIVATE_PERP>USD" in view
 
     def test_corrupt_cache_falls_back_to_hint(self):
         with tempfile.TemporaryDirectory() as tmp:

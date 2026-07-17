@@ -238,7 +238,12 @@ def _run_strategies(
     if not candles or len(candles) < 50:
         return {}
 
-    bare_ticker = _bare_ticker(provider_ticker)
+    # Pass the qualified provider:ticker through to the L3 strategy so its
+    # lookup_min_conviction() call can match keys in
+    # analysis.conviction_thresholds.MIN_CONVICTION_TO_EMIT_BY_STRATEGY
+    # (which are keyed on provider-qualified notation). Stripping the prefix
+    # here would silently fall back to GLOBAL_MIN_CONVICTION_TO_EMIT for any
+    # configured per-(ticker, interval) gate.
     ideas_by_strat: dict[str, list] = {}
     for strat in strategies:
         mod = load_skill(f"strategy-{strat}")
@@ -246,7 +251,7 @@ def _run_strategies(
             print(f"[WARN] strategy '{strat}' not found, skipping", file=sys.stderr)
             continue
         try:
-            result = mod.analyze(candles, ticker=bare_ticker, interval=interval, period=period)
+            result = mod.analyze(candles, ticker=provider_ticker, interval=interval, period=period)
             ideas_by_strat[strat] = result.get("ideas", [])
         except Exception as e:
             print(f"[WARN] strategy '{strat}' analyze failed: {type(e).__name__}: {e}", file=sys.stderr)

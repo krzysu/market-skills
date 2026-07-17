@@ -7,10 +7,10 @@
     "crypto_alts": {
       "SOLUSD": {"tier": 3, "source": "kraken", "label": "Solana"},
       "BNBUSD": {"tier": 3, "source": "kraken", "label": "BNB"},
-      "HYPEUSD": {"tier": 1, "source": "kraken", "label": "Hyperliquid", "asset_class": "perp_dex"},
+      "<TICKER1>USD": {"tier": 1, "source": "kraken", "label": "<tier1 perp_dex label>", "asset_class": "perp_dex"},
       "ADAUSD": {"tier": 3, "source": "kraken", "label": "Cardano"},
       "ALGOUSD": {"tier": 3, "source": "kraken", "label": "Algorand"},
-      "hl:LIT":  {"tier": 1, "source": "hyperliquid", "label": "Lighter Perp DEX", "asset_class": "perp_dex"}
+      "hl:<PERP>":  {"tier": 1, "source": "hyperliquid", "label": "<tier1 hl perp label>", "asset_class": "perp_dex"}
     },
     "crypto_ai": {
       "NEARUSD": {"tier": 1, "source": "kraken", "label": "NEAR Protocol", "asset_class": "ai_infra"},

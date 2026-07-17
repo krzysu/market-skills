@@ -42,7 +42,7 @@ perps:
   leverage_caps:
     SOLUSD: 3
     BTCUSD: 5
-    HYPEUSD: 2
+    <PRIVATE_PERP>: 2
   # Default leverage cap for pairs not in leverage_caps AND not in the
   # code's LEVERAGE_CAPS dict. Default: 5.
   default_leverage_cap: 10
@@ -52,7 +52,7 @@ perps:
   # changes its margin schedule.
   mm_rates:
     SOLUSD: 0.015
-    HYPEUSD: 0.02
+    <PRIVATE_PERP>: 0.02
 
 # Per-portfolio overrides (case-insensitive name match).
 portfolios:
@@ -72,9 +72,9 @@ portfolios:
     perps:
       default_leverage_cap: 3  # this portfolio is more conservative on alts
 
-# Per-pair overrides (case-insensitive bare-ticker match — HYPEUSD matches HYPE-USD).
+# Per-pair overrides (case-insensitive bare-ticker match — <PRIVATE_PERP>-USD matches <PRIVATE_PERP>USD).
 pairs:
-  HYPEUSD:
+  <PRIVATE_PERP>USD:
     max_position_pct: 5
 ```
 
@@ -138,6 +138,6 @@ absence of a per-portfolio override is not an error).
 ## Per-pair matching
 
 `apply_pair_overrides` strips hyphens, slashes, and lowercases the YAML
-key for comparison against `intent["pair"]`. `pairs.HYPE-USD` and
-`pairs.HYPEUSD` both match a `HYPEUSD` intent. No match → block is
+key for comparison against `intent["pair"]`. `pairs.<PRIVATE_PERP>-USD` and
+`pairs.<PRIVATE_PERP>USD` both match a `<PRIVATE_PERP>USD` intent. No match → block is
 silently skipped.

@@ -176,19 +176,24 @@ def analyze(candles, interval="1d", period="1y"):
             "confidence": confidence,
             "max_confidence": 5,
             "classification": classification,
-            "direction": (
-                "bull"
-                if (is_bullish_break and not is_bearish_break)
-                else "bear"
-                if (is_bearish_break and not is_bullish_break)
-                else None
-            ),
+            "direction": _resolve_direction(is_bullish_break, is_bearish_break),
             "type": "BREAKOUT",
         },
         "signals": signals,
         "input_scores": input_scores,
         "narrative": narrative,
     }
+
+
+def _resolve_direction(is_bullish_break: bool, is_bearish_break: bool) -> str | None:
+    """Pick the breakout direction. Exactly one bullish/bearish signal wins;
+    both or neither → ``None`` (the L3 won't take a trade without a clear
+    direction)."""
+    if is_bullish_break and not is_bearish_break:
+        return "bull"
+    if is_bearish_break and not is_bullish_break:
+        return "bear"
+    return None
 
 
 def _build_narrative(
@@ -205,7 +210,12 @@ def _build_narrative(
     if not present:
         return "No breakout pattern detected; price lacks directional conviction."
 
-    direction = "bullish" if is_bullish_break else "bearish" if is_bearish_break else "directional"
+    if is_bullish_break:
+        direction = "bullish"
+    elif is_bearish_break:
+        direction = "bearish"
+    else:
+        direction = "directional"
 
     if classification == "FAILED":
         return "Breakout failed: structure break reversed and price returned to consolidation."

@@ -172,10 +172,10 @@ def _parse_argv(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         default=None,
-        choices=[None, "current", "add", "add_minus_one", "max_plus_one"],
+        choices=["current", "add", "add_minus_one", "max_plus_one"],
         help="(strategy-liquidity-sweep) Conviction formula mode forwarded to "
         "analyze() as conviction_mode=. Use to A/B compare Sharpe per formula "
-        "via FillSimulator. None = strategy's default.",
+        "via FillSimulator. Omit to use the strategy's default.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Replay and print idea counts; do not trade.")
     parser.add_argument("--demo", action="store_true", help="Offline demo: synthetic candles, no network.")

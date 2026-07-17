@@ -53,7 +53,7 @@ The conviction number each idea carries comes from
 `conviction_from_confidences(sweep_conf, accum_conf, *, mode)` in `lib.py`
 (see `analyze`, which calls it with `mode="current"`). The shipped `current`
 formula is `min(5, sweep + accum // 2)`. Before changing this constant, a grid
-search scaffold lives at `scripts/conviction_grid.py` (bead `market-skills-7eq`).
+search scaffold lives at `scripts/conviction_grid.py`.
 
 ```bash
 # Offline smoke test (synthetic candles, no network):
@@ -61,7 +61,7 @@ uv run skills/strategy-liquidity-sweep/scripts/conviction_grid.py --demo
 
 # Real calibration: tally the conviction each formula would emit per fired bar:
 uv run skills/strategy-liquidity-sweep/scripts/conviction_grid.py \
-    --tickers BTCUSD,ETHUSD,SOLUSD,HYPEUSD,TAOUSD,VVVUSD \
+    --tickers BTCUSD,ETHUSD,SOLUSD,<TICKER3>USD,<TICKER4>USD,<TICKER5>USD \
     --interval 1d --period 1y --warmup 200
 
 # Out-of-sample: tally only the last 30% of each series (leading 70% = warmup
@@ -85,6 +85,24 @@ shipped formula. Change the constant in `lib.py` only after the grid shows a
 healthy number of `conv >= 3` fires per scan **without** inflating the
 `conv = 2` band (the negative-EV band per journal evidence), and after
 confirming the out-of-sample distribution matches the in-sample one.
+
+### Conviction gate (entry-side filter)
+
+After the conviction formula returns, this strategy applies an entry-side
+floor: any idea whose final conviction is below the configured threshold is
+dropped before `analyze()` returns. The threshold is per-(`strategy`,
+`ticker`, `interval`) and lives in
+[`analysis/conviction_thresholds.py`](../../analysis/conviction_thresholds.py)
+— read via `lookup_min_conviction("strategy-liquidity-sweep", ticker, interval)`.
+
+`strategy-liquidity-sweep`'s bucket ships **empty** — the per-band backtest
+evidence (597-fill `conv=2` Sharpe `-0.32` is negative-EV, while `conv=5`
+is split ticker-dependent) is ambiguous without journal accumulation,
+so conservative no-ship wins for the open-source default. The grid's
+`--validate-journal` workflow above is the path to per-ticker entries:
+confirm a stable threshold per ticker before populating the central
+table (set `MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH` to your private
+JSON to ship overrides without touching this file).
 
 ## Output
 

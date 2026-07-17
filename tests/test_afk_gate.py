@@ -27,7 +27,7 @@ def _intent(**overrides):
     base = {
         "intent_id": "afk-test",
         "venue": "kraken",
-        "pair": "HYPEUSD",
+        "pair": "<PRIVATE_PERP>USD",
         "side": "buy",
         "order_type": "limit",
         "volume": 1.5,
@@ -141,15 +141,15 @@ class TestCircuitBreaker:
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         state = afk.CircuitBreakerState.load(threshold=2)
 
-        state.record("HYPEUSD")
+        state.record("<PRIVATE_PERP>USD")
         v1 = afk.check_circuit_breaker(_intent(), state)
         assert v1["status"] == "APPROVED"
 
-        state.record("HYPEUSD")
+        state.record("<PRIVATE_PERP>USD")
         v2 = afk.check_circuit_breaker(_intent(), state)
         assert v2["status"] == "REJECT"
         assert "tripped" in v2["reason"]
-        assert "HYPEUSD" in v2["reason"]
+        assert "<PRIVATE_PERP>USD" in v2["reason"]
         assert "manual reset" in v2["reason"]
 
     def test_threshold_default_two(self, monkeypatch, tmp_path):
@@ -166,9 +166,9 @@ class TestCircuitBreaker:
         afk = _load_afk()
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         state = afk.CircuitBreakerState.load(threshold=2)
-        state.record("hype-usd")
-        state.record("HYPEUSD")
-        v = afk.check_circuit_breaker(_intent(pair="HYPEUSD"), state)
+        state.record("<private_perp>-usd")
+        state.record("<PRIVATE_PERP>USD")
+        v = afk.check_circuit_breaker(_intent(pair="<PRIVATE_PERP>USD"), state)
         # Both writes map to the same bare ticker → 2 hits → tripped.
         assert v["status"] == "REJECT"
 
@@ -176,10 +176,10 @@ class TestCircuitBreaker:
         afk = _load_afk()
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         state = afk.CircuitBreakerState.load(threshold=2)
-        state.record("HYPEUSD")
-        state.record("HYPEUSD")
-        assert state.is_tripped("HYPEUSD")
-        state.record("HYPEUSD", reset=True)
+        state.record("<PRIVATE_PERP>USD")
+        state.record("<PRIVATE_PERP>USD")
+        assert state.is_tripped("<PRIVATE_PERP>USD")
+        state.record("<PRIVATE_PERP>USD", reset=True)
         # reset=True wipes the entry.
         v = afk.check_circuit_breaker(_intent(), state)
         assert v["status"] == "APPROVED"
@@ -191,13 +191,13 @@ class TestCircuitBreaker:
         assert path is not None
         # First process: trip the breaker.
         s1 = afk.CircuitBreakerState.load(threshold=2)
-        s1.record("HYPEUSD")
-        s1.record("HYPEUSD")
+        s1.record("<PRIVATE_PERP>USD")
+        s1.record("<PRIVATE_PERP>USD")
         s1.persist()
         assert os.path.exists(path)
         # Second process: read from disk and verify the trip persisted.
         s2 = afk.CircuitBreakerState.load(threshold=2)
-        assert s2.is_tripped("HYPEUSD")
+        assert s2.is_tripped("<PRIVATE_PERP>USD")
         v = afk.check_circuit_breaker(_intent(), s2)
         assert v["status"] == "REJECT"
 
@@ -205,19 +205,19 @@ class TestCircuitBreaker:
         afk = _load_afk()
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         s = afk.CircuitBreakerState.load(threshold=2)
-        s.record("HYPEUSD")
-        s.record("HYPEUSD")
+        s.record("<PRIVATE_PERP>USD")
+        s.record("<PRIVATE_PERP>USD")
         # Helper clears one pair.
-        afk.reset_circuit_breaker("HYPEUSD")
+        afk.reset_circuit_breaker("<PRIVATE_PERP>USD")
         s2 = afk.CircuitBreakerState.load(threshold=2)
-        assert not s2.is_tripped("HYPEUSD")
+        assert not s2.is_tripped("<PRIVATE_PERP>USD")
 
     def test_other_pair_unaffected(self, monkeypatch, tmp_path):
         afk = _load_afk()
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         s = afk.CircuitBreakerState.load(threshold=2)
-        s.record("HYPEUSD")
-        s.record("HYPEUSD")
+        s.record("<PRIVATE_PERP>USD")
+        s.record("<PRIVATE_PERP>USD")
         # BTCUSD never recorded → approved.
         v = afk.check_circuit_breaker(_intent(pair="BTCUSD"), s)
         assert v["status"] == "APPROVED"
@@ -263,8 +263,8 @@ class TestVetAfkComposition:
         afk = _load_afk()
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         state = afk.CircuitBreakerState.load(threshold=2)
-        state.record("HYPEUSD")
-        state.record("HYPEUSD")
+        state.record("<PRIVATE_PERP>USD")
+        state.record("<PRIVATE_PERP>USD")
         ctx = afk.AFKContext(total_value=10000.0, base_ccy="USD")
         noon = _dt.datetime(2026, 6, 29, 12, 0, tzinfo=_dt.UTC)
         v = afk.vet_afk(_intent(), ctx, state, now=noon)

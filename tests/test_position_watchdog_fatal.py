@@ -93,7 +93,7 @@ def test_single_tick_failure_does_not_fatal(monkeypatch, tmp_path, capsys):
     Regression for the original 2026-07-08 06:00 cron blip that woke the
     operator for a single transient outage.
     """
-    names = ["ETH", "HYPE", "NEAR", "PAXG", "VVV", "ZEC"]
+    names = ["ETH", "<PRIVATE_PERP>", "NEAR", "PAXG", "<PRIVATE_AI>", "ZEC"]
     exit_code = _run_main(
         monkeypatch,
         tmp_path,
@@ -122,7 +122,7 @@ def test_sustained_failure_triggers_fatal(monkeypatch, tmp_path, capsys):
     [True, True] in its window); the current tick appends a third True,
     pushing every watch to threshold (3) within the lookback (5).
     """
-    names = ["ETH", "HYPE", "NEAR", "PAXG", "VVV", "ZEC"]
+    names = ["ETH", "<PRIVATE_PERP>", "NEAR", "PAXG", "<PRIVATE_AI>", "ZEC"]
 
     # Pre-seed state files: each watch has 2 prior failures, then this tick fails.
     for n in names:
@@ -158,7 +158,7 @@ def test_partial_failure_does_not_fatal(monkeypatch, tmp_path, capsys):
     Even with sustained history, the all-watches condition is not met
     (one watch succeeded) so the FATAL branch is not entered.
     """
-    names = ["ETH", "HYPE", "NEAR", "PAXG", "VVV", "ZEC"]
+    names = ["ETH", "<PRIVATE_PERP>", "NEAR", "PAXG", "<PRIVATE_AI>", "ZEC"]
     # Pre-seed: 2 all-fail ticks so the others would qualify for sustained
     for n in names:
         _write_state(tmp_path / f"{n}_state.json", n, [True, True])
@@ -190,7 +190,7 @@ def test_recovery_drops_rolling_count_below_threshold(monkeypatch, tmp_path, cap
     the next all-fail tick does not trip FATAL. The recovery is recorded
     in the per-watch window so the operator can see the watch came back.
     """
-    names = ["ETH", "HYPE", "NEAR", "PAXG", "VVV", "ZEC"]
+    names = ["ETH", "<PRIVATE_PERP>", "NEAR", "PAXG", "<PRIVATE_AI>", "ZEC"]
 
     # Tick 1: all fail. Window becomes [T].
     exit_code = _run_main(
