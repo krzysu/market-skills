@@ -141,11 +141,31 @@ def _print_histograms(per_mode, branch2_count, modes):
     print("(the negative-EV band per the journal evidence).")
 
 
-def _validate_journal(modes):
+def _validate_journal(modes, *, strategy: str | None = None):
     """Report per-conviction-band hit rate from the operator journal.
 
     The journal path is read from ``LIQ_SWEEP_JOURNAL_PATH``; we raise if unset
     rather than defaulting to a host-specific path.
+
+    ``strategy`` (optional, recommended): each journal idea carries a
+    ``strategy`` field naming the L3 that produced it (e.g. ``strategy-trend-follow``
+    vs ``strategy-liquidity-sweep``). The daily-trade-pick journal mixes many
+    strategies; an unfiltered run aggregates per-band numbers across them and
+    cannot answer "how does liq-sweep perform at conviction 4". Pass the
+    specific strategy name to scope the breakdown. With ``strategy=None`` the
+    function falls back to the previous all-strategies behaviour and prints a
+    notice so the caller knows.
+
+    The journal may be either:
+      - a single dict with an ``ideas`` key (legacy shape), or
+      - a flat list of ideas, or
+      - a list of "rounds", each round being a dict with its own ``ideas``
+        list (the daily-trade-pick journal shape as of mid-2026).
+    All three shapes are flattened to one idea list before banding.
+
+    Per-trade realized pnl is read from ``actual_return_pct`` (the journal's
+    field name) with a fallback to ``pnl`` for legacy journals. A hit is any
+    closed row with realized pnl > 0.
     """
     path = os.environ.get("LIQ_SWEEP_JOURNAL_PATH")
     if not path:
@@ -156,7 +176,35 @@ def _validate_journal(modes):
         )
     with open(path) as fh:
         journal = json.load(fh)
-    ideas = journal.get("ideas", journal) if isinstance(journal, dict) else journal
+    ideas: list[dict] = []
+    if isinstance(journal, dict):
+        inner = journal.get("ideas")
+        ideas = inner if isinstance(inner, list) else []
+    elif isinstance(journal, list):
+        for entry in journal:
+            if not isinstance(entry, dict):
+                continue
+            inner = entry.get("ideas")
+            if isinstance(inner, list):
+                # Round shape: each list entry is a round carrying its own ideas.
+                ideas.extend(inner)
+            elif isinstance(entry.get("conviction"), int):
+                # Flat-idea shape: each list entry is the idea itself.
+                ideas.append(entry)
+
+    if strategy is None:
+        print(
+            "WARNING: no --strategy filter applied; per-band numbers aggregate "
+            "across all strategies in the journal. Pass --strategy=<name> to "
+            "scope to a single L3 (e.g. strategy-liquidity-sweep)."
+        )
+    else:
+        before = len(ideas)
+        ideas = [i for i in ideas if i.get("strategy") == strategy]
+        print(
+            f"Strategy filter: --strategy={strategy} ({before} -> {len(ideas)} ideas)"
+        )
+
     bands: dict[int, list[dict]] = {k: [] for k in range(1, 6)}
     for idea in ideas:
         conv = idea.get("conviction")
@@ -166,10 +214,21 @@ def _validate_journal(modes):
     for k in range(1, 6):
         rows = bands[k]
         closed = [r for r in rows if r.get("status") == "closed"]
-        hits = sum(1 for r in closed if (r.get("pnl") or 0) > 0)
+
+        def _pnl(r: dict) -> float | None:
+            v = r.get("actual_return_pct")
+            if v is None:
+                v = r.get("pnl")
+            return v if isinstance(v, (int, float)) else None
+
+        hits = sum(1 for r in closed if ((_pnl(r) or 0) > 0))
         rate = hits / len(closed) if closed else 0.0
-        avg = sum(r.get("pnl", 0) or 0 for r in closed) / len(closed) if closed else 0.0
-        print(f"  conv={k}: n={len(rows)} closed={len(closed)} hit_rate={rate:.1%} avg_pnl={avg:+.2f}")
+        avg = (
+            sum((_pnl(r) or 0) for r in closed) / len(closed) if closed else 0.0
+        )
+        print(
+            f"  conv={k}: n={len(rows)} closed={len(closed)} hit_rate={rate:.1%} avg_pnl={avg:+.2f}"
+        )
 
 
 def _parse_argv(argv: list[str]) -> argparse.Namespace:
@@ -190,6 +249,13 @@ def _parse_argv(argv: list[str]) -> argparse.Namespace:
         "at the sample it will be deployed on.",
     )
     p.add_argument("--train-frac", type=float, default=0.7, help="Context fraction kept for --holdout (0.7).")
+    p.add_argument(
+        "--strategy",
+        default=None,
+        help="Optional strategy-name filter for --validate-journal "
+        "(e.g. strategy-liquidity-sweep). The journal mixes strategies; "
+        "without this filter per-band numbers aggregate across all L3s.",
+    )
     return p.parse_args(argv)
 
 
@@ -198,7 +264,7 @@ def main() -> None:
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
 
     if args.validate_journal:
-        _validate_journal(modes)
+        _validate_journal(modes, strategy=args.strategy)
 
     # Build one candle series per ticker (or a single demo series).
     if args.demo:

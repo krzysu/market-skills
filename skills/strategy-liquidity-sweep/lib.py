@@ -27,7 +27,10 @@ def conviction_from_confidences(sweep_conf: int, accum_conf: int, *, mode: str =
       * ``"max_plus_one"`` — ``min(5, max(sweep, accum) + 1)``.
 
     The grid search reports conviction distributions per mode; the actual
-    constant change is deferred until validated against the journal.
+    constant change is deferred until validated against a strategy-filtered
+    journal. A previous attempt to flip the default to ``max_plus_one`` based
+    on aggregated (cross-strategy) journal data was reverted in this commit;
+    see 7eq notes for the corrected blocker.
     """
     if mode == "current":
         raw = sweep_conf + accum_conf // 2
@@ -42,7 +45,18 @@ def conviction_from_confidences(sweep_conf: int, accum_conf: int, *, mode: str =
     return min(5, raw)
 
 
-def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
+def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None,
+            conviction_mode: str | None = None):
+    """Run the liq-sweep L3 emit pipeline.
+
+    Optional ``conviction_mode`` forwards to
+    :func:`conviction_from_confidences` (one of ``"current"``,
+    ``"add"``, ``"add_minus_one"``, ``"max_plus_one"``). When ``None`` (the
+    default) the formula kwarg's own default applies — currently
+    ``"current"``. The kwarg is the lever for backtest-engine formula A/B
+    comparison (bead market-skills-7eq): run ``analyze`` with each mode in
+    turn and compare Sharpe through ``FillSimulator``.
+    """
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
         return {"ideas": [], "narrative": f"insufficient data (need 50+ candles, got {cc})"}
@@ -80,7 +94,9 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         stop = entry - atr * 1.5
         risk = entry - stop
         conviction = conviction_from_confidences(
-            sweep_pattern.get("confidence", 3), accum_pattern.get("confidence", 3)
+            sweep_pattern.get("confidence", 3),
+            accum_pattern.get("confidence", 3),
+            **(dict(mode=conviction_mode) if conviction_mode is not None else {}),
         )
         # BUGS-2026-07-08-3: clamp TP3 at the 5% boundary so low-vol sweeps
         # still produce an idea.
