@@ -111,6 +111,7 @@ class WalkForwardRunner:
         interval: str = "1d",
         period: str = "1y",
         asset_class: str | None = None,
+        **strategy_kwargs: Any,
     ) -> list[IdeaWindow]:
         if hasattr(strategy, "precomputed_ideas"):
             raise NoLookaheadError(strategy)
@@ -126,6 +127,7 @@ class WalkForwardRunner:
                 interval=interval,
                 period=period,
                 asset_class=asset_class,
+                **strategy_kwargs,
             )
             ideas = result.get("ideas", []) if isinstance(result, dict) else []
             # L3 strategies emit at most one idea per call; take the first so

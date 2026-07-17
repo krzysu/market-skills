@@ -117,6 +117,7 @@ bt-1 dry-run output is unchanged when the flags are absent.
 | `--bars=N` | `0` | Use the N most-recent candles (`0` = all fetched). Applied after `--from`/`--to`. |
 | `--period=PERIOD` | `2y` daily+ / `1y` intraday | Lookback period. |
 | `--asset-class=CLASS` | auto | Asset class hint forwarded to the strategy. |
+| `--mode=MODE` | (strategy default) | `(strategy-liquidity-sweep)` Conviction formula mode forwarded to `analyze()` as `conviction_mode=`. One of `current` / `add` / `add_minus_one` / `max_plus_one`. Use to A/B compare Sharpe per formula via FillSimulator. Other strategies ignore the flag. |
 | `--dry-run` | off | Replay and print idea counts; do not trade. |
 | `--demo` | off | Offline demo: synthetic candles, no network. The demo is a downtrend-then-V-recovery so a trend-follow strategy fires at the reversal bar. |
 | `--fill-sim` | off | Run `FillSimulator` over each fired idea; print a trade summary (bt-2). Default off — preserves bt-1 dry-run. |

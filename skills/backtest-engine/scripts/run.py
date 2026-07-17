@@ -169,6 +169,14 @@ def _parse_argv(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--bars", type=int, default=0, help="Use the N most-recent candles (0 = all).")
     parser.add_argument("--period", default=None, help="Lookback period (default: 2y daily+, 1y intraday).")
     parser.add_argument("--asset-class", default=None, help="Asset class hint forwarded to the strategy.")
+    parser.add_argument(
+        "--mode",
+        default=None,
+        choices=[None, "current", "add", "add_minus_one", "max_plus_one"],
+        help="(strategy-liquidity-sweep) Conviction formula mode forwarded to "
+        "analyze() as conviction_mode=. Use to A/B compare Sharpe per formula "
+        "via FillSimulator. None = strategy's default.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Replay and print idea counts; do not trade.")
     parser.add_argument("--demo", action="store_true", help="Offline demo: synthetic candles, no network.")
     parser.add_argument(
@@ -618,6 +626,13 @@ def main() -> None:
         return
 
     runner = bt_lib.WalkForwardRunner()
+    # Strategy-level kwargs: only forward when explicitly set so strategies
+    # that haven't accepted a given kwarg (e.g. strategy-trend-follow has no
+    # ``conviction_mode``) don't get an unexpected keyword error from the
+    # runner forwarding None through to analyze().
+    strategy_kwargs: dict = {}
+    if args.mode is not None:
+        strategy_kwargs["conviction_mode"] = args.mode
     windows = runner.run(
         strategy,
         ticker,
@@ -626,6 +641,7 @@ def main() -> None:
         interval=interval,
         period=period,
         asset_class=args.asset_class,
+        **strategy_kwargs,
     )
     fired = sum(1 for w in windows if w["idea"] is not None)
 
