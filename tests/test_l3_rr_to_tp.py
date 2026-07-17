@@ -168,7 +168,7 @@ class TestStrategyBreakoutConfirm:
     """breakout-confirm ladder: 1.5R / 2.5R / 4R (long and short)."""
 
     def test_long_rr_to_tp(self, _patched_skill_loader):
-        bo_pattern = {"present": True, "confidence": 4, "classification": "BULLISH_BREAKOUT"}
+        bo_pattern = {"present": True, "confidence": 4, "classification": "BULLISH_BREAKOUT", "direction": "bull"}
         sqz_signal = {"signal": "BULLISH"}
         vol = {"volume_ratio": 1.5, "obv_trend": "rising"}
         _patched_skill_loader["market-breakout"] = type(
@@ -188,7 +188,7 @@ class TestStrategyBreakoutConfirm:
             _assert_rr_matches(idea, [1.5, 2.5, 4.0])
 
     def test_short_rr_to_tp(self, _patched_skill_loader):
-        bo_pattern = {"present": True, "confidence": 4, "classification": "BEARISH_BREAKDOWN"}
+        bo_pattern = {"present": True, "confidence": 4, "classification": "BEARISH_BREAKDOWN", "direction": "bear"}
         sqz_signal = {"signal": "BEARISH"}
         vol = {"volume_ratio": 1.5, "obv_trend": "falling"}
         _patched_skill_loader["market-breakout"] = type(

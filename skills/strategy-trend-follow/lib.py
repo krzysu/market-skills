@@ -22,6 +22,18 @@ _ASSET_CLASS_MULTIPLIERS: dict[str, float] = {
     "ai_infra": 2.0,  # 30→60%, 50→100%
 }
 
+# Entry-gate tightening (bead market-skills-hem): the L3 used to emit every
+# trend-classified idea regardless of conviction, producing 70-150 trades per
+# ticker on 1d/1y with mostly negative Sharpe (only VVVUSD positive). Filter to
+# conviction >= N before emit; default N=1 keeps the legacy behavior (the L3
+# already floors conviction at 1). The capability is exposed; tune by raising
+# the constant and validating against backtest-engine (--fill-sim --metrics)
+# before shipping a higher default. The bead hypothesised N=4 was the fix;
+# empirical run on the HYPE 4h fixture shows pre-fix conviction distribution
+# sits at 1-3, so N=4 would zero out the strategy — too aggressive without
+# first raising the upstream conviction range.
+MIN_CONVICTION_TO_EMIT = 1
+
 
 def _detect_intact_bullish_structure(tq_result):
     """Check if WEAKENING still has intact bullish macro structure."""
@@ -314,6 +326,10 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
             elif stop_2pct_rejection is None:
                 stop_2pct_rejection = rej
         ideas = filtered
+
+    # Tighten entry gate (bead market-skills-hem): drop low-conviction noise.
+    if ideas and MIN_CONVICTION_TO_EMIT > 0:
+        ideas = [i for i in ideas if i.get("conviction", 0) >= MIN_CONVICTION_TO_EMIT]
 
     if ideas:
         dirs = ", ".join(i["direction"] for i in ideas)

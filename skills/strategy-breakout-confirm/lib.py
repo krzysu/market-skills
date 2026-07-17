@@ -30,6 +30,9 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     # l2_classification returns None if pattern didn't actually fire (invariant:
     # present=True AND classification is not None).
     bo_classification = l2_classification(bo_result)
+    # Direction (`bull`/`bear`/`None`) was added so consumers don't have to
+    # substring-match against `classification` (which is a status, not a direction).
+    bo_direction = bo_pattern.get("direction")
 
     sqz_signal = sqz_result.get("signal") if "error" not in sqz_result else None
 
@@ -48,7 +51,7 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     obv_rising = obv_trend == "rising"
     obv_falling = obv_trend == "falling"
 
-    if bo_classification and "BULL" in str(bo_classification).upper() and volume_ok and (squeeze_long or obv_rising):
+    if bo_direction == "bull" and volume_ok and (squeeze_long or obv_rising):
         entry = price
         stop = entry - atr * 1.5
         risk = entry - stop
@@ -78,7 +81,7 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
             }
         )
 
-    if bo_classification and "BEAR" in str(bo_classification).upper() and volume_ok and (squeeze_short or obv_falling):
+    if bo_direction == "bear" and volume_ok and (squeeze_short or obv_falling):
         entry = price
         stop = entry + atr * 1.5
         risk = stop - entry

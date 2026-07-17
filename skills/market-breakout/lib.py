@@ -176,6 +176,13 @@ def analyze(candles, interval="1d", period="1y"):
             "confidence": confidence,
             "max_confidence": 5,
             "classification": classification,
+            "direction": (
+                "bull"
+                if (is_bullish_break and not is_bearish_break)
+                else "bear"
+                if (is_bearish_break and not is_bullish_break)
+                else None
+            ),
             "type": "BREAKOUT",
         },
         "signals": signals,

@@ -25,6 +25,8 @@ Usage:
       --tickers BTCUSD,ETHUSD --interval 1d --period 2y --warmup 200
   uv run skills/strategy-liquidity-sweep/scripts/conviction_grid.py \
       --demo --validate-journal   # requires LIQ_SWEEP_JOURNAL_PATH
+  uv run skills/strategy-liquidity-sweep/scripts/conviction_grid.py \
+      --tickers BTCUSD,ETHUSD --interval 1d --period 1y --warmup 200 --holdout
 """
 
 from __future__ import annotations
@@ -89,11 +91,13 @@ def _gate_fires(sweep_mod, accum_mod, vol_mod, prefix, *, interval, period):
     return branch1, branch2, sweep_conf, accum_conf
 
 
-def _fired_convictions_per_mode(candles, *, interval, period, warmup, modes):
+def _fired_convictions_per_mode(candles, *, interval, period, warmup, modes, start_index=0):
     """Walk the series; for each fired bar collect conviction under every mode.
 
-    Returns {mode: [conviction, ...]} for branch1 (formula-driven), plus the
-    count of branch2 (hardcoded conv=2) fires.
+    Bars before ``start_index`` are skipped for tallying (used by ``--holdout``
+    to evaluate only the out-of-sample tail) but remain available as leading
+    context for the L2 detectors. Returns {mode: [conviction, ...]} for
+    branch1 (formula-driven), plus the count of branch2 (hardcoded conv=2) fires.
     """
     from analysis.skill_loader import load_skill as _load
 
@@ -107,7 +111,7 @@ def _fired_convictions_per_mode(candles, *, interval, period, warmup, modes):
     per_mode: dict[str, list[int]] = {m: [] for m in modes}
     branch2_count = 0
     n = len(candles)
-    start = max(warmup, 0)
+    start = max(start_index, warmup, 0)
     for t in range(start, n):
         prefix = candles[: t + 1]
         branch1, branch2, sweep_conf, accum_conf = _gate_fires(
@@ -178,6 +182,14 @@ def _parse_argv(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--bars", type=int, default=0, help="Use the N most-recent candles (0 = all).")
     p.add_argument("--modes", default=",".join(_MODES), help="Comma-separated modes to score.")
     p.add_argument("--validate-journal", action="store_true", help="Also report journal per-band outcomes.")
+    p.add_argument(
+        "--holdout",
+        action="store_true",
+        help="Tally convictions only on the out-of-sample tail of each ticker (last 1-train_frac), "
+        "keeping the leading portion as warmup context. Use this to select a formula WITHOUT peeking "
+        "at the sample it will be deployed on.",
+    )
+    p.add_argument("--train-frac", type=float, default=0.7, help="Context fraction kept for --holdout (0.7).")
     return p.parse_args(argv)
 
 
@@ -188,27 +200,55 @@ def main() -> None:
     if args.validate_journal:
         _validate_journal(modes)
 
+    # Build one candle series per ticker (or a single demo series).
     if args.demo:
-        candles = _make_demo_candles(args.bars if args.bars > 0 else 300)
+        series = [_make_demo_candles(args.bars if args.bars > 0 else 300)]
     elif args.tickers:
         from analysis.data import fetch_ohlc
 
-        candles = []
+        series = []
         for tk in args.tickers.split(","):
             raw = fetch_ohlc(tk, interval=args.interval, period=args.period)
-            candles.extend(raw)
-        if not candles:
+            if not raw:
+                print(f"warn: no candles for {tk}", file=sys.stderr)
+                continue
+            if args.bars > 0:
+                raw = raw[-args.bars :]
+            series.append(raw)
+        if not series:
             print("error: no candles fetched", file=sys.stderr)
             sys.exit(2)
-        if args.bars > 0:
-            candles = candles[-args.bars :]
     else:
         print("error: pass --demo or --tickers", file=sys.stderr)
         sys.exit(2)
 
-    per_mode, branch2 = _fired_convictions_per_mode(
-        candles, interval=args.interval, period=args.period, warmup=args.warmup, modes=modes
-    )
+    if args.holdout:
+        frac = max(0.0, min(1.0, args.train_frac))
+        tag = (
+            f"HOLDOUT (out-of-sample tail: last {int((1 - frac) * 100)}% of each series; "
+            f"leading {int(frac * 100)}% kept as warmup context)"
+        )
+    else:
+        frac = 0.0
+        tag = "FULL SAMPLE (in-sample — use --holdout to validate out-of-sample before selecting a formula)"
+
+
+    def start_of(n: int) -> int:
+        return int(n * frac)
+
+    per_mode: dict[str, list[int]] = {m: [] for m in modes}
+    branch2 = 0
+    for candles in series:
+        si = start_of(len(candles))
+        pm, b2 = _fired_convictions_per_mode(
+            candles, interval=args.interval, period=args.period,
+            warmup=args.warmup, modes=modes, start_index=si,
+        )
+        for m in modes:
+            per_mode[m].extend(pm[m])
+        branch2 += b2
+
+    print(f"# {tag}")
     _print_histograms(per_mode, branch2, modes)
     sys.exit(0)
 
