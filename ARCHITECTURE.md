@@ -124,6 +124,7 @@ provides the skills it calls.
 | Config     | Watchlist JSON                                          | Baskets of tickers + metadata | File on disk                                                                         | **Built** (market-watchlist + run-watchlist)                                                  |
 | Notes      | Notes JSON                                              | Per-pair thesis notes         | File on disk                                                                         | **Built** (market-notes)                                                                      |
 | Monitoring | Watches JSON + Portfolio                                | Alert events                  | Per-watch state                                                                      | **Built** (position-watchdog, manual confirm only)                                            |
+| Backtest  | OHLC candles + L3 ideas                                | Metrics + benchmark          | Stateless (windowed folds)                                                           | **Built** (backtest-engine: FillSimulator + `compute` + `WalkForwardRunner`; analytics-only, never execution) |
 
 ## Key design choices
 

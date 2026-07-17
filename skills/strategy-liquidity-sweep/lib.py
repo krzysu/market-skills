@@ -13,6 +13,35 @@ from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
 
 
+def conviction_from_confidences(sweep_conf: int, accum_conf: int, *, mode: str = "current") -> int:
+    """Compute liq-sweep conviction from the two L2 confidences under ``mode``.
+
+    Pure, pluggable so the calibration grid search (bead market-skills-7eq) can
+    score alternative formulas without editing this module's hot path. ``mode``
+    variants (``"current"`` is capped at 5 and matches the shipped inline
+    formula exactly; the others are capped at 5):
+
+      * ``"current"``      — ``min(5, sweep + accum // 2)`` (shipped default).
+      * ``"add"``          — ``min(5, sweep + accum)``.
+      * ``"add_minus_one"``— ``min(5, sweep + accum - 1)``.
+      * ``"max_plus_one"`` — ``min(5, max(sweep, accum) + 1)``.
+
+    The grid search reports conviction distributions per mode; the actual
+    constant change is deferred until validated against the journal.
+    """
+    if mode == "current":
+        raw = sweep_conf + accum_conf // 2
+    elif mode == "add":
+        raw = sweep_conf + accum_conf
+    elif mode == "add_minus_one":
+        raw = sweep_conf + accum_conf - 1
+    elif mode == "max_plus_one":
+        raw = max(sweep_conf, accum_conf) + 1
+    else:
+        raise ValueError(f"unknown conviction mode: {mode!r}")
+    return min(5, raw)
+
+
 def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
@@ -50,7 +79,9 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
         entry = price
         stop = entry - atr * 1.5
         risk = entry - stop
-        conviction = min(5, sweep_pattern.get("confidence", 3) + accum_pattern.get("confidence", 3) // 2)
+        conviction = conviction_from_confidences(
+            sweep_pattern.get("confidence", 3), accum_pattern.get("confidence", 3)
+        )
         # BUGS-2026-07-08-3: clamp TP3 at the 5% boundary so low-vol sweeps
         # still produce an idea.
         tp3 = max(entry + risk * 4, l3_tp3_dead_zone_floor(entry))

@@ -106,6 +106,14 @@ A detector that sits between L2/L3 output and the LLM narrative layer. Diagnosti
 |-------|---------|
 | [bug-scan](./skills/bug-scan/SKILL.md) | Classifier-anomaly detector: Pattern B shapes (absent-with-subs / silent / ghost), sub-signal weight drift, L3 calibration skew, cross-TF classification contradictions. Reads from `run-all-l2` / `run-all-l3` envelopes, the swing-scan state tracker, or fresh fetch. Cron-friendly (`--from-state` runs offline). |
 
+### Backtesting
+
+Offline strategy evaluator. Fetches candles once, replays L3 strategy ideas through a deterministic `FillSimulator` (worst-case fee + slippage, bar `t` decision → `t+1` open fill), then scores the realized trade list with `compute` (`total_return`, `annualized_return`, `sharpe`, `sortino`, `max_drawdown`, `profit_factor`, `average_trade`) against a buy-and-hold benchmark. Analytics-only — never pairs with execution.
+
+| Skill | Purpose |
+|-------|---------|
+| [backtest-engine](./skills/backtest-engine/SKILL.md) | Replay + scoring engine (`lib.py` is pure, no I/O). `--fill-sim --metrics` prints strategy + benchmark as stable `sort_keys` JSON. `WalkForwardRunner` splits a windowed series into train/test folds. Used by the nightly backtest cron and the liq-sweep conviction calibration grid. |
+
 ### Per-user data
 
 JSON-backed, gitignored, user-specific. Each skill stores its data under `skills/<name>/data/` and ships a checked-in sample under `skills/<name>/examples/`. CLI overrides via `--config` (or env var for `analysis/` accessors).
