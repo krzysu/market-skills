@@ -44,7 +44,7 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
 
 - **Long**: breakout confirmed + volume_ratio > 1.2 + squeeze bullish
 - **Short**: breakdown confirmed + volume_ratio > 1.2 + squeeze bearish
-- **Stop**: below breakout level (long) / above (short) — ~0.5 ATR
+- **Stop**: below breakout level (long) / above (short) — ~1.5 ATR
 - **Targets**: next S/R level, 2x ATR
 
 ## Output

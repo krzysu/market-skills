@@ -47,6 +47,45 @@ Both timeframe flags are validated — bad values exit 2 with a friendly error. 
 - **Stop**: below sweep low (long) / above sweep high (short)
 - **Targets**: 2R, 3R
 
+## Conviction calibration
+
+The conviction number each idea carries comes from
+`conviction_from_confidences(sweep_conf, accum_conf, *, mode)` in `lib.py`
+(see `analyze`, which calls it with `mode="current"`). The shipped `current`
+formula is `min(5, sweep + accum // 2)`. Before changing this constant, a grid
+search scaffold lives at `scripts/conviction_grid.py` (bead `market-skills-7eq`).
+
+```bash
+# Offline smoke test (synthetic candles, no network):
+uv run skills/strategy-liquidity-sweep/scripts/conviction_grid.py --demo
+
+# Real calibration: tally the conviction each formula would emit per fired bar:
+uv run skills/strategy-liquidity-sweep/scripts/conviction_grid.py \
+    --tickers BTCUSD,ETHUSD,SOLUSD,HYPEUSD,TAOUSD,VVVUSD \
+    --interval 1d --period 1y --warmup 200
+
+# Out-of-sample: tally only the last 30% of each series (leading 70% = warmup
+# context) so the formula is selected WITHOUT peeking at the deploy sample:
+uv run skills/strategy-liquidity-sweep/scripts/conviction_grid.py \
+    --tickers BTCUSD,ETHUSD --interval 1d --period 1y --warmup 200 --holdout
+
+# Validate candidate bands against the operator journal. The path comes from
+# LIQ_SWEEP_JOURNAL_PATH; the script raises if unset (no host-path default):
+export LIQ_SWEEP_JOURNAL_PATH=<path-to-journal>/picks.json
+uv run skills/strategy-liquidity-sweep/scripts/conviction_grid.py \
+    --tickers BTCUSD,ETHUSD --holdout --validate-journal
+```
+
+Modes: `current` (`min(5, sweep + accum // 2)`), `add` (`min(5, sweep + accum)`),
+`add_minus_one` (`min(5, sweep + accum - 1)`), `max_plus_one` (`min(5, max(sweep, accum) + 1)`).
+
+The grid only **reports** the per-mode conviction distribution (and, with
+`--validate-journal`, the journal's per-band hit rate) — it never edits the
+shipped formula. Change the constant in `lib.py` only after the grid shows a
+healthy number of `conv >= 3` fires per scan **without** inflating the
+`conv = 2` band (the negative-EV band per journal evidence), and after
+confirming the out-of-sample distribution matches the in-sample one.
+
 ## Output
 
 - `ideas[]` — trade ideas with direction, conviction, entry/stop/target, reasoning
