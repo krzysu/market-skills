@@ -12,6 +12,8 @@ quote only.
 import importlib.util
 import os
 
+import pytest
+
 _SKILLS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "skills",
@@ -133,8 +135,8 @@ def _recovery_event(current=61.5, entry=60.15):
     }
 
 
-def _zone_event(current=505.0, low=500.0, high=510.0, label="T2 limit zone", emoji="🟢"):
-    return {
+def _zone_event(current=505.0, low=500.0, high=510.0, label="T2 limit zone", emoji="🟢", backtest_regime=None):
+    ev = {
         "type": "zone",
         "level_id": f"zone:{low}-{high}:{label}",
         "current_price": current,
@@ -144,6 +146,9 @@ def _zone_event(current=505.0, low=500.0, high=510.0, label="T2 limit zone", emo
         "emoji": emoji,
         "triggered_at": "2026-06-20T12:00:00+00:00",
     }
+    if backtest_regime is not None:
+        ev["backtest_regime"] = backtest_regime
+    return ev
 
 
 def _invalidation_event(current=480.0, below=486.0):
@@ -570,3 +575,59 @@ def test_end_to_end_evaluate_then_format_compact():
     assert len(events) == 1
     out = format_alerts(events, _ctx(**_EUR_CTX_KW, format_style="compact"))
     assert "🔴 STOP BREACHED at €48.00 (stop €49.71). Verify fill manually." in out[0]
+
+
+# --- backtest regime [LOW CONFIDENCE] prefix on zone alerts ---
+
+
+@pytest.mark.parametrize(
+    "fmt_fn,zone_event_kw,expected",
+    [
+        (
+            format_as_compact,
+            {},
+            "🟢 T2 limit zone — <PRIVATE_PERP> @ €505.00.",
+        ),
+        (
+            format_as_default,
+            {},
+            "🟢 ZONE ENTRY — T2 limit zone. <PRIVATE_PERP> now €505.00.",
+        ),
+        (
+            format_as_compact,
+            {"backtest_regime": "positive"},
+            "🟢 T2 limit zone — <PRIVATE_PERP> @ €505.00.",
+        ),
+        (
+            format_as_compact,
+            {"backtest_regime": "negative"},
+            "🟡 [LOW CONFIDENCE] 🟢 T2 limit zone — <PRIVATE_PERP> @ €505.00.",
+        ),
+        (
+            format_as_compact,
+            {"backtest_regime": "unknown"},
+            "🟢 T2 limit zone — <PRIVATE_PERP> @ €505.00.",
+        ),
+        (
+            format_as_default,
+            {"backtest_regime": "negative"},
+            "🟡 [LOW CONFIDENCE] 🟢 ZONE ENTRY — T2 limit zone. <PRIVATE_PERP> now €505.00.",
+        ),
+        (
+            format_as_default,
+            {"backtest_regime": "positive"},
+            "🟢 ZONE ENTRY — T2 limit zone. <PRIVATE_PERP> now €505.00.",
+        ),
+        (
+            format_as_default,
+            {"backtest_regime": "unknown"},
+            "🟢 ZONE ENTRY — T2 limit zone. <PRIVATE_PERP> now €505.00.",
+        ),
+    ],
+)
+def test_zone_regime_prefix(fmt_fn, zone_event_kw, expected):
+    """Zone alert renders with ``🟡 [LOW CONFIDENCE] `` prefix when
+    ``backtest_regime=='negative'``, and without it for other values."""
+    ev = _zone_event(**zone_event_kw)
+    s = fmt_fn(ev, _ctx(**_EUR_CTX_KW, format_style="compact"))
+    assert s == expected, f"got {s!r}"

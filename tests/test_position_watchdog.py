@@ -1024,3 +1024,216 @@ def test_run_process_watch_watch_level_format_style_overrides_default(monkeypatc
     cfg = "/tmp/open-positions.json"
     alerts, _ = _run_mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC), config_path=cfg)
     assert all("\n" not in a for a in alerts)
+
+
+# --- backtest regime state integration (zone-event suppression) ---
+
+
+_REGIME_SAMPLE = {
+    "positions": {
+        "ZEC": {
+            "trend-follow": {
+                "ticker": "ZECEUR",
+                "sharpe_7n": -0.59,
+                "regime_status": "negative",
+                "recommendation": "HOLD — strategy is regime-negative, skip adds",
+            },
+            "mean-reversion": {
+                "ticker": "ZECEUR",
+                "sharpe_7n": 1.2,
+                "regime_status": "positive",
+                "recommendation": "OK — strategy is regime-positive",
+            },
+        },
+        "BTC": {
+            "trend-follow": {
+                "ticker": "BTCUSD",
+                "sharpe_7n": 0.9,
+                "regime_status": "positive",
+                "recommendation": "OK — strategy is regime-positive",
+            },
+        },
+    }
+}
+
+
+class TestBacktestRegime:
+    """Zone events get a ``backtest_regime`` field sourced from the nightly
+    backtest regime state file. Negative regime suppresses automatic
+    zone-entry alert confidence (the formatter prepends ``[LOW CONFIDENCE]``);
+    invalidation/drop/recovery alerts are unaffected (risk-management, not
+    opportunity-adds).
+    """
+
+    def _write_regime_file(self, tmp_path, payload):
+        regime_dir = tmp_path / "backtest-nightly"
+        regime_dir.mkdir(parents=True, exist_ok=True)
+        regime_file = regime_dir / "watchdog_regime_state.json"
+        regime_file.write_text(json.dumps(payload))
+        return regime_file
+
+    def _make_run_mod(self, monkeypatch, tmp_path):
+        mod = _load_run_mod("position_watchdog_regime")
+        monkeypatch.setattr(mod, "DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(mod, "_state_is_stale", lambda _s: False)
+        monkeypatch.setattr(mod, "_run_strategies", lambda *_a, **_kw: {})
+        # _current_price is patched by the caller (or _capture_events_mod)
+        # with the per-test price; no default here to avoid a redundant
+        # double-patch when both run.
+        return mod
+
+    def _zec_zone_watch(self):
+        return {
+            "name": "ZEC",
+            "monitor_provider": "kraken:ZECEUR",
+            "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
+            "levels": [
+                {"type": "zone", "low": 500, "high": 510, "label": "T2 limit zone", "emoji": "🟢"},
+            ],
+        }
+
+    def _capture_events_mod(self, monkeypatch, tmp_path, regime_payload, price=505.0):
+        """Wire a run mod with the regime file pointed at ``regime_payload``
+        and ``format_alerts`` patched to capture the raw events list."""
+        mod = self._make_run_mod(monkeypatch, tmp_path)
+        if regime_payload is not None:
+            regime_file = self._write_regime_file(tmp_path, regime_payload)
+            monkeypatch.setattr(mod, "_REGIME_STATE_PATH", str(regime_file))
+        else:
+            monkeypatch.setattr(mod, "_REGIME_STATE_PATH", str(tmp_path / "nope" / "missing.json"))
+        monkeypatch.setattr(mod, "_current_price", lambda *_a, **_kw: price)
+
+        captured: list[list[dict]] = []
+
+        def _capture(events, _ctx):
+            captured.append(list(events))
+            return ["" for _ in events]
+
+        monkeypatch.setattr(mod, "format_alerts", _capture)
+        return mod, captured
+
+    def test_zone_event_gets_negative_regime(self, monkeypatch, tmp_path):
+        """A zone event on a watch whose strategy is regime-negative gets
+        ``backtest_regime='negative'`` on the event dict."""
+        mod, captured = self._capture_events_mod(monkeypatch, tmp_path, _REGIME_SAMPLE, price=505.0)
+
+        watch = self._zec_zone_watch()
+        mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
+
+        assert captured, "format_alerts was not called"
+        zone_events = [e for e in captured[0] if e["type"] == "zone"]
+        assert zone_events, "expected a zone event to fire"
+        assert all(e.get("backtest_regime") == "negative" for e in zone_events), (
+            f"expected backtest_regime='negative'; got {zone_events!r}"
+        )
+
+    def test_zone_event_gets_positive_regime(self, monkeypatch, tmp_path):
+        """A zone event on a watch whose strategy is regime-positive fires
+        as normal — ``backtest_regime='positive'`` on the event dict."""
+        mod, captured = self._capture_events_mod(monkeypatch, tmp_path, _REGIME_SAMPLE, price=505.0)
+
+        watch = {
+            "name": "BTC",
+            "monitor_provider": "kraken:BTCUSD",
+            "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
+            "levels": [
+                {"type": "zone", "low": 500, "high": 510, "label": "T2 limit zone", "emoji": "🟢"},
+            ],
+        }
+        mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
+
+        assert captured, "format_alerts was not called"
+        zone_events = [e for e in captured[0] if e["type"] == "zone"]
+        assert zone_events, "expected a zone event to fire"
+        assert all(e.get("backtest_regime") == "positive" for e in zone_events), (
+            f"expected backtest_regime='positive'; got {zone_events!r}"
+        )
+
+    def test_zone_event_gets_unknown_regime_when_file_missing(self, monkeypatch, tmp_path):
+        """Missing regime file → ``backtest_regime='unknown'`` on the event dict."""
+        mod, captured = self._capture_events_mod(monkeypatch, tmp_path, regime_payload=None, price=505.0)
+
+        watch = self._zec_zone_watch()
+        mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
+
+        assert captured, "format_alerts was not called"
+        zone_events = [e for e in captured[0] if e["type"] == "zone"]
+        assert zone_events, "expected a zone event to fire"
+        assert all(e.get("backtest_regime") == "unknown" for e in zone_events), (
+            f"expected backtest_regime='unknown'; got {zone_events!r}"
+        )
+
+    def test_invalidation_and_drop_events_do_not_get_backtest_regime(self, monkeypatch, tmp_path):
+        """Invalidation and drop events are risk-management alerts, not
+        opportunity-adds — they must not carry a ``backtest_regime`` field
+        even when the regime file says negative.
+
+        Captures the events that ``_process_watch`` hands to
+        ``format_alerts`` and asserts only zone events got the tag.
+        """
+        mod = self._make_run_mod(monkeypatch, tmp_path)
+        regime_file = self._write_regime_file(tmp_path, _REGIME_SAMPLE)
+        monkeypatch.setattr(mod, "_REGIME_STATE_PATH", str(regime_file))
+
+        # Price 57.0 is inside the zone (55–58) and ~5.2% below the 60.15
+        # entry → both a zone event and a drop event fire on this same tick.
+        # The invalidation level (below 486.0) does NOT fire here; the separate
+        # test_invalidation_event_fires_regardless_of_regime test covers it.
+        watch = {
+            "name": "ZEC",
+            "monitor_provider": "kraken:ZECEUR",
+            "entry_price": 60.15,
+            "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
+            "levels": [
+                {"type": "zone", "low": 55.0, "high": 58.0, "label": "drop zone", "emoji": "🟡"},
+                {"type": "drop", "pct": -5},
+                {"type": "invalidation", "below": 486.0},
+            ],
+        }
+        monkeypatch.setattr(mod, "_current_price", lambda *_a, **_kw: 57.0)
+
+        captured: list[list[dict]] = []
+
+        def _capture_events(events, _ctx):
+            captured.append(list(events))
+            return ["" for _ in events]  # placeholder alerts so format_alerts shape is preserved
+
+        monkeypatch.setattr(mod, "format_alerts", _capture_events)
+        mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
+
+        assert captured, "format_alerts was not called"
+        events = captured[0]
+        zone_events = [e for e in events if e["type"] == "zone"]
+        drop_events = [e for e in events if e["type"] == "drop"]
+        assert zone_events, "expected a zone event to fire"
+        assert drop_events, "expected a drop event to fire"
+        assert all(e.get("backtest_regime") == "negative" for e in zone_events), (
+            f"zone events should be tagged negative; got {zone_events!r}"
+        )
+        for e in drop_events:
+            assert "backtest_regime" not in e, f"drop event must NOT carry backtest_regime (risk-management); got {e!r}"
+
+    def test_invalidation_event_fires_regardless_of_regime(self, monkeypatch, tmp_path):
+        """Invalidation alert fires even when the strategy is regime-negative
+        — risk-management alerts are NOT suppressed."""
+        mod = self._make_run_mod(monkeypatch, tmp_path)
+        regime_file = self._write_regime_file(tmp_path, _REGIME_SAMPLE)
+        monkeypatch.setattr(mod, "_REGIME_STATE_PATH", str(regime_file))
+
+        watch = {
+            "name": "ZEC",
+            "monitor_provider": "kraken:ZECEUR",
+            "signals": [{"strategies": ["trend-follow"], "min_conviction": 3, "cooldown_hours": 0}],
+            "levels": [
+                {"type": "invalidation", "below": 486.0},
+            ],
+        }
+        monkeypatch.setattr(mod, "_current_price", lambda *_a, **_kw: 480.0)
+        alerts, new_state = mod._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC))
+        assert alerts, "invalidation alert must fire even when regime is negative"
+        assert any("INVALIDATION" in a or "INVALIDATED" in a for a in alerts), alerts
+        # No [LOW CONFIDENCE] prefix on invalidation alerts — abstract contract,
+        # not coupled to the specific emoji the formatter happens to use.
+        assert all("LOW CONFIDENCE" not in a for a in alerts), alerts
+        inv_state = new_state["levels"]["alerted_levels"]
+        assert any("invalidation" in k for k in inv_state), "invalidation must be recorded in state"

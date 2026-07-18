@@ -138,7 +138,8 @@ def _format_recovery(event: dict, ctx: dict) -> str:
 def _format_zone(event: dict, ctx: dict) -> str:
     name = _ctx_name(ctx)
     now = _fmt_live(event["current_price"], ctx)
-    return f"{event['emoji']} {event['label']} — {name} @ {now}."
+    prefix = "🟡 [LOW CONFIDENCE] " if event.get("backtest_regime") == "negative" else ""
+    return f"{prefix}{event['emoji']} {event['label']} — {name} @ {now}."
 
 
 def _format_invalidation(event: dict, ctx: dict) -> str:
@@ -196,7 +197,8 @@ def format_as_default_recovery(event: dict, ctx: dict) -> str:
 def format_as_default_zone(event: dict, ctx: dict) -> str:
     name = _ctx_name(ctx)
     now = _fmt_live(event["current_price"], ctx)
-    return f"{event['emoji']} ZONE ENTRY — {event['label']}. {name} now {now}."
+    prefix = "🟡 [LOW CONFIDENCE] " if event.get("backtest_regime") == "negative" else ""
+    return f"{prefix}{event['emoji']} ZONE ENTRY — {event['label']}. {name} now {now}."
 
 
 def format_as_default_invalidation(event: dict, ctx: dict) -> str:
