@@ -7,9 +7,12 @@ from analysis.contracts import (
     l2_classification,
     validate_l3_tp_ladder,
 )
+from analysis.conviction_thresholds import lookup_min_conviction
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
+
+_STRATEGY_NAME = "strategy-breakout-confirm"
 
 
 def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
@@ -126,6 +129,14 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
             elif stop_2pct_rejection is None:
                 stop_2pct_rejection = rej
         ideas = filtered
+
+    # Tighten entry gate (bead market-skills-6th, market-skills-oin):
+    # drop low-conviction noise. Threshold comes from the per-(ticker,
+    # interval) table in `analysis.conviction_thresholds`; ``1`` is the
+    # no-op floor and any ``>= 2`` value drops low-conviction ideas.
+    _min_conv = lookup_min_conviction(_STRATEGY_NAME, ticker, interval)
+    if ideas and _min_conv > 1:
+        ideas = [i for i in ideas if i.get("conviction", 0) >= _min_conv]
 
     if ideas:
         narrative = f"Breakout momentum setup: {', '.join(i['direction'] for i in ideas)}."
