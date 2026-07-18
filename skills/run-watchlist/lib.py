@@ -11,9 +11,85 @@ independently, just merged per ticker.
 from __future__ import annotations
 
 import inspect
+import json
+from collections.abc import Callable
 
 from analysis.registry import l2_skills, l3_strategies
 from analysis.skill_loader import load_skill
+
+_SKIP_REASON = "excluded: all strategies have negative Sharpe on this ticker"
+
+
+def _load_skip_tickers(path: str | None) -> tuple[list[str], str | None]:
+    """Read ``skip_tickers`` and ``reason`` from a skip-list JSON file.
+
+    Silently returns ``([], None)`` on any failure (missing file, invalid
+    JSON, missing key, wrong shape) so a skip-list issue never aborts the
+    scan.
+    """
+    if not path:
+        return [], None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return [], None
+    if not isinstance(data, dict):
+        return [], None
+    skip = data.get("skip_tickers", [])
+    if not isinstance(skip, list):
+        return [], None
+    reason_raw = data.get("reason")
+    reason = reason_raw if isinstance(reason_raw, str) and reason_raw.strip() else None
+    return [t for t in skip if isinstance(t, str)], reason
+
+
+def filter_skip_list(
+    tickers: list[str],
+    skip_tickers: list[str],
+    wl_path: str | None,
+    *,
+    metadata_for: Callable[[str, str | None], dict] | None = None,
+    reason: str | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    """Apply skip-list filtering with a watchlist override.
+
+    A ticker is excluded when it appears in ``skip_tickers`` AND its
+    watchlist metadata does not put it at tier 1 or tier 2 (tier-1/2
+    tickers are always scanned — watchlist wins).
+
+    ``reason`` overrides the default skip message; falls back to
+    ``_SKIP_REASON`` when ``None``.
+
+    Returns ``(kept_tickers, skipped)`` where ``skipped`` maps
+    ``ticker -> reason``.
+    """
+    if not skip_tickers:
+        return list(tickers), {}
+
+    skip_set = set(skip_tickers)
+    if metadata_for is None:
+        from analysis.watchlist import metadata_for as _default_metadata_for
+
+        metadata_for = _default_metadata_for
+
+    use_reason = reason if reason else _SKIP_REASON
+    kept: list[str] = []
+    skipped: dict[str, str] = {}
+    for t in tickers:
+        if t in skip_set:
+            try:
+                meta = metadata_for(t, wl_path) or {}
+            except Exception:
+                meta = {}
+            tier = meta.get("tier")
+            if tier in (1, 2):
+                kept.append(t)
+            else:
+                skipped[t] = use_reason
+        else:
+            kept.append(t)
+    return kept, skipped
 
 
 def _strategy_accepts(mod, param_name: str) -> bool:
