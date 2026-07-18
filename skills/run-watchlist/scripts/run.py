@@ -76,6 +76,10 @@ def main():
     p.add_argument("--period", default="1y", help="Candle period (default: 1y)")
     p.add_argument("--json", action="store_true", help="Emit JSON to stdout")
     p.add_argument("--source", help="Data source override (e.g. yfinance, kraken)")
+    p.add_argument(
+        "--skip-list",
+        help="Path to a skip-list JSON ({'skip_tickers': [...]}) — tickers with negative Sharpe are excluded unless tier 1/2.",
+    )
     args = p.parse_args()
 
     if args.l2_only and args.l3_only:
@@ -101,6 +105,9 @@ def main():
 
     lib = load_lib_for_script(__file__)
 
+    skip_tickers, skip_reason = lib._load_skip_tickers(args.skip_list)
+    tickers, skipped = lib.filter_skip_list(tickers, skip_tickers, wl_path, reason=skip_reason)
+
     if args.json:
         out: dict = {
             "scope": scope_label,
@@ -108,6 +115,8 @@ def main():
             "period": args.period,
             "tickers": {},
         }
+        if skipped:
+            out["skipped_tickers"] = skipped
         for t in tickers:
             candles = fetch_ohlc(t, interval=args.interval, period=args.period, source=args.source)
             if not candles:
@@ -125,7 +134,10 @@ def main():
                 interval=args.interval,
                 period=args.period,
             )
-        out["summary"] = f"{scope_label}: {len(tickers)} ticker(s)"
+        if skipped:
+            out["summary"] = f"{scope_label}: {len(tickers)} ticker(s) ({len(skipped)} skipped from backtest skip list)"
+        else:
+            out["summary"] = f"{scope_label}: {len(tickers)} ticker(s)"
         cache_run_result(__file__, out)
         emit_json(out)
         return
@@ -133,6 +145,8 @@ def main():
     print_header(f"RUN WATCHLIST ({scope_label})")
     print(f"  {len(tickers)} ticker(s) | interval={args.interval} period={args.period}")
     print(f"  include_l2={include_l2} include_l3={include_l3} include_notes={include_notes}")
+    if skipped:
+        print(f"  skipped {len(skipped)} ticker(s) from skip list: {', '.join(skipped)}")
     print()
     for t in tickers:
         candles = fetch_ohlc(t, interval=args.interval, period=args.period, source=args.source)
