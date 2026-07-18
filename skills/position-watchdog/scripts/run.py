@@ -34,10 +34,33 @@ from analysis.skill_loader import load_skill
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.dirname(HERE)
+
+
+def _resolve_repo_root() -> str:
+    """Walk up from ``SKILL_DIR`` until we find the repo root (has ``pyproject.toml``)."""
+    path = SKILL_DIR
+    for _ in range(10):
+        if os.path.exists(os.path.join(path, "pyproject.toml")):
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+    # Fallback: two levels up from SKILL_DIR works for standard layouts
+    return os.path.dirname(os.path.dirname(SKILL_DIR))
+
+
+REPO_ROOT = _resolve_repo_root()
 DEFAULT_CONFIG = os.path.join(SKILL_DIR, "data", "watches.json")
 DEFAULT_STATE_DIR = os.path.join(SKILL_DIR, "data")
 STALE_STATE_SECONDS = 24 * 3600
 DATA_DIR = ""
+
+# Nightly backtest regime state — regenerated at 02:00 CEST by the backtest
+# pipeline cron. Used to suppress automatic zone-entry alerts when the
+# position's assigned strategy has negative backtest Sharpe. Missing file
+# (first run, cron missed a tick) is treated as "unknown" — no suppression.
+_REGIME_STATE_PATH = os.path.join(REPO_ROOT, "data", "backtest-nightly", "watchdog_regime_state.json")
 
 # Sustained-failure window for the all-watches FATAL trip. A single tick of
 # all-fetches-failed is treated as a blip and logged but not fatal; the FATAL
@@ -193,6 +216,86 @@ def _bare_in_watchlist(bare: str, known_tickers: set[str], watchlist_path: str |
 def _bare_ticker(provider_ticker: str) -> str:
     """Extract the bare ticker from a `provider:ticker` string."""
     return provider_ticker.split(":", 1)[1] if ":" in provider_ticker else provider_ticker
+
+
+def _load_regime_state() -> dict | None:
+    """Load the nightly backtest regime state file or return None on any failure.
+
+    The file is regenerated nightly at 02:00 CEST by the backtest pipeline
+    cron. Missing file (first run, cron missed a tick) is treated as
+    "unknown" by callers — no suppression, no warning, just neutral.
+    """
+    if not os.path.exists(_REGIME_STATE_PATH):
+        return None
+    try:
+        with open(_REGIME_STATE_PATH) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _regime_status_for_watch(watch: dict, regime_data: dict | None) -> str:
+    """Resolve a watch's backtest regime status: "positive" | "negative" | "unknown".
+
+    Returns ``"negative"`` if ANY of the watch's strategies has
+    ``regime_status == "negative"`` in the regime file, ``"positive"`` if
+    all found strategies are positive, ``"unknown"`` if the file is
+    missing, the watch has no signals, or no strategies match.
+
+    The regime file may key positions by either the full monitor ticker
+    (e.g. ``"ZECEUR"`` — what ``_bare_ticker()`` returns) or the
+    quote-stripped bare ticker (e.g. ``"ZEC"``). Both forms are tried.
+    """
+    if not regime_data:
+        return "unknown"
+
+    monitor = watch.get("monitor_provider")
+    if not monitor:
+        return "unknown"
+
+    bare = _bare_ticker(monitor)
+    positions = regime_data.get("positions", {}) or {}
+
+    candidate_keys = [bare]
+    quote = _primary_quote(monitor)
+    if quote and bare.endswith(quote) and len(bare) > len(quote):
+        stripped = bare[: -len(quote)]
+        if stripped and stripped not in candidate_keys:
+            candidate_keys.append(stripped)
+
+    pos_entry: dict | None = None
+    for key in candidate_keys:
+        entry = positions.get(key)
+        if isinstance(entry, dict):
+            pos_entry = entry
+            break
+
+    if pos_entry is None:
+        return "unknown"
+
+    strategies: list[str] = []
+    for sg in watch.get("signals", []) or []:
+        strategies.extend(sg.get("strategies", []) or [])
+    strategies = list(dict.fromkeys(strategies))
+
+    if not strategies:
+        return "unknown"
+
+    found_statuses: list[str] = []
+    for strat in strategies:
+        strat_entry = pos_entry.get(strat)
+        if isinstance(strat_entry, dict):
+            status = strat_entry.get("regime_status")
+            if isinstance(status, str):
+                found_statuses.append(status)
+
+    if not found_statuses:
+        return "unknown"
+    if any(s == "negative" for s in found_statuses):
+        return "negative"
+    if all(s == "positive" for s in found_statuses):
+        return "positive"
+    return "unknown"
 
 
 def _current_price(provider_ticker: str, *, interval: str = "4h", period: str = "6mo") -> float | None:
@@ -458,6 +561,8 @@ def _process_watch(
     dry_run: bool,
     now: dt.datetime,
     config_path: str | None = None,
+    *,
+    regime_data: dict | None = None,
 ) -> tuple[list[str], dict | None]:
     """Process a single watch. Returns (alerts, new_state or None on fetch failure).
 
@@ -521,6 +626,13 @@ def _process_watch(
         )
         if stale:
             level_events = []
+        zone_events = [ev for ev in level_events if ev.get("type") == "zone"]
+        if zone_events:
+            if regime_data is None:
+                regime_data = _load_regime_state()
+            regime_status = _regime_status_for_watch(watch, regime_data)
+            for ev in zone_events:
+                ev["backtest_regime"] = regime_status
         events.extend(level_events)
         levels_state = new_levels_state
 
@@ -650,6 +762,8 @@ def main() -> int:
             print(f"[WARN] could not load watchlist {args.watchlist}: {e}", file=sys.stderr)
             known_tickers = None
 
+    regime_data = _load_regime_state()
+
     for watch in watches:
         if not watch.get("enabled"):
             continue
@@ -670,7 +784,7 @@ def main() -> int:
         if args.formatter and not watch.get("format_style"):
             watch = {**watch, "format_style": args.formatter}
 
-        alerts, new_state = _process_watch(watch, args.dry_run, now, config_path=args.config)
+        alerts, new_state = _process_watch(watch, args.dry_run, now, config_path=args.config, regime_data=regime_data)
         if new_state is None and not args.dry_run:
             _record_fetch_outcome(watch["name"], fetch_failed=True)
             fetch_failures += 1
