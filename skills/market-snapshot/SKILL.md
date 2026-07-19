@@ -5,7 +5,7 @@ version: 0.1.0
 metadata:
   hermes:
     tags: [market, snapshot, sanity, supertrend, rsi, alignment]
-    category: markets
+    category: market
 compatibility: "Requires Python 3.12+ and uv. Sources: same providers as other market-skills."
 ---
 

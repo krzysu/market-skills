@@ -12,6 +12,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Session-start cross-skill dashboard. Reads the per-skill state caches written by phase 3 home views and composes a single AXI envelope. Designed to be the LLM's first call at session start.
 
+## When NOT to use
+
+- As a live analysis tool — it only reads cached state from other skills; if any source shows "no cache"/stale, run that source skill (`market-macro`, `run-watchlist`, `l3-conviction-scan`, etc.) before relying on the dashboard.
+- For trade decisions — it is a dashboard/overview, not a signal. Drill into the underlying skill for the actionable read.
+- As a fresh-data source — it does no I/O at runtime; use `--refresh` only for the macro TTL, other sources still come from disk.
+
 ## Quick Start
 
 ```bash

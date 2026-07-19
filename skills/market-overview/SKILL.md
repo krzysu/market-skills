@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 High-level market scanner that runs all indicators on a watchlist of tickers and produces a unified, ranked overview with per-ticker actions.
 
+## When NOT to use
+
+- As a trade signal — it is a screening/landscape tool; the BUY/SELL/WATCH action is a score, not an entry plan. Verify individual setups with `market-trend-quality` and an L3 strategy (`run-all-l3`).
+- For deep per-ticker analysis — use the single skills (`market-trend`, `market-squeeze`, `market-rsi`) or `run-watchlist` for L2 + L3 + notes.
+- When you need conviction-ranked trade ideas — `l3-conviction-scan` / `run-all-l3` are the right layers.
+
 ## Quick Start
 
 ```bash

@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L2 pattern detection skill that composes L1 indicators to determine whether smart money is accumulating a position.
 
+## When NOT to use
+
+- This is pattern detection, not a trade idea — feed a fired pattern into an L3 strategy (`strategy-accumulation-swing`) or `run-all-l3` before acting.
+- Do not trade a `SPRING`/`REACCUMULATION` signal as a standalone entry — confirm trend quality via `market-trend-quality` so you are not catching a falling knife.
+- Pattern is unreliable on choppy/low-volume tape where sub-signals fire sporadically; require a clean trend context (see `market-trend`) before treating it as actionable.
+
 ## Quick Start
 
 ```bash

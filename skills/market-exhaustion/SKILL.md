@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L2 pattern detection skill that composes L1 indicators to determine whether a price move is approaching exhaustion.
 
+## When NOT to use
+
+- This is pattern detection, not a trade idea — feed a fired pattern into `strategy-exhaustion-fade` or `run-all-l3` before acting.
+- Do not fade an exhaustion signal while the underlying trend is still strong (e.g. a `BLOWOFF_TOP` in a structural uptrend) — exhaustion can extend far before reversing. Confirm with `market-trend` and `market-s-r` levels.
+- An exhaustion classification is a contrarian hint, not confirmation; require a clear S/R level and reversal structure before treating it as actionable.
+
 ## Quick Start
 
 ```bash

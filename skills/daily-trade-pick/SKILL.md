@@ -5,7 +5,7 @@ version: 0.7.0
 metadata:
   hermes:
     tags: [market, scanner, pick, journal, outcome-tracking]
-    category: markets
+    category: market
 compatibility: "Writes to the path in $MARKET_SKILLS_DAILY_TRADE_PICK_PATH. Reads market-skills run-all-l3 output + BTC 4h + ETH 4h + F&G. Reads current prices via the `kraken` CLI."
 ---
 

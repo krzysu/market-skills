@@ -15,6 +15,12 @@ Cross-asset macro context. One call → one `RegimeSignal` (see
 `analysis.contracts.RegimeSignal`). **Ticker-agnostic** — there is
 no positional ticker; the same signal covers the whole portfolio.
 
+## When NOT to use
+
+- For a single-ticker trade decision — the signal is ticker-agnostic portfolio context, not a directional call on one asset. Use market-* / strategy-* skills for the ticker.
+- As a standalone trade signal — it is narrate-only by design; there is no `conviction_modifier()` or directional filter. Treat the regime as background, not a trigger.
+- When you need position-level risk — that is `risk-engine`; market-macro only sets the mood.
+
 ## Quick Start
 
 ```bash

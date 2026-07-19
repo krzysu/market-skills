@@ -17,6 +17,12 @@ this skill *before* asking the user to confirm an order. The verdict is
 on context the policies didn't see, but the human-in-the-loop at
 `execution-kraken-spot` is the actual safety layer.
 
+## When NOT to use
+
+- As a confirmation gate — the verdict is advisory (APPROVED/CONCERN/SCALE/REJECT), never a hard block. Do not tell the user "risk approved" as if execution is safe; the execution skill confirm is the real safety layer.
+- Without a built Intent — risk-engine vets an `Intent` (or direct flags); call it after an L3 strategy produced the idea, not before.
+- For analysis/sizing discovery — it only vets a proposed trade against policy caps; use market-* / strategy-* for finding the trade.
+
 ## Why advisory not gate
 
 The LLM is the agent brain (see ARCHITECTURE.md "Agent brain"). A

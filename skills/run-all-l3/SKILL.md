@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Fetches candles once per ticker, then runs all L3 strategy skills on the cached data. Use this from batch runners or agents that need to evaluate trade ideas across all strategies.
 
+## When NOT to use
+
+- For a deep single-ticker dive — call the individual L3 strategy (`strategy-trend-follow`, etc.) directly for focused output and flags.
+- To execute — run-all-l3 is analytics-only and never places orders. Vet the idea with `risk-engine` and hand off to `execution-kraken-*` with explicit user approval.
+- When you want a conviction-ranked view across baskets — `l3-conviction-scan` is the ranking layer on top of this.
+
 ## Why
 
 Same reasoning as `run-all-l2/` — each L3 script's `run.py` calls `fetch_ohlc()` independently. This runner reduces N×6 fetches to N fetches.

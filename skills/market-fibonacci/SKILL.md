@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Fibonacci retracement and extension analysis based on the most recent significant swing high and swing low.
 
+## When NOT to use
+
+- This is a context/level skill, not a directional signal — it returns zones, never a buy/sell call. Pair with a directional read (`market-trend`, `market-s-r`) before acting.
+- It needs a clear recent swing high/low; on choppy or range-less series the levels are arbitrary. Requires 25+ candles minimum.
+- Do not enter purely off a fib level — confirm confluence with `market-s-r` (touches >= 3) and a trend context.
+
 ## Quick Start
 
 ```bash

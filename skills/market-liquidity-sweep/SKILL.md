@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L2 pattern detection skill that composes L1 indicators to detect liquidity sweeps and fakeouts.
 
+## When NOT to use
+
+- This is pattern detection, not a trade idea — feed a fired pattern into `strategy-liquidity-sweep` or `run-all-l3` before acting.
+- A sweep is a liquidity event, not a reversal — do not enter long on every support sweep; require accumulation confirmation (`market-accumulation`) and volume reversal (`market-volume`).
+- On a trending tape a sweep can be a continuation retest rather than a fakeout; confirm the broader structure with `market-trend` first.
+
 ## Quick Start
 
 ```bash

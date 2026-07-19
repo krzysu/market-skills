@@ -5,7 +5,7 @@ version: 0.1.0
 metadata:
   hermes:
     tags: [market, anomaly, classifier, bug, drift, scan]
-    category: markets
+    category: market
 compatibility: "Requires Python 3.12+ and uv. Reads from analysis.contracts helpers (l2_fired, l2_classification). `--from-state` runs offline against a pre-computed state file."
 ---
 

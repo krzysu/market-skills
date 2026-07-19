@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Fetches candles once per ticker, then runs all L2 pattern skills on the cached data. Use this from batch runners or agents that need to evaluate multiple tickers across all L2s.
 
+## When NOT to use
+
+- For a deep single-ticker dive — call the individual L2 skill (`market-breakout`, `market-accumulation`, etc.) directly for focused output and flags.
+- As a trade signal — it returns pattern detections (present/classification), not trade ideas. Feed fired patterns into `run-all-l3` / an L3 strategy before acting.
+- When you want trade ideas directly — use `run-all-l3` (or `l3-conviction-scan` for ranking); run-all-l2 is the L2 layer only.
+
 ## Why
 
 Each L2 script's `run.py` calls `fetch_ohlc()` independently. A morning brief for 3 tickers × 5 L2s = 15 fetches. This runner reduces that to 3 fetches (one per ticker).

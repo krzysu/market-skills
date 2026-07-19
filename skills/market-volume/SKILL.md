@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Volume analysis skill: measures current volume relative to its 20-period average, tracks On-Balance Volume (OBV) trend, and classifies the volume regime.
 
+## When NOT to use
+
+- This is a context/confirmation skill, not a directional signal — volume confirms or rejects price moves, it never says which way to trade. Pair with `market-trend` for direction.
+- A `CLIMAX` reading can mean exhaustion (trend ending), not continuation — do not read high volume as bullish by itself.
+- Use it to confirm a move (volume supports the trend), not as a standalone entry trigger.
+
 ## Quick Start
 
 ```bash

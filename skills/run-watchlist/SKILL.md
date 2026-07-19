@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 The bulk-analysis runner. Driven by [`market-watchlist`](../market-watchlist/) — pass a basket name, a `--tickers` list, or omit for everything.
 
+## When NOT to use
+
+- As a trade signal — it aggregates L2 + L3 + notes into a view; the agent brain still decides and must vet via `risk-engine` + `execution-kraken-*` before acting.
+- For a single-skill deep dive — call the individual market-* / strategy-* skill directly for focused output and flags.
+- To execute — run-watchlist is analytics-only, never places orders.
+
 Fetches candles **once per ticker**, then runs:
 
 - All 5 L2 pattern skills (`market-accumulation`, `market-breakout`, `market-exhaustion`, `market-liquidity-sweep`, `market-trend-quality`)

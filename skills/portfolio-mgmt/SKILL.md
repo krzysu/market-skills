@@ -15,6 +15,12 @@ Track trades, holdings, and P&L across any number of user-defined portfolios. SQ
 
 > **LLM agent brain**: for the partial-fill recording workflow (when an `execution-kraken-*` `FillConfirmation` returns `status="partial"` and you need to write a row manually because auto-wiring was skipped), see [`LLM-ORCHESTRATION.md`](../../LLM-ORCHESTRATION.md) §3.
 
+## When NOT to use
+
+- For analysis or trade signals — this is a record-keeping system (cost basis, P&L, positions), not an indicator. Use market-* / strategy-* skills for the read.
+- For live execution — placing orders is `execution-kraken-spot` / `execution-kraken-perps`; this skill only logs fills after the fact.
+- To skip the AUTO-LOG: every confirmed trade MUST be written here via `add` so FIFO cost basis stays correct; do not treat it as optional bookkeeping.
+
 ## Quick Start
 
 ```bash

@@ -14,6 +14,12 @@ compatibility: "Requires Python 3.12+ and uv; network access to multpl.com and Y
 SP500 fair-value context via Shiller CAPE z-score. The single asset
 class with academically validated valuation framing.
 
+## When NOT to use
+
+- For a single-ticker trade decision — CAPE is SP500-only cross-asset context, not a directional call on an individual asset. Use market-* / strategy-* skills for the ticker.
+- As a standalone trade signal — it is narrate-only by design; no L3 strategy hard-vetoes on CAPE (at most a soft `veto_reasons` tag). Treat the regime as background, not a trigger.
+- For non-SP500 valuation (BTC/oil/DXY) — deliberately out of scope; there is no defensible model shipped.
+
 ## Quick Start
 
 ```bash

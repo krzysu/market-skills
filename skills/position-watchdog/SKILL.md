@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Two kinds of watchdogs: **position protection** (downside alerts for open positions) and **entry zone** (buy-zone monitoring). Both run as `no_agent` ticks — zero LLM tokens per evaluation, only print on state changes.
 
+## When NOT to use
+
+- As an execution tool — the watchdog monitors and alerts only; it NEVER places, closes, or modifies orders. Hand execution to `execution-kraken-*`.
+- For analysis or new setup generation — it evaluates configured `watches.json` levels/signals; to find setups use `run-watchlist` / `run-all-l3`.
+- Do not treat a "TP HIT" label as profitable without checking cost basis — the label fires on price level, not on P&L. Always verify before acting.
+
 ### Position protection watchdog
 
 Monitors open positions with silent hourly checks, fires only on threshold crossings:

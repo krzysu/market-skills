@@ -15,6 +15,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Comprehensive trend structure analysis combining EMA alignment with swing point pattern recognition.
 
+## When NOT to use
+
+- This is a single indicator (L1), not a trade idea — pair it with `market-trend-quality` (the L2 health lens) or an L3 strategy before acting.
+- Swing structure lags price by nature — use it for confirmation, not timing. Do not enter on a single EMA cross.
+- Needs 220+ daily candles for EMA(200); with shorter history the long-term read is incomplete (falls back with a warning).
+
 ## Layering
 
 Two trend skills do overlapping but distinct work. Use them in this order:

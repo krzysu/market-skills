@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L2 pattern detection skill that composes L1 indicators to determine whether a breakout is genuine or likely to fail.
 
+## When NOT to use
+
+- This is pattern detection, not a trade idea — feed a fired pattern into `strategy-breakout-confirm` or `run-all-l3` before acting.
+- In low-volume or choppy tape a `FRESH`/`CONFIRMED` breakout is a frequent fakeout — require volume confirmation (`market-volume`) and squeeze release (`market-squeeze`) before trusting it.
+- Do not treat `STALE` or `FAILED` classifications as reversal entries; they only say the breakout did not hold.
+
 ## Flags
 
 | Flag | Default | Notes |

@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L3 momentum strategy that only enters breakouts when volume confirms and squeeze is firing. Filters out fakeouts.
 
+## When NOT to use
+
+- Without a mandatory `risk-engine` vet before execution — this skill emits ideas, not orders. Always vet the Intent and get explicit user approval.
+- In low-volume or choppy tape — even with its volume/squeeze filter, breakouts fake out often; do not over-trust a single confirmed breakout without trend context.
+- For a single-indicator read — it composes `market-breakout` + `market-volume` + `market-squeeze`; call those directly if you only want the pattern.
+
 ## Quick Start
 
 ```bash

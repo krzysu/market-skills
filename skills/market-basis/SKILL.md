@@ -1,6 +1,11 @@
 ---
 name: market-basis
 description: "Perpetual swap market structure: funding rate, spot-perp basis, and squeeze/RSI on both sides. Use to gauge positioning cost, directional bias in perp markets, and spot-perp divergence. Requires --source ccxt or ccxt:exchange."
+version: 0.1.0
+metadata:
+  hermes:
+    tags: [market, perps, basis, funding, structure, venue-state]
+    category: market
 compatibility: "Requires Python 3.12+ and uv"
 ---
 
@@ -9,6 +14,12 @@ compatibility: "Requires Python 3.12+ and uv"
 Analyzes perpetual swap market structure for any ticker on supported CCXT exchanges.
 Reports funding rate (current and historical average), spot-perp basis, and compares
 squeeze momentum and RSI between spot and perpetual markets.
+
+## When NOT to use
+
+- For price-direction calls — this skill only reports perp/venue state (funding, basis, spot-vs-perp divergence), not which way to trade. Use the market-* trend indicators for direction.
+- For spot execution or spot analysis — it requires `--source ccxt` and a perp ticker (`BTC/USDT`); without a `/` it is treated as spot and yields no funding/basis.
+- As a standalone trade signal — pair the positioning read with `market-trend-quality` / `market-squeeze` for directional context.
 
 ## Quick Start
 

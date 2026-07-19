@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Computes the Relative Strength Index (RSI) using Wilder smoothing on daily OHLC from Yahoo Finance.
 
+## When NOT to use
+
+- This is a single oscillator, not a trade idea — pair it with trend context (`market-ema`, `market-trend-quality`) before acting.
+- RSI can pin overbought in strong uptrends and oversold in strong downtrends — do not buy blindly near 30 or sell near 70 without a trend read; combine with `market-trend`.
+- Do not use a single RSI extreme as an entry trigger; require confluence (S/R, volume, trend alignment) via an L2/L3.
+
 ## Quick Start
 
 ```bash

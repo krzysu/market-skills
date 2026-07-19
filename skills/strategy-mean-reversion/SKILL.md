@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L3 strategy that fades extreme moves by entering when price reaches a key S/R level and RSI confirms exhaustion.
 
+## When NOT to use
+
+- Without a mandatory `risk-engine` vet before execution — this skill emits ideas, not orders. Always vet the Intent and get explicit user approval.
+- In a strong trend — mean-reversion fails hardest when price keeps running (e.g. RSI pinned overbought in an uptrend). Confirm a real range/low-vol regime (`market-volatility`) first.
+- For a single-indicator read — it composes `market-rsi` + `market-s-r` + `market-volatility`; call those directly if you only want the levels/oscillator.
+
 ## Quick Start
 
 ```bash

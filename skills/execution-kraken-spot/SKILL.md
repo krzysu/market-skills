@@ -22,6 +22,12 @@ pluggable interface.
 > does not auto-execute. Always ask the user to confirm before invoking
 > `submit` without `--yes`, and prefer `--dry-run` first.
 
+## When NOT to use
+
+- For live money without explicit user approval — the interactive `y/N` confirm is the safety layer; never invoke `submit` (or pass `--yes`) unless the user has explicitly pre-approved the exact order. This skill places real orders on Kraken.
+- For perps orders — use `execution-kraken-perps` (different venue subcommand and Intent fields).
+- For analysis, sizing, or risk vetting — those are `risk-engine` and the market-* / strategy-* skills. This skill only executes an Intent handed to it.
+
 ## Quick Start
 
 ```bash

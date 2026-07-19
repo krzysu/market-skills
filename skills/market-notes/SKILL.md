@@ -15,6 +15,12 @@ Per-pair free-form thesis notes with timestamps and optional expiration. The sim
 
 Notes are personal context — the data file is **gitignored** and lives at `skills/market-notes/data/notes.json`. Shipped example: `skills/market-notes/examples/notes.example.json`.
 
+## When NOT to use
+
+- For analysis or signals — this skill only stores and retrieves free-form context; it never computes a verdict. Use market-* / strategy-* skills for the actual read.
+- To hold live prices, position sizes, or P&L — those belong in `position-watchdog` / `portfolio-mgmt`. Notes go stale fast.
+- Do not let a stored note override a fresh L3/risk verdict silently; reconcile them together at decision time.
+
 ## Quick Start
 
 ```bash
