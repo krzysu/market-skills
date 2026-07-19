@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Volatility analysis skill: measures annualized realized volatility over 7-day and 30-day windows, ranks it historically, and classifies the current regime.
 
+## When NOT to use
+
+- This is a context/sizing input, not a directional signal — it returns a regime (LOW/HIGH/EXTREME), never a buy/sell call. Pair with a directional read before acting.
+- Use it to size stops and position (wide stops in EXTREME, tight in LOW), not to pick direction.
+- For volatility compression/expansion cycle timing, pair with `market-squeeze`; this skill only ranks the current regime.
+
 ## Quick Start
 
 ```bash

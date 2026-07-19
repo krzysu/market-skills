@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L3 strategy that enters with the dominant trend at pullbacks or breakouts. Composes L2 verdicts from trend-quality and breakout detection.
 
+## When NOT to use
+
+- Without a mandatory `risk-engine` vet before execution — this skill emits ideas, not orders. Always vet the Intent and get explicit user approval.
+- In ranges or choppy tape — trend-follow fails when there is no trend; require `market-trend-quality` HEALTHY_* structure before trusting a signal.
+- For a single-indicator read — it composes `market-trend-quality` + `market-breakout`; call those directly if you only want the trend health, not the trade idea.
+
 ## Quick Start
 
 ```bash

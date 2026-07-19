@@ -5,7 +5,7 @@ version: 0.2.0
 metadata:
   hermes:
     tags: [movers, gainers, losers, trending, categories, coingecko, kraken, brief, discovery]
-    category: briefing
+    category: market
 compatibility: "Requires Python 3.12+, uv, network egress to api.coingecko.com, and the `kraken` CLI on PATH for the tradability cross-reference (graceful degrade when absent)."
 ---
 
@@ -20,6 +20,12 @@ venue:
 - **Trending** — top N from `/search/trending` (separate quota tier).
 - **Categories** — top N from `/coins/categories` ordered by 24h market-cap change (the "where is the rotation" signal next to per-coin movers).
 - **`tradable_on`** — per-entry, optional. Cross-references each gainers/losers/trending entry against `kraken pairs -o json` so the brief is *actionable* (you can actually execute it on Kraken), not just informative.
+
+## When NOT to use
+
+- As a trade decision tool — this is a discovery/screening brief (what is hot), not a setup with entry/stop/conviction. Validate any name through `run-watchlist` / `run-all-l3` before acting.
+- When `tradable_on` is `null` (Kraken CLI missing/rate-limited) — do not treat a CoinGecko hot entry as "tradable on Kraken"; the cross-ref signal is unavailable.
+- For execution — hand off to `execution-kraken-spot`; this skill only reports, it never places orders.
 
 ## Quick start
 

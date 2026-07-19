@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Computes exponential moving averages and trend structure from daily OHLC data via Yahoo Finance.
 
+## When NOT to use
+
+- This is a single indicator, not a trade idea — pair it with other L1s or an L2/L3 (`market-trend-quality`, `run-all-l3`) before acting.
+- EMA alignment lags price; it is structure, not timing — do not use a single EMA cross to enter a position. Combine with `market-rsi` for oversold entries in an uptrend.
+- Needs 220+ daily candles for EMA(200); with less history it falls back and the long-term read is untrustworthy.
+
 ## Quick Start
 
 ```bash

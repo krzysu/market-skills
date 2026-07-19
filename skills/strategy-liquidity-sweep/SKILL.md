@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L3 strategy that enters after liquidity sweeps when accumulation confirms smart money is positioning the opposite direction. Works especially well on crypto where stop hunts are frequent.
 
+## When NOT to use
+
+- Without a mandatory `risk-engine` vet before execution — this skill emits ideas, not orders. Always vet the Intent and get explicit user approval.
+- On a trending tape — a sweep can be a continuation retest, not a reversal; require accumulation confirmation (`market-accumulation`) and volume reversal (`market-volume`).
+- For a single-indicator read — it composes `market-liquidity-sweep` + `market-accumulation` + `market-volume`; call those directly if you only want the pattern.
+
 ## Quick Start
 
 ```bash

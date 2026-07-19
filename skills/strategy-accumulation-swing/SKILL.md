@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L3 swing strategy that identifies Wyckoff accumulation patterns (spring, reaccumulation) within healthy trends and enters for multi-swing moves.
 
+## When NOT to use
+
+- Without a mandatory `risk-engine` vet before execution — this skill emits ideas, not orders. Always vet the Intent and get explicit user approval.
+- In a falling-knife tape — it requires trend-quality HEALTHY_UPTREND/WEAKENING; do not trade a spring in a structural downtrend (use `market-trend-quality` to confirm).
+- For a single-indicator read — it composes `market-accumulation` + `market-trend-quality`; call those directly if you only want the pattern, not the trade idea.
+
 ## Quick Start
 
 ```bash

@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L3 contrarian strategy that fades exhaustion patterns when the trend is extended and price is at a key S/R level.
 
+## When NOT to use
+
+- Without a mandatory `risk-engine` vet before execution — this skill emits ideas, not orders. Always vet the Intent and get explicit user approval.
+- In a still-strong trend — fading exhaustion in an extended-but-intact uptrend/`market-trend` is a classic loss; wait for a clear S/R level and reversal structure.
+- For a single-indicator read — it composes `market-exhaustion` + `market-s-r` + `market-trend`; call those directly if you only want the pattern.
+
 ## Quick Start
 
 ```bash

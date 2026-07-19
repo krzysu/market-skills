@@ -15,6 +15,12 @@ Squeeze momentum indicator: when Bollinger Bands are inside Keltner Channels, vo
 
 Based on John Carter's TTM Squeeze (LazyBear variant).
 
+## When NOT to use
+
+- This is a single timing overlay, not a trade idea — use it on top of a trend read (`market-ema`, `market-trend-quality`), never as a standalone entry.
+- A squeeze being "ON" only says compression; it does not say direction. Wait for the release (`squeeze_on=False`) and confirm with volume (`market-volume`).
+- "FADING" signals after a release may mean the breakout is exhausting — do not chase; require trend confirmation.
+
 ## Quick Start
 
 ```bash

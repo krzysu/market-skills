@@ -15,6 +15,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 L2 pattern detection skill that composes L1 indicators to assess the health and quality of a trend.
 
+## When NOT to use
+
+- This is pattern detection, not a trade idea — treat `HEALTHY_UPTREND` / `WEAKENING` as input to an L3 strategy (`strategy-trend-follow`) or `run-all-l3`, not as an entry.
+- Do not enter off a `WEAKENING` / `DEGRADING` / `TANGLED` classification — those say structure is breaking down, not that a reversal trade exists.
+- For raw EMA alignment + HH/HL structure use `market-trend`; this skill is the health lens L3 strategies key off, not a standalone signal.
+
 ## Layering
 
 This is the **only L2 trend skill** after the consolidation:

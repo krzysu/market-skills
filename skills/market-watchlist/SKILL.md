@@ -15,6 +15,12 @@ The asset registry. Named **baskets** of tickers, each entry carrying metadata: 
 
 Data file is **gitignored** at `skills/market-watchlist/data/watchlist.json`. Shipped example: `skills/market-watchlist/examples/watchlist.example.json`.
 
+## When NOT to use
+
+- For analysis or signals — this skill only stores/resolve ticker baskets and metadata; it never computes a verdict. Use `run-watchlist` / `run-all-l2` / `run-all-l3` for the actual run.
+- For position/price state — open positions and P&L live in `position-watchdog` / `portfolio-mgmt`; the `tracking_only` flag here only means "skip strategy eval".
+- Do not hardcode tickers elsewhere — resolve through this registry so bulk runners stay consistent.
+
 ## Quick Start
 
 ```bash

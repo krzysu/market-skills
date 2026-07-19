@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 MACD (Moving Average Convergence Divergence) momentum indicator using standard parameters 12/26/9.
 
+## When NOT to use
+
+- This is a single indicator, not a trade idea — pair with `market-trend` for trend context and `market-volume` for confirmation before acting.
+- MACD flips signal potential turns before price confirms; do not enter on a histogram flip alone — wait for price structure (see `market-trend-quality`).
+- Needs 35+ daily candles for reliable warm-up; thin history produces noisy crossovers.
+
 ## Quick Start
 
 ```bash

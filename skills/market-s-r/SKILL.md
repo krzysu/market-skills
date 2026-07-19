@@ -13,6 +13,12 @@ compatibility: "Requires Python 3.12+ and uv"
 
 Support and Resistance analysis from swing point clustering. Identifies key price levels where the market has previously reversed.
 
+## When NOT to use
+
+- This is a context/level skill, not a directional signal — it returns levels, never a buy/sell call. Pair with a directional read (`market-trend`) before acting.
+- Requires 20+ candles; on thin history the "nearest support/resistance" is a weak single swing, not a real level. Prefer `touches >= 3` for structural strength.
+- Do not enter purely off a level — confirm with volume/trend confluence (an L2 like `market-breakout` or `market-liquidity-sweep`).
+
 ## Quick Start
 
 ```bash
