@@ -145,6 +145,20 @@ result = analyze_ticker(
 )
 ```
 
+## Candle cache (opt-in)
+
+This runner bulk-scans a watchlist basket (L2 + L3 + notes). Each invocation
+re-fetches candles from the venue unless the OHLC cache is enabled. For cron /
+repeated scans, set a TTL so identical `provider:ticker:interval:period`
+requests are served from disk:
+
+```bash
+MARKET_SKILLS_OHLC_CACHE_TTL=3600 uv run skills/run-watchlist/scripts/run.py crypto_majors
+```
+
+`0` (the default) means always fetch live. See the README "Candle cache"
+section for the full contract (store path, entry cap, staleness guidance).
+
 ## Exit codes
 
 - `0` — success (per-ticker fetch failures appear in output, not as exit errors)

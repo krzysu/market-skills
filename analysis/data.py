@@ -15,6 +15,7 @@ import logging
 
 from analysis.intervals import validate_timeframe, warn_unsupported_combo
 from analysis.providers.data.base import Provider
+from analysis.providers.data.cache import cache_ttl_seconds, get_cached, make_key, put_cached
 from analysis.providers.data.ccxt import CCXTProvider
 from analysis.providers.data.hyperliquid import HyperliquidProvider
 from analysis.providers.data.kraken import KrakenProvider
@@ -211,26 +212,52 @@ def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y", source: st
     """
     validate_timeframe(interval, period)
 
-    # Try explicit `provider:ticker` routing first
+    ttl = cache_ttl_seconds()
+
+    # Explicit `provider:ticker` routing — single provider, no fallback.
     explicit = _resolve_ticker_prefix(ticker)
     if explicit is not None:
         raw_ticker, provider_name = explicit
-        return _fetch_from_provider(provider_name, raw_ticker, interval, period)
+        return _fetch_cached_or_live(provider_name, raw_ticker, interval, period, ttl)
 
-    # Legacy source argument (used by some scripts)
+    # Legacy `source` argument — single provider, no fallback.
     if source:
-        return _fetch_from_provider(source, ticker, interval, period)
+        return _fetch_cached_or_live(source, ticker, interval, period, ttl)
 
-    # Auto-detect: try each provider in registry order
+    # Auto-detect: try each supporting provider in registry order (the first
+    # successful fetch wins, preserving the pre-cache fallback behavior).
     for p in _REGISTRY:
         if p.supports(ticker):
             try:
-                return _fetch_from_provider(p.name, ticker, interval, period)
+                return _fetch_cached_or_live(p.name, ticker, interval, period, ttl)
             except Exception as e:
                 logger.debug("fetch_ohlc(auto, %s=%s): %s", p.name, ticker, e)
                 continue
 
     return []
+
+
+def _fetch_cached_or_live(
+    provider_name: str,
+    raw_ticker: str,
+    interval: str,
+    period: str,
+    ttl: int,
+) -> list[list]:
+    """Check the opt-in disk cache, else fetch live and store the result."""
+    if ttl > 0:
+        key = make_key(provider_name, raw_ticker, interval, period)
+        cached = get_cached(key, ttl)
+        if cached is not None:
+            logger.debug("fetch_ohlc(cache hit): %s", key)
+            return cached
+
+    candles = _fetch_from_provider(provider_name, raw_ticker, interval, period)
+
+    if ttl > 0 and candles:
+        put_cached(make_key(provider_name, raw_ticker, interval, period), candles, ttl)
+
+    return candles
 
 
 def _fetch_from_provider(provider_name: str, raw_ticker: str, interval: str, period: str) -> list[list]:
