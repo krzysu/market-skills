@@ -50,7 +50,7 @@ def main() -> int:
     p.add_argument("--narrative", action="store_true", help="Append top-5 strategy narratives after the table")
     p.add_argument("--json", action="store_true", help="Emit JSON envelope to stdout")
 
-    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, from_state, ttl, filtered_argv = parse_axi_flags(sys.argv[1:])
     if len(sys.argv) == 1:
         if maybe_render_home_view(__file__, None, False):
             return 0

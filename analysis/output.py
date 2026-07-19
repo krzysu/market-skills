@@ -306,25 +306,67 @@ def print_envelope(env: dict[str, Any], *, file: Any = None) -> None:
         print(out, file=file)
 
 
-def parse_axi_flags(argv: list[str]) -> tuple[Any, bool, bool, list[str]]:
+def print_axi_usage() -> None:
+    """Print the canonical AXI CLI usage line shared by every skill.
+
+    ADR-0004 principle 10 requires a consistent ``--help`` surface so the
+    LLM agent reads the same flag vocabulary from every ``scripts/run.py``.
+    Skills call this from their ``-h`` / ``--help`` branch (or rely on
+    :func:`parse_axi_flags`, which exits via this helper when it sees
+    ``-h`` / ``--help``).
+    """
+    print(
+        "usage: run.py TICKER [--json] [--source=PROVIDER] "
+        "[--interval=INTERVAL] [--period=PERIOD] "
+        "[--fields=<csv>] [--full] [--toon] "
+        "[--from-state[=PATH]] [--ttl[=SECONDS]] [--help]"
+    )
+
+
+def _parse_ttl(raw: str) -> int:
+    """Parse a ``--ttl`` value into an int seconds, raising ValueError on junk."""
+    try:
+        val = int(raw)
+    except ValueError as e:
+        raise ValueError(f"--ttl expects an integer seconds value, got {raw!r}") from e
+    if val < 0:
+        raise ValueError(f"--ttl must be >= 0, got {val}")
+    return val
+
+
+def parse_axi_flags(argv: list[str]) -> tuple[Any, bool, bool, Any, Any, list[str]]:
     """Extract AXI-specific flags from argv.
 
-    Returns ``(fields, full, toon, filtered_argv)``. `fields` is the
-    raw `--fields=` value (string) or None; `full` is True when
-    `--full` is set; `toon` is True when `--toon` is set;
-    `filtered_argv` is the input argv with the AXI flags stripped, so
-    the caller can pass it to ``safe_parse_args`` without tripping
-    the "unrecognized flag" check. Recognised AXI flags: ``--full``,
-    ``--fields=`` / ``--fields <value>``, ``--toon``.
+    Returns ``(fields, full, toon, from_state, ttl, filtered_argv)``.
+
+    - ``fields`` — raw ``--fields=`` value (string) or None.
+    - ``full`` — True when ``--full`` is set.
+    - ``toon`` — True when ``--toon`` is set.
+    - ``from_state`` — ``--from-state[=PATH]`` value (path string, or ``True``
+      when given without ``=``) or None. Standard offline-input flag for skills
+      that can read a pre-fetched state file instead of fetching live.
+    - ``ttl`` — ``--ttl[=SECONDS]`` integer seconds, or None.
+    - ``filtered_argv`` — input argv with the AXI flags stripped, so the caller
+      can pass it to ``safe_parse_args`` without tripping the "unrecognized
+      flag" check.
+
+    Recognised AXI flags: ``--full``, ``--fields=`` / ``--fields <value>``,
+    ``--toon``, ``--from-state[=PATH]``, ``--ttl[=SECONDS]``, and
+    ``-h`` / ``--help`` (prints :func:`print_axi_usage` and exits 0).
     """
     fields: Any = None
     full = False
     toon = False
+    from_state: Any = None
+    ttl: Any = None
     out: list[str] = []
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--full":
+        if a in ("--help", "-h"):
+            print_axi_usage()
+            sys.exit(0)
+        elif a == "--full":
             full = True
             i += 1
         elif a == "--toon":
@@ -338,10 +380,30 @@ def parse_axi_flags(argv: list[str]) -> tuple[Any, bool, bool, list[str]]:
                 raise ValueError("--fields requires a value")
             fields = argv[i + 1]
             i += 2
+        elif a.startswith("--from-state="):
+            from_state = a.split("=", 1)[1]
+            i += 1
+        elif a == "--from-state":
+            # Bare flag: truthy sentinel (caller supplies its own default
+            # path). A following non-flag token is treated as the path.
+            if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+                from_state = argv[i + 1]
+                i += 2
+            else:
+                from_state = True
+                i += 1
+        elif a.startswith("--ttl="):
+            ttl = _parse_ttl(a.split("=", 1)[1])
+            i += 1
+        elif a == "--ttl":
+            if i + 1 >= len(argv):
+                raise ValueError("--ttl requires a value")
+            ttl = _parse_ttl(argv[i + 1])
+            i += 2
         else:
             out.append(a)
             i += 1
-    return fields, full, toon, out
+    return fields, full, toon, from_state, ttl, out
 
 
 def resolve_fields(
