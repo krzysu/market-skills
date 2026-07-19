@@ -317,6 +317,35 @@ uv run skills/market-ema/scripts/run.py hl:LIT --json
 uv run skills/market-ema/scripts/run.py yf:AAPL --json
 ```
 
+## Candle cache (opt-in)
+
+Every analysis call re-fetches OHLC from the venue by default. To avoid
+re-paying for the same candles on repeated / cron runs, `fetch_ohlc()` can
+serve a prior result from an on-disk cache keyed by
+`provider:ticker:interval:period`.
+
+The cache is **opt-in** and defaults OFF — set a TTL to enable it:
+
+```bash
+# Cache candle fetches for up to 1 hour (3600s) for the duration of a run
+MARKET_SKILLS_OHLC_CACHE_TTL=3600 uv run skills/run-all-l3/scripts/run.py SPY BTC-USD
+
+# Or export it for a session / cron job
+export MARKET_SKILLS_OHLC_CACHE_TTL=3600
+```
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `MARKET_SKILLS_OHLC_CACHE_TTL` | `0` (disabled) | Cache lifetime in seconds. `0` = always fetch live. Any positive value enables the cache. |
+
+- Store: `$XDG_DATA_HOME/market-skills/ohlc_cache.json` (requires `XDG_DATA_HOME`,
+  same as the other per-user state files). Capped at 2000 entries (oldest evicted).
+- A cache hit returns the stored candles **without contacting the venue** — use a
+  TTL shorter than your data's staleness tolerance (e.g. intraday scans want
+  minutes, daily scans can use hours).
+- The cache is a performance optimization only; it never changes analysis results
+  and is safe to clear with `analysis.providers.data.cache.clear_cache()`.
+
 ## Macro sources (network)
 
 `analysis/macro/fetchers.py` reads from three external endpoints (no API keys required):

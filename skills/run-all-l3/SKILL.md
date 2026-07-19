@@ -106,6 +106,20 @@ and `direction` to compute progress and staleness on their own terms.
 
 `--json` output follows the canonical [AXI envelope](../../docs/AXI-REFERENCE.md) — `{data, count, errors, help[]}`. Default schema is the per-skill minimal fields (3-6 essentials); pass `--fields=<csv>` to project or `--full` for the full payload. `count` is the item count, `help[]` is contextual next-step command templates. Lib.py return shapes (`L1Result` / `L2Result` / `L3Result` / `L3Idea` / `RegimeSignal`) are unchanged — the envelope wraps them at the `scripts/run.py` boundary.
 
+## Candle cache (opt-in)
+
+This runner fetches candles once per ticker, then runs all strategies
+in-process — but each invocation still re-fetches from the venue unless the
+OHLC cache is enabled. For cron / repeated scans, set a TTL so identical
+`provider:ticker:interval:period` requests are served from disk:
+
+```bash
+MARKET_SKILLS_OHLC_CACHE_TTL=3600 uv run skills/run-all-l3/scripts/run.py SPY BTC-USD
+```
+
+`0` (the default) means always fetch live. See the README "Candle cache"
+section for the full contract (store path, entry cap, staleness guidance).
+
 ## Home view (no-arg mode)
 
 No-arg mode prints the home view from `$XDG_DATA_HOME/market-skills/<skill>_last.json` (last successful run). Errors are not cached.
