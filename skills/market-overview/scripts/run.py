@@ -143,7 +143,7 @@ def main():
         if maybe_render_home_view(__file__, None, args.json):
             return
 
-    fields_arg, full, toon, _ = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, from_state, ttl, _ = parse_axi_flags(sys.argv[1:])
 
     validate_timeframe(args.interval, args.period)
 

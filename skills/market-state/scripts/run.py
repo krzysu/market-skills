@@ -46,7 +46,7 @@ def _help_lines(refreshed: list[str]) -> list[str]:
 
 
 def main():
-    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, from_state, ttl, filtered_argv = parse_axi_flags(sys.argv[1:])
 
     if len(sys.argv) == 1:
         if maybe_render_home_view(__file__, None, False):

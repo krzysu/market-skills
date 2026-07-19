@@ -72,7 +72,7 @@ def _help_lines(ticker: str) -> list[str]:
 
 
 def main():
-    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, from_state, ttl, filtered_argv = parse_axi_flags(sys.argv[1:])
     ticker, json_mode, source, interval, period = safe_parse_args(filtered_argv)
     if maybe_render_home_view(__file__, ticker, json_mode):
         return

@@ -18,6 +18,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from analysis.toon import toon_dump, toon_load
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -209,25 +211,67 @@ class TestParseAxiFlagsToon:
     def test_default_is_off(self):
         from analysis.output import parse_axi_flags
 
-        fields, full, toon, rest = parse_axi_flags(["AAPL", "--json"])
+        fields, full, toon, from_state, ttl, rest = parse_axi_flags(["AAPL", "--json"])
         assert toon is False
         assert rest == ["AAPL", "--json"]
 
     def test_toon_flag_sets_true(self):
         from analysis.output import parse_axi_flags
 
-        fields, full, toon, rest = parse_axi_flags(["AAPL", "--toon", "--json"])
+        fields, full, toon, from_state, ttl, rest = parse_axi_flags(["AAPL", "--toon", "--json"])
         assert toon is True
         assert rest == ["AAPL", "--json"]
 
     def test_toon_with_fields_and_full(self):
         from analysis.output import parse_axi_flags
 
-        fields, full, toon, rest = parse_axi_flags(["AAPL", "--toon", "--full", "--fields=ticker,signal"])
+        parsed = parse_axi_flags(["AAPL", "--toon", "--full", "--fields=ticker,signal"])
+        fields, full, toon, from_state, ttl, rest = parsed
         assert toon is True
         assert full is True
         assert fields == "ticker,signal"
         assert rest == ["AAPL"]
+
+    def test_from_state_flag(self):
+        from analysis.output import parse_axi_flags
+
+        parsed = parse_axi_flags(["BTC-USD", "--from-state=/tmp/state.json"])
+        _fields, _full, _toon, from_state, ttl, rest = parsed
+        assert from_state == "/tmp/state.json"
+        assert ttl is None
+        assert rest == ["BTC-USD"]
+
+    def test_from_state_flag_no_value(self):
+        from analysis.output import parse_axi_flags
+
+        parsed = parse_axi_flags(["BTC-USD", "--from-state"])
+        _fields, _full, _toon, from_state, _ttl, rest = parsed
+        assert from_state is True
+        assert rest == ["BTC-USD"]
+
+    def test_ttl_flag(self):
+        from analysis.output import parse_axi_flags
+
+        parsed = parse_axi_flags(["BTC-USD", "--ttl=3600"])
+        _fields, _full, _toon, _from_state, ttl, rest = parsed
+        assert ttl == 3600
+        assert rest == ["BTC-USD"]
+
+    def test_ttl_requires_integer(self):
+        from analysis.output import parse_axi_flags
+
+        with pytest.raises(ValueError, match="--ttl expects an integer"):
+            parse_axi_flags(["BTC-USD", "--ttl=abc"])
+
+    def test_usage_prints_canonical_line(self, capsys):
+        from analysis.output import print_axi_usage
+
+        print_axi_usage()
+        out = capsys.readouterr().out
+        assert out.startswith("usage: run.py TICKER")
+        assert "--from-state" in out
+        assert "--ttl" in out
+        assert "--help" in out
 
 
 class TestMarketStateToonMode:

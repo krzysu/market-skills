@@ -12,6 +12,7 @@ from analysis.output import (
     emit_envelope_json,
     maybe_render_home_view,
     parse_axi_flags,
+    print_axi_usage,
     resolve_fields,
     truncate,
 )
@@ -33,11 +34,7 @@ def _parse_argv(argv):
             json_mode = True
             i += 1
         elif a in ("--help", "-h"):
-            print(
-                "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
-                "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
-                "[--fired-only] [--fields=<csv>] [--full]"
-            )
+            print_axi_usage()
             sys.exit(0)
         elif a == "--source" or a.startswith("--source="):
             if a.startswith("--source="):
@@ -87,17 +84,12 @@ def _skill_fired(skill_result: dict) -> bool:
 
 
 def main():
-    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, from_state, ttl, filtered_argv = parse_axi_flags(sys.argv[1:])
     tickers, json_mode, source, interval, period, include_notes, fired_only = _parse_argv(filtered_argv)
     if not tickers:
         if maybe_render_home_view(__file__, None, json_mode):
             return
-        print(
-            "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
-            "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
-            "[--fired-only] [--fields=<csv>] [--full]",
-            file=sys.stderr,
-        )
+        print_axi_usage()
         sys.exit(2)
 
     _lib = load_lib_for_script(__file__)

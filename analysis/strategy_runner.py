@@ -143,7 +143,7 @@ def run_strategy_cli(strategy_title: str, script_file: str) -> None:
     ``cache_run_result`` and ``maybe_render_home_view`` so the home-view
     state lives in the per-skill namespace.
     """
-    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, from_state, ttl, filtered_argv = parse_axi_flags(sys.argv[1:])
     ticker, json_mode, source, interval, period = safe_parse_args(filtered_argv)
     if maybe_render_home_view(script_file, ticker, json_mode):
         return

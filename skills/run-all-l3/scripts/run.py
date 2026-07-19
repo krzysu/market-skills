@@ -13,6 +13,8 @@ from analysis.output import (
     emit_envelope_json,
     maybe_render_home_view,
     parse_axi_flags,
+    print_axi_usage,
+    print_envelope,
     project_fields,
     resolve_fields,
     truncate,
@@ -37,11 +39,7 @@ def _parse_argv(argv):
             json_mode = True
             i += 1
         elif a in ("--help", "-h"):
-            print(
-                "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
-                "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
-                "[--top=N] [--fired-only] [--fields=<csv>] [--full]"
-            )
+            print_axi_usage()
             sys.exit(0)
         elif a == "--source" or a.startswith("--source="):
             if a.startswith("--source="):
@@ -118,17 +116,12 @@ def _strip_when_fired_only(strategy_result: dict) -> dict | None:
 
 
 def main():
-    fields_arg, full, toon, filtered_argv = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, from_state, ttl, filtered_argv = parse_axi_flags(sys.argv[1:])
     tickers, json_mode, source, interval, period, include_notes, top, fired_only = _parse_argv(filtered_argv)
     if not tickers:
         if maybe_render_home_view(__file__, None, json_mode):
             return
-        print(
-            "usage: run.py TICKER [TICKER ...] [--json] [--source=PROVIDER] "
-            "[--interval=INTERVAL] [--period=PERIOD] [--include-notes] "
-            "[--top=N] [--fired-only] [--fields=<csv>] [--full]",
-            file=sys.stderr,
-        )
+        print_axi_usage()
         sys.exit(2)
 
     _lib = load_lib_for_script(__file__)

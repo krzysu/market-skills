@@ -128,7 +128,7 @@ def _cmd_add(args: argparse.Namespace) -> int:
 def _cmd_list(args: argparse.Namespace) -> int:
     from analysis.output import cache_run_result, emit_envelope_json, parse_axi_flags
 
-    fields_arg, full, toon, _filtered = parse_axi_flags(sys.argv[1:])
+    fields_arg, full, toon, from_state, ttl, _filtered = parse_axi_flags(sys.argv[1:])
     data = load_raw(args.config)
     now = now_utc()
     pairs = [args.pair] if args.pair else sorted(data.keys())
