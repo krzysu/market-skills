@@ -46,6 +46,7 @@ import sys
 from typing import Any
 
 from analysis.contracts import l2_classification, l2_fired
+from analysis.registry import l2_skills, l3_strategies
 
 # -- shape constants ----------------------------------------------------------
 
@@ -82,24 +83,14 @@ L3_CALIBRATION_HIGH_CONV = 4
 # strong enough to be meaningful — weaker ideas are noise across TFs.
 L3_DIRECTION_MIN_CONVICTION = 2
 
-# L2 skills whose pattern data the bug-scan inspects.
-L2_SKILLS = (
-    "market-accumulation",
-    "market-breakout",
-    "market-exhaustion",
-    "market-liquidity-sweep",
-    "market-trend-quality",
-)
+# L2 skills whose pattern data the bug-scan inspects — sourced from the
+# single registry of truth so a newly-added L2 skill is swept automatically
+# (no hardcoded drift between bug-scan and analysis.registry).
+L2_SKILLS = tuple(l2_skills())
 
-# L3 strategies whose idea counts the bug-scan inspects.
-L3_STRATEGIES = (
-    "strategy-trend-follow",
-    "strategy-mean-reversion",
-    "strategy-breakout-confirm",
-    "strategy-accumulation-swing",
-    "strategy-exhaustion-fade",
-    "strategy-liquidity-sweep",
-)
+# L3 strategies whose idea counts the bug-scan inspects — same registry
+# single-source-of-truth contract as L2_SKILLS above.
+L3_STRATEGIES = tuple(l3_strategies())
 
 
 # -- finding construction -----------------------------------------------------

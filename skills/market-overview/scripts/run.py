@@ -157,16 +157,6 @@ def main():
         period=args.period,
     )
 
-    output = {
-        "tickers_scanned": len(tickers),
-        "interval": args.interval,
-        "period": args.period,
-        "results": len(results),
-        "errors": errors,
-        "ranked": results,
-    }
-    del output
-
     if args.json:
         if not results and errors:
             print_envelope(
