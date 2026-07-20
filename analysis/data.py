@@ -80,9 +80,19 @@ def fetch_funding_rate(ticker: str, source: str | None = None) -> dict | None:
 
     Returns a dict with funding rate info, or None if unavailable.
     Only CCXT-based providers support this. Use the ``source`` argument
-    (e.g. ``source="ccxt:binance"``) to pick an exchange explicitly;
-    ticker-prefix routing is not supported for funding rates.
+    (e.g. ``source="ccxt:binance"``) to pick an exchange explicitly.
+    When ``source`` is None and ``ticker`` carries a ``provider:``
+    prefix (e.g. ``hl:HYPE``, ``kraken:BTCUSD``), the prefix is
+    stripped and auto-detect runs on the bare ticker — the prefix does
+    not select the provider, it only normalizes the symbol before the
+    registry scan.
     """
+    # Strip provider: prefix for auto-detect routing
+    if source is None:
+        resolved = _resolve_ticker_prefix(ticker)
+        if resolved is not None:
+            ticker, _ = resolved
+
     if source:
         try:
             p = _get_provider(source)

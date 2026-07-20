@@ -1,6 +1,14 @@
 """Tests for analysis/data.py — data fetching and provider routing."""
 
-from analysis.data import _PREFIX_MAP, _REGISTRY, _get_provider, _resolve_ticker_prefix
+from unittest.mock import MagicMock
+
+from analysis.data import (
+    _PREFIX_MAP,
+    _REGISTRY,
+    _get_provider,
+    _resolve_ticker_prefix,
+    fetch_funding_rate,
+)
 
 
 class TestResolveTickerPrefix:
@@ -69,3 +77,173 @@ class TestProviderRegistryOrder:
 
         with pytest.raises(ValueError, match="Unknown provider"):
             _get_provider("does-not-exist")
+
+
+def _mock_provider(name: str, *, supports_funding: bool, supports_ticker: bool, funding_result: dict | None):
+    """Build a MagicMock provider for fetch_funding_rate tests."""
+    p = MagicMock()
+    p.name = name
+    if supports_funding:
+        p.fetch_funding_rate = MagicMock(return_value=funding_result)
+    else:
+        # Remove the attribute so hasattr() returns False, mirroring real
+        # providers that don't implement funding rates (e.g. yfinance).
+        del p.fetch_funding_rate
+    p.supports = MagicMock(return_value=supports_ticker)
+    return p
+
+
+class TestFetchFundingRatePrefixRouting:
+    """Verifies ``provider:ticker`` prefixes are stripped before auto-detect."""
+
+    def test_hl_prefix_strips_and_runs_auto_detect(self, monkeypatch):
+        """`hl:HYPE` should strip the prefix and call auto-detect with `HYPE`."""
+        hl = _mock_provider(
+            "hyperliquid",
+            supports_funding=True,
+            supports_ticker=True,
+            funding_result={"fundingRate": 0.0001, "source": "hyperliquid"},
+        )
+        ccxt = _mock_provider(
+            "ccxt",
+            supports_funding=True,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        kraken = _mock_provider(
+            "kraken",
+            supports_funding=False,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        yfinance = _mock_provider(
+            "yfinance",
+            supports_funding=False,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        monkeypatch.setattr("analysis.data._REGISTRY", [hl, ccxt, kraken, yfinance])
+
+        result = fetch_funding_rate("hl:HYPE")
+
+        assert result == {"fundingRate": 0.0001, "source": "hyperliquid"}
+        # The prefix must be stripped before supports()/fetch_funding_rate().
+        hl.supports.assert_called_with("HYPE")
+        hl.fetch_funding_rate.assert_called_once_with("HYPE")
+        # yfinance lacks fetch_funding_rate, so it must never be asked.
+        yfinance.supports.assert_not_called()
+
+    def test_yf_prefix_returns_none(self, monkeypatch):
+        """`yf:AAPL` strips to `AAPL`, but yfinance has no funding rate method."""
+        hl = _mock_provider(
+            "hyperliquid",
+            supports_funding=True,
+            supports_ticker=False,
+            funding_result=None,
+        )
+        ccxt = _mock_provider(
+            "ccxt",
+            supports_funding=True,
+            supports_ticker=False,
+            funding_result=None,
+        )
+        kraken = _mock_provider(
+            "kraken",
+            supports_funding=False,
+            supports_ticker=False,
+            funding_result=None,
+        )
+        yfinance = _mock_provider(
+            "yfinance",
+            supports_funding=False,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        monkeypatch.setattr("analysis.data._REGISTRY", [hl, ccxt, kraken, yfinance])
+
+        result = fetch_funding_rate("yf:AAPL")
+
+        assert result is None
+        # Prefix stripped: bare AAPL is what providers see.
+        hl.supports.assert_called_with("AAPL")
+        ccxt.supports.assert_called_with("AAPL")
+        # yfinance has no fetch_funding_rate, so it's skipped silently.
+        assert not hasattr(yfinance, "fetch_funding_rate")
+
+    def test_bare_ticker_still_works_without_prefix(self, monkeypatch):
+        """`HYPEUSD` (no prefix) must follow the same auto-detect path."""
+        hl = _mock_provider(
+            "hyperliquid",
+            supports_funding=True,
+            supports_ticker=True,
+            funding_result={"fundingRate": 0.0002, "source": "hyperliquid"},
+        )
+        ccxt = _mock_provider(
+            "ccxt",
+            supports_funding=True,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        kraken = _mock_provider(
+            "kraken",
+            supports_funding=False,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        yfinance = _mock_provider(
+            "yfinance",
+            supports_funding=False,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        monkeypatch.setattr("analysis.data._REGISTRY", [hl, ccxt, kraken, yfinance])
+
+        result = fetch_funding_rate("HYPEUSD")
+
+        assert result == {"fundingRate": 0.0002, "source": "hyperliquid"}
+        hl.supports.assert_called_with("HYPEUSD")
+        hl.fetch_funding_rate.assert_called_once_with("HYPEUSD")
+
+    def test_kraken_prefix_strips_and_matches_bare_ticker(self, monkeypatch):
+        """`kraken:BTCUSD` strips to `BTCUSD` and matches `fetch_funding_rate('BTCUSD')`.
+
+        Acceptance criterion #2: the prefix must not select the kraken
+        provider — it is stripped, and auto-detect runs on the bare
+        ticker. The result is therefore identical to calling with no
+        prefix at all.
+        """
+        kraken = _mock_provider(
+            "kraken",
+            supports_funding=True,
+            supports_ticker=True,
+            funding_result={"fundingRate": 0.00005, "source": "kraken"},
+        )
+        ccxt = _mock_provider(
+            "ccxt",
+            supports_funding=True,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        hl = _mock_provider(
+            "hyperliquid",
+            supports_funding=True,
+            supports_ticker=False,
+            funding_result=None,
+        )
+        yfinance = _mock_provider(
+            "yfinance",
+            supports_funding=False,
+            supports_ticker=True,
+            funding_result=None,
+        )
+        monkeypatch.setattr("analysis.data._REGISTRY", [kraken, ccxt, hl, yfinance])
+
+        prefixed = fetch_funding_rate("kraken:BTCUSD")
+        bare = fetch_funding_rate("BTCUSD")
+
+        # Acceptance criterion #2: same result either way.
+        assert prefixed == bare == {"fundingRate": 0.00005, "source": "kraken"}
+        # Prefix stripped: kraken sees BTCUSD, never "kraken:BTCUSD".
+        kraken.supports.assert_called_with("BTCUSD")
+        kraken.fetch_funding_rate.assert_called_with("BTCUSD")
+        assert not any(call.args[0] == "kraken:BTCUSD" for call in kraken.supports.call_args_list)
