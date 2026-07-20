@@ -53,6 +53,7 @@ Portable, composable technical analysis skills for trading agents. Pure-math ind
 | [strategy-breakout-confirm](./skills/strategy-breakout-confirm/SKILL.md) | market-breakout, market-volume, market-squeeze | Enter only on confirmed breakout with volume + squeeze |
 | [strategy-accumulation-swing](./skills/strategy-accumulation-swing/SKILL.md) | market-accumulation, market-trend-quality | Wyckoff spring/reaccumulation within healthy trend |
 | [strategy-exhaustion-fade](./skills/strategy-exhaustion-fade/SKILL.md) | market-exhaustion, market-s-r, market-trend | Fade blowoff/capitulation at S/R in extended trend |
+| [strategy-funding-carry](./skills/strategy-funding-carry/SKILL.md) | market-basis | Harvest perp funding rates — enter the side receiving funding |
 | [strategy-liquidity-sweep](./skills/strategy-liquidity-sweep/SKILL.md) | market-liquidity-sweep, market-accumulation, market-volume | Enter after sweep with accumulation + volume confirmation |
 
 ### Batch Runners
@@ -62,7 +63,7 @@ Fetch candles once per ticker, run all skills in-process. Use for cron jobs / mo
 | Skill | Runs | Use case |
 |-------|------|----------|
 | [run-all-l2](./skills/run-all-l2/SKILL.md) | All 6 L2 pattern skills | Pattern context for briefing |
-| [run-all-l3](./skills/run-all-l3/SKILL.md) | All 6 L3 strategies (with `--track-ideas` for stale-idea detection) | Aggregated trade ideas across strategies |
+| [run-all-l3](./skills/run-all-l3/SKILL.md) | All 7 L3 strategies (with `--track-ideas` for stale-idea detection) | Aggregated trade ideas across strategies |
 | [run-watchlist](./skills/run-watchlist/SKILL.md) | L2 + L3 + notes across a basket | Bulk scan driven by `market-watchlist` |
 
 ### Cross-cutting helpers
@@ -230,7 +231,8 @@ uv run pytest
 ```
 L3 Strategy Skills
   strategy-trend-follow  strategy-mean-reversion  strategy-breakout-confirm
-  strategy-accumulation-swing  strategy-exhaustion-fade  strategy-liquidity-sweep
+  strategy-accumulation-swing  strategy-exhaustion-fade  strategy-funding-carry
+  strategy-liquidity-sweep
         │                    │
         └───────┬────────────┘
                 │

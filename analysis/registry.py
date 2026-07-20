@@ -29,6 +29,7 @@ _l3_strategies: list[str] = [
     "strategy-breakout-confirm",
     "strategy-accumulation-swing",
     "strategy-exhaustion-fade",
+    "strategy-funding-carry",
     "strategy-liquidity-sweep",
 ]
 

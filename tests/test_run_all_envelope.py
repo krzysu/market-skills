@@ -8,7 +8,7 @@ Key invariants:
 - L2 envelope: ``{"ticker": ..., "skills": {<name>: {"pattern": {"classification": ...}}}}``
 - L3 envelope: ``{"ticker": ..., "strategies": {<name>: {"ideas": [...]}}}``
 - L2 skills list: exactly 5
-- L3 strategies list: exactly 6
+- L3 strategies list: exactly 7
 """
 
 import importlib.util
@@ -129,18 +129,19 @@ class TestRunAllL3Envelope:
         assert "skills" not in out, "L3 must use 'strategies' key, not 'skills' (L2 envelope)"
         assert "data" not in out, "L3 envelope is flat — top-level 'data' would double-nest"
 
-    def test_strategy_count_is_six(self):
-        """The L3 registry has exactly 6 strategies."""
+    def test_strategy_count_is_seven(self):
+        """The L3 registry has exactly 7 strategies."""
         from analysis.registry import l3_strategies
 
         strats = l3_strategies()
-        assert len(strats) == 6
+        assert len(strats) == 7
         for required in (
             "strategy-trend-follow",
             "strategy-mean-reversion",
             "strategy-breakout-confirm",
             "strategy-accumulation-swing",
             "strategy-exhaustion-fade",
+            "strategy-funding-carry",
             "strategy-liquidity-sweep",
         ):
             assert required in strats
@@ -226,6 +227,7 @@ class TestRunAllL3Envelope:
             "strategy-breakout-confirm",
             "strategy-accumulation-swing",
             "strategy-exhaustion-fade",
+            "strategy-funding-carry",
             "strategy-liquidity-sweep",
         ):
             mod = _load(strat_name)

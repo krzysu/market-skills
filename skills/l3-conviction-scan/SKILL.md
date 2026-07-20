@@ -11,7 +11,7 @@ compatibility: "Requires Python 3.12+ and uv"
 
 # l3-conviction-scan
 
-Ranks L3 trade ideas across watchlist baskets by conviction. Fetches candles **once per ticker per (basket, interval, period)**, runs all 6 L3 strategies in-process, then flattens every `ideas[]` into a single conviction-sorted table.
+Ranks L3 trade ideas across watchlist baskets by conviction. Fetches candles **once per ticker per (basket, interval, period)**, runs all 7 L3 strategies in-process, then flattens every `ideas[]` into a single conviction-sorted table.
 
 ## When to use
 
