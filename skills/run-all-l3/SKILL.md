@@ -1,6 +1,6 @@
 ---
 name: run-all-l3
-description: "Runner that fetches candles once per ticker, then runs all 6 L3 strategy skills in-process. Returns aggregated trade ideas."
+description: "Runner that fetches candles once per ticker, then runs all 7 L3 strategy skills in-process. Returns aggregated trade ideas."
 version: 0.1.0
 metadata:
   hermes:
@@ -61,6 +61,7 @@ Both `--flag value` (space-separated) and `--flag=value` (equals) syntaxes are a
 | strategy-breakout-confirm | Confirmed breakouts with volume + squeeze |
 | strategy-accumulation-swing | Wyckoff spring/reaccumulation in trend |
 | strategy-exhaustion-fade | Fade blowoff/capitulation at S/R |
+| strategy-funding-carry | Harvest perp funding rates (carry trade) |
 | strategy-liquidity-sweep | Sweep + accumulation + volume |
 
 ## Output

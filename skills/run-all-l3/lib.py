@@ -26,6 +26,8 @@ _REJECTION_REASON_TAGS = {
     "missing_oversold": "RSI not at oversold extreme",
     "missing_overbought": "RSI not at overbought extreme",
     "missing_volume_confirmation": "volume_ratio or OBV trend not confirming",
+    "missing_funding_rate": "funding rate data returned None",
+    "missing_funding_extreme": "funding rate not extreme enough to emit an idea",
     "tp_ladder_invalid": "TP ladder structurally invalid (post-validator rejection)",
     "stop_too_tight": "stop distance below 2% swing-mode minimum",
 }
@@ -94,6 +96,10 @@ def _classify_rejection(strategy_name: str, narrative: str) -> list[str]:
         "strategy-liquidity-sweep": {
             "sweep, accumulation, or volume confirmation missing": ["missing_sweep"],
             "no liquidity sweep setup": ["missing_sweep"],
+        },
+        "strategy-funding-carry": {
+            "funding rate unavailable": ["missing_funding_rate"],
+            "no funding carry setup": ["missing_funding_extreme"],
         },
     }
     strat_phrases = phrase_map.get(strategy_name, {})
