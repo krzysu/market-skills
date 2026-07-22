@@ -14,7 +14,6 @@ from analysis.output import (
     maybe_render_home_view,
     parse_axi_flags,
     print_axi_usage,
-    print_envelope,
     project_fields,
     resolve_fields,
     truncate,

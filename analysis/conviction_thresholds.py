@@ -33,10 +33,14 @@ to tighten the gate.
 
 ## Loading private overrides
 
-The module ships with ``MIN_CONVICTION_TO_EMIT_BY_STRATEGY = {}``. To
-populate it, set the env var ``MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH``
-to an absolute JSON path before importing this module. The JSON shape
-is::
+The module ships with ``MIN_CONVICTION_TO_EMIT_BY_STRATEGY = {}``. At
+import time it resolves the overrides file via:
+
+1. ``MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH`` — explicit path (set = MUST exist).
+2. ``MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR/conviction_thresholds_private.json``
+   — fallback when the nightly backtest pipeline writes alongside this repo.
+   Missing here is not an error (pipeline hasn't run yet).
+3. Neither → shipped empty table, ``GLOBAL_MIN_CONVICTION_TO_EMIT=1``.
 
     {
       "GLOBAL_MIN_CONVICTION_TO_EMIT": 1,
@@ -105,23 +109,46 @@ def _coerce_threshold(value, *, context: str) -> int:
     return value
 
 
-def _load_overrides() -> None:
-    """Load overrides from ``$MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH``.
+def _resolve_path() -> str | None:
+    """Resolve the overrides file path.
 
-    Idempotent — safe to call multiple times; existing entries are merged
-    (later calls overwrite on conflict). No-op when the env var is unset.
-    Raises ``OSError`` when the env var is set but the file is missing,
-    and ``ValueError`` when the JSON is malformed or any threshold value
-    fails :func:`_coerce_threshold`.
+    1. ``MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH`` — explicit override.
+    2. ``MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR/conviction_thresholds_private.json``
+       — fallback when the backtest pipeline writes alongside this repo.
+    3. Neither → ``None`` (use shipped empty table).
     """
     env = os.environ.get(ENV_OVERRIDES_PATH)
-    if not env:
+    if env:
+        return os.path.expanduser(env)
+    out_dir = os.environ.get("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR")
+    if out_dir:
+        return os.path.join(os.path.expanduser(out_dir), "conviction_thresholds_private.json")
+    return None
+
+
+def _load_overrides() -> None:
+    """Load overrides from the resolved path.
+
+    Idempotent — safe to call multiple times; existing entries are merged
+    (later calls overwrite on conflict). No-op when no path is resolved
+    (uses the shipped empty table).
+
+    When ``MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH`` is explicitly set but
+    the file is missing, raises ``OSError`` (a configured-but-missing
+    override file is a configuration bug). When the fallback OUT_DIR path
+    is missing, silently uses the empty table (the pipeline hasn't run yet).
+    """
+    path = _resolve_path()
+    if not path:
         return
-    path = os.path.expanduser(env)
+    explicit_configured = bool(os.environ.get(ENV_OVERRIDES_PATH))
     if not os.path.isfile(path):
-        raise OSError(
-            f"{ENV_OVERRIDES_PATH}={env!r} but no file at {path!r}; unset the env var to use the shipped empty table"
-        )
+        if explicit_configured:
+            raise OSError(
+                f"{ENV_OVERRIDES_PATH}={os.environ[ENV_OVERRIDES_PATH]!r} "
+                f"but no file at {path!r}; unset the env var to use the shipped empty table"
+            )
+        return
     with open(path) as fh:
         data = json.load(fh)
     if not isinstance(data, dict):

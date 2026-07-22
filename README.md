@@ -114,7 +114,8 @@ Offline strategy evaluator. Fetches candles once, replays L3 strategy ideas thro
 
 | Skill | Purpose |
 |-------|---------|
-| [backtest-engine](./skills/backtest-engine/SKILL.md) | Replay + scoring engine (`lib.py` is pure, no I/O). `--fill-sim --metrics` prints strategy + benchmark as stable `sort_keys` JSON. `WalkForwardRunner` splits a windowed series into train/test folds. Used by the nightly backtest cron and the liq-sweep conviction calibration grid. |
+| [backtest-engine](./skills/backtest-engine/SKILL.md) | Replay + scoring engine (`lib.py` is pure, no I/O). `--fill-sim --metrics` prints strategy + benchmark as stable `sort_keys` JSON. `WalkForwardRunner` splits a windowed series into train/test folds. Used by the nightly backtest pipeline and the liq-sweep conviction calibration grid. |
+| [backtest-pipeline](./skills/backtest-pipeline/SKILL.md) | Nightly cron pipeline — runs every L3 strategy × every active watchlist ticker on 1d + 4h intervals, compares against a rolling 7-night Sharpe baseline, detects strategy decay, and produces five cross-boundary output files (conviction thresholds, fitness matrix, watchdog regime, swing scan skip list, regime health brief) consumed by downstream skills. Controlled by a single env var: ``MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR``. |
 
 ### Per-user data
 
