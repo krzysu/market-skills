@@ -1098,9 +1098,9 @@ class TestBacktestRegime:
         mod = self._make_run_mod(monkeypatch, tmp_path)
         if regime_payload is not None:
             regime_file = self._write_regime_file(tmp_path, regime_payload)
-            monkeypatch.setattr(mod, "_REGIME_STATE_PATH", str(regime_file))
+            monkeypatch.setattr(mod, "_resolve_regime_state_path", lambda: str(regime_file))
         else:
-            monkeypatch.setattr(mod, "_REGIME_STATE_PATH", str(tmp_path / "nope" / "missing.json"))
+            monkeypatch.setattr(mod, "_resolve_regime_state_path", lambda: str(tmp_path / "nope" / "missing.json"))
         monkeypatch.setattr(mod, "_current_price", lambda *_a, **_kw: price)
 
         captured: list[list[dict]] = []
@@ -1173,7 +1173,7 @@ class TestBacktestRegime:
         """
         mod = self._make_run_mod(monkeypatch, tmp_path)
         regime_file = self._write_regime_file(tmp_path, _REGIME_SAMPLE)
-        monkeypatch.setattr(mod, "_REGIME_STATE_PATH", str(regime_file))
+        monkeypatch.setattr(mod, "_resolve_regime_state_path", lambda: str(regime_file))
 
         # Price 57.0 is inside the zone (55–58) and ~5.2% below the 60.15
         # entry → both a zone event and a drop event fire on this same tick.
@@ -1218,7 +1218,7 @@ class TestBacktestRegime:
         — risk-management alerts are NOT suppressed."""
         mod = self._make_run_mod(monkeypatch, tmp_path)
         regime_file = self._write_regime_file(tmp_path, _REGIME_SAMPLE)
-        monkeypatch.setattr(mod, "_REGIME_STATE_PATH", str(regime_file))
+        monkeypatch.setattr(mod, "_resolve_regime_state_path", lambda: str(regime_file))
 
         watch = {
             "name": "ZEC",

@@ -60,7 +60,27 @@ DATA_DIR = ""
 # pipeline cron. Used to suppress automatic zone-entry alerts when the
 # position's assigned strategy has negative backtest Sharpe. Missing file
 # (first run, cron missed a tick) is treated as "unknown" — no suppression.
-_REGIME_STATE_PATH = os.path.join(REPO_ROOT, "data", "backtest-nightly", "watchdog_regime_state.json")
+_ENV_REGIME_STATE = "MARKET_SKILLS_REGIME_STATE_PATH"
+
+_VALID_REGIME_STATUSES = frozenset({"positive", "negative", "unknown"})
+
+
+def _resolve_regime_state_path() -> str | None:
+    """Resolve the regime state file path.
+
+    1. ``MARKET_SKILLS_REGIME_STATE_PATH`` — explicit override.
+    2. ``MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR/watchdog_regime_state.json``
+       — fallback when the nightly backtest pipeline writes alongside.
+    3. Neither → ``None`` (no regime data, no suppression).
+    """
+    env = os.environ.get(_ENV_REGIME_STATE)
+    if env:
+        return os.path.expanduser(env)
+    out_dir = os.environ.get("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR")
+    if out_dir:
+        return os.path.join(os.path.expanduser(out_dir), "watchdog_regime_state.json")
+    return None
+
 
 # Sustained-failure window for the all-watches FATAL trip. A single tick of
 # all-fetches-failed is treated as a blip and logged but not fatal; the FATAL
@@ -221,17 +241,42 @@ def _bare_ticker(provider_ticker: str) -> str:
 def _load_regime_state() -> dict | None:
     """Load the nightly backtest regime state file or return None on any failure.
 
-    The file is regenerated nightly at 02:00 CEST by the backtest pipeline
+    The file is regenerated nightly at 02:00 CEST by the backtest-pipeline
     cron. Missing file (first run, cron missed a tick) is treated as
     "unknown" by callers — no suppression, no warning, just neutral.
+    Unset env var (``MARKET_SKILLS_REGIME_STATE_PATH``) also returns None.
+
+    Loaded data is validated against the contract shape; a mismatch logs
+    a warning and returns None (treat as unknown).
     """
-    if not os.path.exists(_REGIME_STATE_PATH):
+    path = _resolve_regime_state_path()
+    if not path:
+        return None
+    if not os.path.exists(path):
         return None
     try:
-        with open(_REGIME_STATE_PATH) as f:
-            return json.load(f)
+        with open(path) as f:
+            data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
+    positions = data.get("positions")
+    if not isinstance(positions, dict):
+        print(f"[WARN] regime state file at {path}: missing 'positions' object", file=sys.stderr)
+        return None
+    for ticker, strategies in positions.items():
+        if not isinstance(strategies, dict):
+            continue
+        for strat_name, strat_entry in strategies.items():
+            if not isinstance(strat_entry, dict):
+                continue
+            status = strat_entry.get("regime_status")
+            if not isinstance(status, str) or status not in _VALID_REGIME_STATUSES:
+                print(
+                    f"[WARN] regime state: {ticker}.{strat_name}.regime_status "
+                    f"must be one of {sorted(_VALID_REGIME_STATUSES)}, got {status!r}",
+                    file=sys.stderr,
+                )
+    return data
 
 
 def _regime_status_for_watch(watch: dict, regime_data: dict | None) -> str:
