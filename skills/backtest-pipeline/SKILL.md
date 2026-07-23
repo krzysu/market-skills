@@ -34,7 +34,11 @@ export MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR=/path/to/data/backtest-nightly
 # Optional: needed only for watchdog regime output
 export MARKET_SKILLS_BACKTEST_PIPELINE_OPEN_POSITIONS_PATH=/path/to/open-positions.json
 
+# Run all baskets
 uv run skills/backtest-pipeline/scripts/run.py
+
+# Run specific baskets
+uv run skills/backtest-pipeline/scripts/run.py --baskets crypto_majors crypto_alts
 ```
 
 ## Output files
@@ -71,7 +75,7 @@ All output file contracts are defined in `lib.py` as TypedDicts with validation 
 
 ## Architecture
 
-- **Ticker discovery**: `analysis.watchlist.basket()` on each `ACTIVE_BASKET`
+- **Ticker discovery**: `analysis.watchlist.categories()` — iterates all baskets in the watchlist. Use `--baskets` to target specific ones.
 - **Strategy discovery**: `analysis.registry.l3_strategies()` — top 3 are "primary" (full coverage), remainder limited to 3 secondary
 - **Per-pair execution**: shells out to `uv run skills/backtest-engine/scripts/run.py` with `--fill-sim --metrics --json`
 - **Baseline**: rolling 7-night average Sharpe per `{interval}×{strategy}×{ticker}`

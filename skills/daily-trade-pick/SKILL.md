@@ -50,17 +50,15 @@ Read the whole JSON, modify in memory, write back atomically. Never append parti
 
 ### B. Today's scan (with optional pick)
 
-1. **Tier list** (mirror Morning Brief): resolve live from `market-watchlist tickers tier_1 tier_2 --json`. Single source of truth — never hardcode.
-2. **L3 batch** on every tier 1+2 ticker:
+1. **Tier list** (mirror Morning Brief): resolve live from `market-watchlist list --json` to discover all baskets. Single source of truth — never hardcode.
+2. **L3 batch** on every ticker across all baskets:
    ```bash
-   T1=$(uv run skills/market-watchlist/scripts/run.py tickers tier_1 | tr '\n' ' ')
-   T2=$(uv run skills/market-watchlist/scripts/run.py tickers tier_2 | tr '\n' ' ')
-   TIERS=$(echo "$T1 $T2" | tr ' ' '\n' | sort -u | tr '\n' ' ')
-   uv run skills/run-all-l3/scripts/run.py $TIERS --json > /tmp/dtp_l3.json
+   BASKETS=$(uv run skills/market-watchlist/scripts/run.py list --json | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)['baskets'].keys()))")
+   uv run skills/run-all-l3/scripts/run.py $BASKETS --json > /tmp/dtp_l3.json
    ```
 3. **Macro alignment** (3 signals):
-   - Tier-1 bellwether A 4h trend-follow direction: `uv run skills/strategy-trend-follow/scripts/run.py <TIER_1_TICKER> --interval=4h --period=3mo --json` (resolve ticker from `market-watchlist tickers tier_1`). The `--period` flag is a kwarg, not positional — see [B2] in BUGS.md if it gets read as a ticker.
-   - Tier-1 bellwether B 4h trend-follow direction: same pattern, different tier_1 ticker
+   - Tier-1 bellwether A 4h trend-follow direction: `uv run skills/strategy-trend-follow/scripts/run.py <TIER_1_TICKER> --interval=4h --period=3mo --json` (resolve ticker from `market-watchlist tickers crypto_majors`). The `--period` flag is a kwarg, not positional — see [B2] in BUGS.md if it gets read as a ticker.
+   - Tier-1 bellwether B 4h trend-follow direction: same pattern, different bellwether ticker
    - F&G regime: use `market-macro` skill (returns `RegimeSignal` envelope) — canonical source for F&G/VIX/regime. Do NOT curl F&G separately; the skill handles it.
 4. **Bar evaluation** (per-source — see `references/multi-source-design.md`):
    1. Conviction ≥ source-specific gate (tier 1+2: ≥3; swing shortlist + CoinGecko: ≥4; smart money + HL narrative: ≥3 with L3 confirms)
@@ -202,7 +200,7 @@ The bundled `scripts/verify_journal.py` enforces a tight schema on `picks.json`.
 
 Lessons from the 2026-07-06 journal review (N=113 closed ideas, before classifier fix). Calibration dataset must be re-validated after the wick-exit / direction-blind `hit_target` fix lands (see "Bar strictness" below + journal backfill script).
 
-- **One perp-DEX token bleeds across the scan universe.** 11 closed ideas, 18% hit rate, -0.28% avg return — worst-performing tracked ticker. Perp-DEX scaling rule keeps most of it at conv=1/2 so the conviction floor catches it, but it still logs every tick. Remove from tier_1 scan (or set `tracking_only: true`); don't lower the bar.
+- **One perp-DEX token bleeds across the scan universe.** 11 closed ideas, 18% hit rate, -0.28% avg return — worst-performing tracked ticker. Perp-DEX scaling rule keeps most of it at conv=1/2 so the conviction floor catches it, but it still logs every tick. Remove from scan (or set `tracking_only: true`); don't lower the bar.
 - **`(unmapped)` basket dominates negative returns.** 41 ideas (~35%), 41% hit rate, -1.07% avg return. Treat as research-only; investigate watchlist drift vs scan-universe mismatch before trusting unmapped ticker signals.
 - **TP1 sweet spot is 5-10% from entry.** | Band | n | Hit | Avg | | 1-3% | 5 | 20% | -2.14% | | 3-5% | 25 | 28% | +2.18% | | **5-10% | 20 | 60% | +2.57%** | | 10-20% | 42 | 40% | -1.51% | | 20%+ | 21 | 29% | -1.01% |. Below 5%, wicks reverse before TP2; above 10%, the move overshoots before TP1. Tag ideas outside 5-10% with `rejection_reasons: ["tp1_outside_5_10_band"]` rather than tightening the bar.
 - **Stop sweet spot is 3-6% from entry.** | Band | n | Hit | Avg | | 0-3% | 27 | 33% | -0.11% | | **3-6% | 20 | 55% | +4.36%** | | 6-10% | 23 | 30% | +0.37% | | 10-15% | 25 | 40% | -2.81% | | 15%+ | 18 | 33% | -0.67% |. Tight stops (<3%) get wick-stopped; wide stops (>10%) collapse R:R. Mirror TP1: tag with `rejection_reasons: ["stop_outside_3_6_band"]`.
@@ -261,9 +259,9 @@ v0.7.0 — added 7 data-backed pitfalls from the 2026-07-06 journal review (11 d
 
 `strategy-trend-follow --json` returns `{"ideas": [...]}`. Read `ideas[0].direction` for the bellwether; if `ideas` is empty, treat the direction as `NEUTRAL` (0 alignment in the macro check). The `NEUTRAL` case is the common one for ETH 4h in mixed regimes.
 
-### Universe expansion when tier_1+2 is silent
+### Universe expansion when primary baskets are silent
 
-When tier_1+2 produces no `met_bar` ideas (or they're all in cooldown), expand to tier_1+2+3 by adding `tickers tier_3` to the `market-watchlist` invocation, dedup, and re-run the L3 batch. **Don't lower the bar** — expansion is the only sanctioned path. If expansion is also silent, the universe is genuinely quiet and the correct answer is `[SILENT]`.
+When primary baskets produce no `met_bar` ideas (or they're all in cooldown), expand to additional baskets by adding more basket names to the `market-watchlist` invocation, dedup, and re-run the L3 batch. **Don't lower the bar** — expansion is the only sanctioned path. If expansion is also silent, the universe is genuinely quiet and the correct answer is `[SILENT]`.
 
 ### FX pitfall — `rr_to_tp1` is quote-invariant, prices are not
 
