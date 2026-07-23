@@ -15,7 +15,7 @@ Ranks L3 trade ideas across watchlist baskets by conviction. Fetches candles **o
 
 ## When to use
 
-- Morning briefs and swing scans: "show me the strongest setups across `tier_1` and `tier_2` first."
+- Morning briefs and swing scans: "show me the strongest setups across `crypto_majors` and `crypto_alts` first."
 - After `run-all-l3` to re-shape its per-ticker output into a single ranking.
 - Any LLM-driven triage that needs a flat "best N trades right now" view, not the
   per-ticker breakdown that `run-all-l3` / `run-watchlist` print.
@@ -32,14 +32,14 @@ Ranks L3 trade ideas across watchlist baskets by conviction. Fetches candles **o
 ## Quick Start
 
 ```bash
-# All ideas across tier_1 + tier_2, default 1d/1y
-uv run skills/l3-conviction-scan/scripts/run.py tier_1 tier_2
+# All ideas across crypto_majors + crypto_alts, default 1d/1y
+uv run skills/l3-conviction-scan/scripts/run.py crypto_majors crypto_alts
 
 # Top 10, intraday TF, machine-readable
-uv run skills/l3-conviction-scan/scripts/run.py tier_1 --interval 4h --period 3mo --top 10 --json
+uv run skills/l3-conviction-scan/scripts/run.py crypto_alts --interval 4h --period 3mo --top 10 --json
 
 # Include top-5 strategy narratives after the table
-uv run skills/l3-conviction-scan/scripts/run.py tier_1 tier_2 --narrative
+uv run skills/l3-conviction-scan/scripts/run.py crypto_majors crypto_alts --narrative
 ```
 
 ## Flags
@@ -62,12 +62,12 @@ Both `--interval` and `--period` are validated via `analysis.intervals.validate_
 ### Text (default)
 
 ```text
-TF   BASKET    TICKER     STRATEGY                  DIR   CONV ENTRY      STOP      TP1       TP2       RRT2   VETO
----- ---------- ---------- -------------------------- ----- ---- --------- --------- --------- --------- ------ -----
-1d   tier_1    BTCUSD     strategy-trend-follow      long  5    67500.00  66200.00  70500.00  73000.00  2.44
-1d   tier_1    AAPL       strategy-breakout-confirm  long  4     187.20    182.50    194.00    199.50  2.31
-4h   tier_2    HYPEUSD    strategy-trend-follow      long  4      24.10     22.80     26.40     28.10  2.29
-1d   tier_1    ETHUSD     strategy-mean-reversion    long  3    3450.00   3380.00   3550.00   3620.00  1.78   mature-move
+TF   BASKET          TICKER     STRATEGY                  DIR   CONV ENTRY      STOP      TP1       TP2       RRT2   VETO
+---- --------------- ---------- -------------------------- ----- ---- --------- --------- --------- --------- ------ -----
+1d   crypto_majors   BTCUSD     strategy-trend-follow      long  5    67500.00  66200.00  70500.00  73000.00  2.44
+1d   crypto_majors   ETHUSD     strategy-breakout-confirm  long  4     187.20    182.50    194.00    199.50  2.31
+4h   crypto_alts     HYPEUSD    strategy-trend-follow      long  4      24.10     22.80     26.40     28.10  2.29
+1d   crypto_alts     SOLUSD     strategy-mean-reversion    long  3    3450.00   3380.00   3550.00   3620.00  1.78   mature-move
 ```
 
 `RRT2` is the deployment-ready R:R to TP2 (the runner TP1 here is just the
@@ -82,7 +82,7 @@ Read them, don't strip them.
 {
   "interval": "1d",
   "period": "1y",
-  "baskets": ["tier_1", "tier_2"],
+  "baskets": ["crypto_majors", "crypto_alts"],
   "count": 42,
   "ideas": [
     {

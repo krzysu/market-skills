@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shlex
@@ -55,8 +56,6 @@ def _resolve_state_file(out_dir: Path) -> Path:
 
 
 # ── Pipeline constants ─────────────────────────────────────────────
-
-ACTIVE_BASKETS = ["tier_1", "tier_2", "classics", "perp_dex", "ai_infra"]
 
 PRIMARY_STRATEGIES = [
     "strategy-trend-follow",
@@ -93,13 +92,18 @@ def _secondary_strategies() -> list[str]:
 # ── Ticker discovery ───────────────────────────────────────────────
 
 
-def _read_active_tickers() -> list[tuple[str, str]]:
-    """Read tickers from ACTIVE_BASKETS, returning (ticker_key, provider_ticker)."""
+def _read_active_tickers(baskets: list[str] | None = None) -> list[tuple[str, str]]:
+    """Read tickers from watchlist baskets.
+
+    Args:
+        baskets: Explicit basket names. If None, uses all baskets.
+    """
     import analysis.watchlist as wl
 
     result: list[tuple[str, str]] = []
     seen: set[str] = set()
-    for basket_name in ACTIVE_BASKETS:
+    categories = baskets if baskets else wl.categories()
+    for basket_name in categories:
         basket = wl.basket(basket_name)
         for ticker_key, meta in basket.items():
             if ticker_key in seen:
@@ -576,14 +580,25 @@ def _write_regime_health_brief(current: dict, state: dict, out_dir: Path) -> Non
 # ═══════════════════════════════════════════════════════════════════
 
 
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="backtest-pipeline")
+    p.add_argument(
+        "--baskets",
+        nargs="*",
+        help="Watchlist basket names to backtest (default: all except macro_refs)",
+    )
+    return p.parse_args()
+
+
 def main() -> int:
+    args = _parse_args()
     out_dir = _resolve_out_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     state_file = _resolve_state_file(out_dir)
 
     state = _load_state(state_file)
     is_first_run = state.get("first_run", True)
-    ticker_pairs = _read_active_tickers()
+    ticker_pairs = _read_active_tickers(baskets=args.baskets)
 
     strategies = PRIMARY_STRATEGIES + _secondary_strategies()
     intervals = BACKTEST_INTERVALS

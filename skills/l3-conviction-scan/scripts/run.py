@@ -7,10 +7,10 @@ In-process runner: imports ``skills.run-all-l3.lib.analyze`` via
 no host-specific paths.
 
 Usage:
-  uv run skills/l3-conviction-scan/scripts/run.py tier_1 tier_2
-  uv run skills/l3-conviction-scan/scripts/run.py tier_1 --interval 4h --period 3mo --top 10
-  uv run skills/l3-conviction-scan/scripts/run.py tier_1 tier_2 --json
-  uv run skills/l3-conviction-scan/scripts/run.py tier_1 tier_2 --narrative
+  uv run skills/l3-conviction-scan/scripts/run.py crypto_majors crypto_alts
+  uv run skills/l3-conviction-scan/scripts/run.py crypto_alts --interval 4h --period 3mo --top 10
+  uv run skills/l3-conviction-scan/scripts/run.py crypto_majors crypto_alts --json
+  uv run skills/l3-conviction-scan/scripts/run.py crypto_majors crypto_alts --narrative
 """
 
 import argparse
@@ -38,7 +38,7 @@ def main() -> int:
             "ticker, runs all L3 strategies in-process, ranks ideas by conviction."
         ),
     )
-    p.add_argument("baskets", nargs="+", help="Watchlist basket names (e.g. tier_1 tier_2)")
+    p.add_argument("baskets", nargs="+", help="Watchlist basket names (e.g. crypto_majors crypto_alts)")
     p.add_argument("--interval", default=DEFAULT_INTERVAL, help="Candle interval (default: 1d)")
     p.add_argument("--period", default=DEFAULT_PERIOD, help="Candle lookback (default: 1y)")
     p.add_argument("--source", help="Data provider override (e.g. yfinance, kraken, hl)")

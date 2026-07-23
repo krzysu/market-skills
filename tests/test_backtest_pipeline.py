@@ -8,6 +8,7 @@ future producer or consumer change could introduce.
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -415,6 +416,7 @@ class TestErrorReporting:
 
         monkeypatch.setattr(run_mod, "_resolve_out_dir", lambda: out_dir)
         monkeypatch.setattr(run_mod, "_resolve_state_file", lambda _d: state_file)
+        monkeypatch.setattr(run_mod, "_parse_args", lambda: argparse.Namespace(baskets=None))
         monkeypatch.setattr(run_mod, "_save_state", lambda *a: None)
         monkeypatch.setattr(run_mod, "_update_baseline", lambda *a: None)
         monkeypatch.setattr(run_mod, "_summarize_strategy_decay", lambda *a, **kw: [])
@@ -428,7 +430,7 @@ class TestErrorReporting:
         monkeypatch.setattr(
             run_mod,
             "_read_active_tickers",
-            lambda: [("BTCUSD", "kraken:BTCUSD"), ("ETHUSD", "kraken:ETHUSD")],
+            lambda baskets=None: [("BTCUSD", "kraken:BTCUSD"), ("ETHUSD", "kraken:ETHUSD")],
         )
 
         pair_results = [
