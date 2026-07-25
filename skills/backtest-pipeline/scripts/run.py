@@ -334,7 +334,7 @@ def _write_conviction_thresholds(current: dict, state: dict, out_dir: Path) -> N
         strat_dict = thresholds["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"].setdefault(strat, {})
         interval = key.split("\u00d7")[0] if "\u00d7" in key else "1d"
         ticker_entry = strat_dict.setdefault(ticker, {})
-        existing = ticker_entry.get(interval, 99)
+        existing = ticker_entry.get(interval, 100)
         if floor < existing:
             ticker_entry[interval] = floor
 
