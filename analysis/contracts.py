@@ -1,5 +1,6 @@
 """TypedDict contracts for L1, L2, and L3 skill return shapes."""
 
+from collections.abc import Callable
 from typing import Any, NotRequired, TypedDict
 
 SWING_MIN_STOP_DISTANCE: float = 0.02
@@ -39,6 +40,7 @@ class L1Result(TypedDict):
     score: NotRequired[int | None]
     signal: NotRequired[str | None]
     zone: NotRequired[str | None]
+    error: NotRequired[str]
 
 
 class L3Idea(TypedDict):
@@ -486,3 +488,62 @@ class AXIEnvelope(TypedDict, total=False):
     count: int | None
     errors: list[str]
     help: list[str]
+
+
+# --- Shared L3 idea finalization pipeline ---
+
+
+def finalize_ideas(
+    ideas: list[dict],
+    *,
+    strategy_name: str,
+    ticker: str,
+    interval: str,
+    pre_validate_hook: Callable[[dict], None] | None = None,
+) -> tuple[list[dict], str | None]:
+    """Run the shared post-build pipeline on a list of raw L3 ideas.
+
+    Pipeline per idea (in order):
+      1. ``pre_validate_hook(idea)`` — strategy-specific mutation (Pattern S,
+         CAPE tag, etc.). Optional; pass ``None`` to skip.
+      2. Pop internal ``_close`` key if present.
+      3. ``compute_rr_to_tp`` — enrich with canonical R:R.
+      4. ``validate_l3_tp_ladder_silent`` — reject structurally invalid ladders.
+      5. ``enforce_min_stop_distance`` — reject sub-2% stops (noise risk).
+
+    After per-idea validation, the conviction gate drops ideas below
+    ``lookup_min_conviction(strategy_name, ticker, interval)``.
+
+    Returns ``(validated_ideas, first_rejection)`` where
+    ``first_rejection`` is the first validation error message (for
+    narrative fallback) or ``None`` when all ideas passed.
+    """
+    from analysis.conviction_thresholds import lookup_min_conviction
+
+    first_rejection: str | None = None
+
+    if ideas:
+        validated = []
+        for idea in ideas:
+            if pre_validate_hook is not None:
+                pre_validate_hook(idea)
+            idea.pop("_close", None)
+            idea["rr_to_tp"] = compute_rr_to_tp(idea)
+            err = validate_l3_tp_ladder_silent(idea)
+            if err is not None:
+                if first_rejection is None:
+                    first_rejection = err
+                continue
+            ok, rej = enforce_min_stop_distance(idea)
+            if not ok:
+                if first_rejection is None:
+                    first_rejection = rej
+                continue
+            validated.append(idea)
+        ideas = validated
+
+    min_conv = lookup_min_conviction(strategy_name, ticker, interval)
+    if ideas and min_conv > 1:
+        ideas = [i for i in ideas if i.get("conviction", 0) >= min_conv]
+
+    return ideas, first_rejection

@@ -14,6 +14,11 @@ def load_skill(name: str):
     The skill name may contain hyphens (e.g. ``market-s-r``); the resulting
     module name has hyphens replaced with underscores so it is a valid Python
     identifier.
+
+    .. note:: The result is cached for the lifetime of the process
+       (``functools.cache``). Long-running processes (nightly pipelines,
+       cron loops) that edit a skill's ``lib.py`` mid-run must be
+       restarted to pick up changes.
     """
     lib_path = os.path.join(os.path.dirname(__file__), "..", "skills", name, "lib.py")
     if not os.path.exists(lib_path):

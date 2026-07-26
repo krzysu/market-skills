@@ -1,14 +1,11 @@
 """strategy-funding-carry — L3 strategy: harvest perp funding rates for income."""
 
 from analysis.contracts import (
-    compute_rr_to_tp,
     conviction_version,
-    enforce_min_stop_distance,
+    finalize_ideas,
     l3_tp3_dead_zone_ceiling,
     l3_tp3_dead_zone_floor,
-    validate_l3_tp_ladder_silent,
 )
-from analysis.conviction_thresholds import lookup_min_conviction
 from analysis.data import fetch_funding_rate
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
@@ -103,40 +100,15 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
 
     ideas = [idea]
 
-    tp_rejection = None
-    if ideas:
-        validated = []
-        for i in ideas:
-            i["rr_to_tp"] = compute_rr_to_tp(i)
-            err = validate_l3_tp_ladder_silent(i)
-            if err is None:
-                validated.append(i)
-            elif tp_rejection is None:
-                tp_rejection = err
-        ideas = validated
-
-    stop_2pct_rejection = None
-    if ideas:
-        filtered = []
-        for i in ideas:
-            ok, rej = enforce_min_stop_distance(i)
-            if ok:
-                filtered.append(i)
-            elif stop_2pct_rejection is None:
-                stop_2pct_rejection = rej
-        ideas = filtered
-
-    _min_conv = lookup_min_conviction(_STRATEGY_NAME, ticker, interval)
-    if ideas and _min_conv > 1:
-        ideas = [i for i in ideas if i.get("conviction", 0) >= _min_conv]
+    ideas, rejection = finalize_ideas(
+        ideas, strategy_name=_STRATEGY_NAME, ticker=ticker, interval=interval
+    )
 
     if ideas:
         dirs = ", ".join(i["direction"] for i in ideas)
         narrative = f"Funding carry setup: {dirs}. {reasoning}"
-    elif tp_rejection is not None:
-        narrative = tp_rejection
-    elif stop_2pct_rejection is not None:
-        narrative = stop_2pct_rejection
+    elif rejection is not None:
+        narrative = rejection
     else:
         narrative = "No funding carry setup — funding rate not extreme enough to emit an idea."
 

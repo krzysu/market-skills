@@ -139,6 +139,12 @@ The bullets below are descriptive of how the system is built, not
   layer that is never bypassed silently.
 - **Portfolio is SQLite.** One file, zero infra, but queryable via
   SQL — multi-portfolio, FIFO cost basis, P&L, replay, reconcile.
+  The `portfolio/` package (installed via `pyproject.toml`) owns the
+  DB schema, migrations, and query functions (`portfolio.db`). The
+  `skills/portfolio-mgmt/` skill is the CLI wrapper that exposes those
+  functions to the LLM agent. The package is separate so that
+  `execution-kraken-spot` can import `portfolio.db.add_transaction`
+  directly (fill → portfolio wiring) without depending on the skill.
 - **Providers are protocol-based.** `DataProvider` and
   `ExecutionProvider` Protocols in `analysis/providers/` — add a venue
   by implementing one and registering it. Same pattern for data and
