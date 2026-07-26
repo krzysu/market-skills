@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-import analysis.conviction_thresholds as ct
+import analysis.signals.conviction_thresholds as ct
 
 
 class TestShippedState:

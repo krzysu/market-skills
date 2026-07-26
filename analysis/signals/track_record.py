@@ -1,4 +1,4 @@
-"""analysis.track_record — per-ticker hit-rate signal from DTP journal.
+"""analysis.signals.track_record — per-ticker hit-rate signal from DTP journal.
 
 Read-side helper used by the DTP tick to size ``suggested_size_eur`` based
 on a ticker's recent closed-idea track record.  Reads the parsed

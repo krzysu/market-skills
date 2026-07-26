@@ -279,7 +279,7 @@ def write_fill_to_portfolio(
 
     # Record the decision trace in the decisions table.
     if intent:
-        from analysis.decision import build_decision_context_from_idea, direction_from_side
+        from analysis.signals.decision import build_decision_context_from_idea, direction_from_side
 
         take_profit = []
         if intent.get("bracket"):

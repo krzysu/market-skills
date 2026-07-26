@@ -518,7 +518,7 @@ def finalize_ideas(
     ``first_rejection`` is the first validation error message (for
     narrative fallback) or ``None`` when all ideas passed.
     """
-    from analysis.conviction_thresholds import lookup_min_conviction
+    from analysis.signals.conviction_thresholds import lookup_min_conviction
 
     first_rejection: str | None = None
 

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from analysis.perp_state import (
+from analysis.signals.perp_state import (
     KRAKEN_FUTURES_MAP,
     get_funding_rate,
     get_mm_rate,
@@ -38,7 +38,7 @@ class TestGetOpenPositions:
                 {"symbol": "PF_BTCUSD", "size": 0.001},
             ]
         }
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_open_positions()
         assert result == [
             {"symbol": "PF_SOLUSD", "size": -10.5},
@@ -53,7 +53,7 @@ class TestGetOpenPositions:
                 {"symbol": "PF_ETHUSD", "size": -2.0},
             ]
         }
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_open_positions()
         assert result == [
             {"symbol": "PF_BTCUSD", "size": 0.001},
@@ -68,7 +68,7 @@ class TestGetOpenPositions:
                 "PF_BTCUSD": {"size": 0.001},
             }
         }
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_open_positions()
         assert len(result) == 2
         symbols = {p["symbol"] for p in result}
@@ -77,23 +77,23 @@ class TestGetOpenPositions:
     def test_returns_none_on_auth_error(self) -> None:
         # Auth error envelope: stdout has {"error": "auth"} on rc=0.
         auth_resp = {"error": "auth", "message": "no creds"}
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(auth_resp)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(auth_resp)):
             result = get_open_positions()
         assert result is None
 
     def test_returns_none_on_cli_missing(self) -> None:
-        with patch("analysis.perp_state.subprocess.run", side_effect=FileNotFoundError):
+        with patch("analysis.signals.perp_state.subprocess.run", side_effect=FileNotFoundError):
             result = get_open_positions()
         assert result is None
 
     def test_returns_empty_list_when_envelope_lacks_positions_key(self) -> None:
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result({})):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result({})):
             result = get_open_positions()
         assert result == []
 
     def test_raises_on_timeout(self) -> None:
         with patch(
-            "analysis.perp_state.subprocess.run",
+            "analysis.signals.perp_state.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="kraken", timeout=30),
         ):
             with pytest.raises(RuntimeError, match="timed out"):
@@ -109,7 +109,7 @@ class TestGetOpenPositions:
                 {"symbol": "PF_ETHUSD", "size": "bad"},  # non-numeric size
             ]
         }
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_open_positions()
         assert result == [{"symbol": "PF_SOLUSD", "size": -10.5}]
 
@@ -122,25 +122,25 @@ class TestGetFundingRate:
                 {"fundingRate": 0.0005, "timestamp": "2026-06-24T08:00:00Z"},
             ]
         }
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_funding_rate("SOLUSD", "buy")
         assert result == 0.0005
 
     def test_short_flips_sign(self) -> None:
         envelope = {"rates": [{"fundingRate": 0.0005, "timestamp": "2026-06-24T08:00:00Z"}]}
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_funding_rate("SOLUSD", "sell")
         assert result == -0.0005
 
     def test_negative_raw_rate_for_long(self) -> None:
         envelope = {"rates": [{"fundingRate": -0.0003, "timestamp": "2026-06-24T08:00:00Z"}]}
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_funding_rate("SOLUSD", "buy")
         assert result == -0.0003
 
     def test_negative_raw_rate_for_short(self) -> None:
         envelope = {"rates": [{"fundingRate": -0.0003, "timestamp": "2026-06-24T08:00:00Z"}]}
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_funding_rate("SOLUSD", "sell")
         assert result == 0.0003  # flips: shorts receive
 
@@ -152,13 +152,13 @@ class TestGetFundingRate:
                 {"fundingRate": 0.0008, "timestamp": "2026-06-24T08:00:00Z"},
             ]
         }
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_funding_rate("SOLUSD", "buy")
         assert result == 0.0008
 
     def test_returns_none_on_auth_error(self) -> None:
         auth_resp = {"error": "auth", "message": "no creds"}
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(auth_resp)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(auth_resp)):
             result = get_funding_rate("SOLUSD", "buy")
         assert result is None
 
@@ -169,13 +169,13 @@ class TestGetFundingRate:
 
     def test_returns_none_when_rates_missing(self) -> None:
         envelope = {"not_rates": []}
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_funding_rate("SOLUSD", "buy")
         assert result is None
 
     def test_returns_none_when_last_entry_lacks_funding_rate(self) -> None:
         envelope = {"rates": [{"timestamp": "2026-06-24T08:00:00Z"}]}
-        with patch("analysis.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
+        with patch("analysis.signals.perp_state.subprocess.run", return_value=_kraken_result(envelope)):
             result = get_funding_rate("SOLUSD", "buy")
         assert result is None
 

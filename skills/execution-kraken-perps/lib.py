@@ -257,7 +257,7 @@ def write_fill_to_portfolio(
                 notes_blob[k] = v
 
         # Record the decision trace in the decisions table.
-        from analysis.decision import build_decision_context_from_idea, direction_from_side
+        from analysis.signals.decision import build_decision_context_from_idea, direction_from_side
 
         sl = bracket.get("stop_loss")
         tp = bracket.get("take_profit")

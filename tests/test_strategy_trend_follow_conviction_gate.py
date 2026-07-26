@@ -29,7 +29,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-import analysis.conviction_thresholds as ct
+import analysis.signals.conviction_thresholds as ct
 
 
 def _load_lib():
