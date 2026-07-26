@@ -1616,9 +1616,9 @@ class TestBuildContextPerps:
         args = self._args(tmp_path, venue="kraken")
         # Confirm the perps fetchers are NEVER called.
         with monkeypatch.context() as m:
-            m.setattr("analysis.perp_state.get_open_positions", lambda: None)
-            m.setattr("analysis.perp_state.get_funding_rate", lambda p, s: None)
-            m.setattr("analysis.perp_state.get_mm_rate", lambda p: 0.01)
+            m.setattr("analysis.signals.perp_state.get_open_positions", lambda: None)
+            m.setattr("analysis.signals.perp_state.get_funding_rate", lambda p, s: None)
+            m.setattr("analysis.signals.perp_state.get_mm_rate", lambda p: 0.01)
             ctx = lib.build_context(args)
 
         # No perps fields touched.
@@ -1640,11 +1640,11 @@ class TestBuildContextPerps:
         )
         with monkeypatch.context() as m:
             m.setattr(
-                "analysis.perp_state.get_open_positions",
+                "analysis.signals.perp_state.get_open_positions",
                 lambda: [{"symbol": "PF_SOLUSD", "size": -10.0}],
             )
-            m.setattr("analysis.perp_state.get_funding_rate", lambda p, s: 0.0003)
-            m.setattr("analysis.perp_state.get_mm_rate", lambda p: 0.01)
+            m.setattr("analysis.signals.perp_state.get_funding_rate", lambda p, s: 0.0003)
+            m.setattr("analysis.signals.perp_state.get_mm_rate", lambda p: 0.01)
             ctx = lib.build_context(args)
 
         assert ctx.open_perps_positions == [{"symbol": "PF_SOLUSD", "size": -10.0}]
@@ -1669,14 +1669,14 @@ class TestBuildContextPerps:
         with monkeypatch.context() as m:
             # These should never be called — overrides take precedence.
             m.setattr(
-                "analysis.perp_state.get_open_positions",
+                "analysis.signals.perp_state.get_open_positions",
                 lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
             )
             m.setattr(
-                "analysis.perp_state.get_funding_rate",
+                "analysis.signals.perp_state.get_funding_rate",
                 lambda p, s: (_ for _ in ()).throw(AssertionError("should not be called")),
             )
-            m.setattr("analysis.perp_state.get_mm_rate", lambda p: 0.01)
+            m.setattr("analysis.signals.perp_state.get_mm_rate", lambda p: 0.01)
             ctx = lib.build_context(args)
 
         assert ctx.funding_rate_per_8h == 0.0099
@@ -1691,14 +1691,14 @@ class TestBuildContextPerps:
         args = self._args(tmp_path, pair="SOLUSD", side="buy", venue="kraken-perps")
         with monkeypatch.context() as m:
             m.setattr(
-                "analysis.perp_state.get_open_positions",
+                "analysis.signals.perp_state.get_open_positions",
                 lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
             )
             m.setattr(
-                "analysis.perp_state.get_funding_rate",
+                "analysis.signals.perp_state.get_funding_rate",
                 lambda p, s: (_ for _ in ()).throw(AssertionError("should not be called")),
             )
-            m.setattr("analysis.perp_state.get_mm_rate", lambda p: 0.01)
+            m.setattr("analysis.signals.perp_state.get_mm_rate", lambda p: 0.01)
             ctx = lib.build_context(args)
 
         # MM rate resolved from the static table even without --perps-account.
@@ -1746,11 +1746,11 @@ class TestBuildContextPerps:
         args = self._args(tmp_path, intent=str(intent_path), perps_account="kraken-futures")
         with monkeypatch.context() as m:
             m.setattr(
-                "analysis.perp_state.get_open_positions",
+                "analysis.signals.perp_state.get_open_positions",
                 lambda: [{"symbol": "PF_SOLUSD", "size": -5.0}],
             )
-            m.setattr("analysis.perp_state.get_funding_rate", lambda p, s: -0.0002)
-            m.setattr("analysis.perp_state.get_mm_rate", lambda p: 0.01)
+            m.setattr("analysis.signals.perp_state.get_funding_rate", lambda p, s: -0.0002)
+            m.setattr("analysis.signals.perp_state.get_mm_rate", lambda p: 0.01)
             ctx = lib.build_context(args)
 
         # All three perps fields populated — file venue resolved correctly.
@@ -1789,8 +1789,8 @@ class TestBuildContextPerps:
             funding_rate_per_8h=0.005,  # 1.5% per 8h — way over the 1% warn threshold
         )
         with monkeypatch.context() as m:
-            m.setattr("analysis.perp_state.get_open_positions", lambda: [])
-            m.setattr("analysis.perp_state.get_mm_rate", lambda p: 0.01)
+            m.setattr("analysis.signals.perp_state.get_open_positions", lambda: [])
+            m.setattr("analysis.signals.perp_state.get_mm_rate", lambda p: 0.01)
             ctx = lib.build_context(args)
 
         # Validate the intent and run vet

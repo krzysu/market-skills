@@ -27,7 +27,7 @@ Usage:
     python3 scripts/backfill_outcomes.py --journal /path/to/picks.json
     python3 scripts/backfill_outcomes.py --dry-run           # preview only, no write
 
-Dependencies: none outside stdlib + analysis.track_record (already installed).
+Dependencies: none outside stdlib + analysis.signals.track_record (already installed).
 """
 
 from __future__ import annotations

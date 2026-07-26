@@ -7,7 +7,7 @@ import tempfile
 
 import pytest
 
-from analysis import chop as regime
+from analysis.signals import chop as regime
 
 
 class TestChopScore:

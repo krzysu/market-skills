@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from analysis.track_record import compute_track_record
+from analysis.signals.track_record import compute_track_record
 
 
 def _scan(scan_id: str, ideas: list[dict]) -> dict:

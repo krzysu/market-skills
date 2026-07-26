@@ -2,7 +2,7 @@
 
 import pytest
 
-from analysis.decision import (
+from analysis.signals.decision import (
     build_decision_context,
     build_decision_context_from_idea,
     compute_rr_to_tp2,

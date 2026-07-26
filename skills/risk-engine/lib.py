@@ -289,7 +289,7 @@ def _populate_perps_context(ctx: RiskContext, args: argparse.Namespace) -> None:
     ``Namespace`` manually won't have either attribute — the perps
     branch is skipped.
     """
-    from analysis.perp_state import get_funding_rate, get_mm_rate, get_open_positions
+    from analysis.signals.perp_state import get_funding_rate, get_mm_rate, get_open_positions
 
     venue, pair_from_file, side_from_file = _resolve_intent_meta(args)
     is_perps = bool(venue) and venue.endswith("-perps")

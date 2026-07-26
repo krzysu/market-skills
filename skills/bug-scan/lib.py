@@ -890,7 +890,7 @@ def _collect_ideas(l3_data: dict) -> list[dict]:
 
 def _chop_score_findings() -> list[dict]:
     """Read the rolling L3 idea history and emit a chop_score finding."""
-    from analysis import chop as _regime
+    from analysis.signals import chop as _regime
 
     summary = _regime.chop_score_from_history()
     if not summary:
@@ -906,10 +906,10 @@ def _chop_score_findings() -> list[dict]:
 
 
 def analysis_regime_append_tick(ideas: list[dict]) -> int:
-    """Thin wrapper around ``analysis.chop.append_tick`` so callers don't
+    """Thin wrapper around ``analysis.signals.chop.append_tick`` so callers don't
     need to import the module separately.
     """
-    from analysis import chop as _regime
+    from analysis.signals import chop as _regime
 
     return _regime.append_tick(ideas)
 
