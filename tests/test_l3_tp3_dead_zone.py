@@ -329,7 +329,9 @@ def test_validator_rejection_surfaces_structured_narrative(monkeypatch, _patched
     def always_fail(_idea):
         return "L3 TEST short TP3 must be ≤ entry × 0.95 (entry=100.0, tp3=99.0, required<=95.0)"
 
-    monkeypatch.setattr(mod, "validate_l3_tp_ladder_silent", always_fail)
+    import analysis.contracts as _contracts
+
+    monkeypatch.setattr(_contracts, "validate_l3_tp_ladder_silent", always_fail)
 
     candles = _make_candles(n=250, base=100.0, seed=42, lock_close=100.3, half_range=1.5)
     result = mod.analyze(candles, ticker="TEST", interval="4h", period="6mo")

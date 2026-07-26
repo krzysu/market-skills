@@ -25,6 +25,7 @@ include = ["analysis*", "portfolio*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: requires network access (yfinance)"]
 
 [tool.ruff]
 target-version = "py312"
@@ -34,13 +35,23 @@ line-length = 120
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
-"skills/*/scripts/run.py" = ["E402", "E501"]
+"skills/*/scripts/run.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.390",
     "pytest>=9.0.3",
     "ruff>=0.11.0",
 ]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["analysis", "portfolio"]
+exclude = ["skills/*/scripts", "tests"]
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false

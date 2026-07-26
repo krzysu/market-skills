@@ -78,12 +78,6 @@ from .spot import (
 # Policy signature: (intent, ctx) -> RiskVerdictFragment
 Policy = Callable[[Intent, RiskContext], RiskVerdictFragment]
 
-# Public aliases preserving the original analysis.risk public API.
-DEFAULT_POLICIES: list[Policy] = list(SPOT_POLICIES)
-"""Spot-only policy set. Re-exported as ``DEFAULT_POLICIES`` for
-backward compatibility — older callers that imported this name keep
-working."""
-
 
 def is_perps_intent(intent: dict | Intent) -> bool:
     """True when ``intent`` targets a perps venue (any provider).
@@ -431,7 +425,6 @@ def apply_pair_overrides(ctx: RiskContext, overrides: dict | None, pair: str | N
 
 
 __all__ = [
-    "DEFAULT_POLICIES",
     "PERPS_POLICIES",
     "Policy",
     "RiskContext",

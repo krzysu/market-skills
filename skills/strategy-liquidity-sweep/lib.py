@@ -1,14 +1,11 @@
 """strategy-liquidity-sweep — L3 strategy: sweep + accumulation reversal."""
 
 from analysis.contracts import (
-    compute_rr_to_tp,
     conviction_version,
-    enforce_min_stop_distance,
+    finalize_ideas,
     l2_fired,
     l3_tp3_dead_zone_floor,
-    validate_l3_tp_ladder_silent,
 )
-from analysis.conviction_thresholds import lookup_min_conviction
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
@@ -174,44 +171,14 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None, co
             }
         )
 
-    tp_rejection = None
-    if ideas:
-        validated = []
-        for idea in ideas:
-            idea["rr_to_tp"] = compute_rr_to_tp(idea)
-            err = validate_l3_tp_ladder_silent(idea)
-            if err is None:
-                validated.append(idea)
-            elif tp_rejection is None:
-                tp_rejection = err
-        ideas = validated
-
-    # Drop sub-2% stops (noise risk in swing mode).
-    stop_2pct_rejection = None
-    if ideas:
-        filtered = []
-        for idea in ideas:
-            ok, rej = enforce_min_stop_distance(idea)
-            if ok:
-                filtered.append(idea)
-            elif stop_2pct_rejection is None:
-                stop_2pct_rejection = rej
-        ideas = filtered
-
-    # Tighten entry gate (bead market-skills-96y, market-skills-oin):
-    # drop low-conviction noise. Threshold comes from the per-(ticker,
-    # interval) table in `analysis.conviction_thresholds`; ``1`` is the
-    # no-op floor and any ``>= 2`` value drops low-conviction ideas.
-    _min_conv = lookup_min_conviction(_STRATEGY_NAME, ticker, interval)
-    if ideas and _min_conv > 1:
-        ideas = [i for i in ideas if i.get("conviction", 0) >= _min_conv]
+    ideas, rejection = finalize_ideas(
+        ideas, strategy_name=_STRATEGY_NAME, ticker=ticker, interval=interval
+    )
 
     if ideas:
         narrative = f"Liquidity sweep setup: long. {sweep_result.get('narrative', '')}"
-    elif tp_rejection is not None:
-        narrative = tp_rejection
-    elif stop_2pct_rejection is not None:
-        narrative = stop_2pct_rejection
+    elif rejection is not None:
+        narrative = rejection
     else:
         narrative = "No liquidity sweep setup — sweep, accumulation, or volume confirmation missing."
 

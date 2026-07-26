@@ -495,8 +495,8 @@ class TestKrakenPerpsReadOps:
 
 
 from analysis.risk import (  # noqa: E402
-    DEFAULT_POLICIES,
     PERPS_POLICIES,
+    SPOT_POLICIES,
     RiskContext,
     duplicate_perps_position_policy,
     funding_drag_policy,
@@ -740,7 +740,7 @@ class TestPolicySelection:
             "bracket": {"stop_loss": 76.66, "take_profit": 58.07},
         }
         chosen = select_policies(intent)
-        assert len(chosen) == len(DEFAULT_POLICIES) + len(PERPS_POLICIES)
+        assert len(chosen) == len(SPOT_POLICIES) + len(PERPS_POLICIES)
         # Spot policies are still in the set.
         assert any(p is leverage_cap_policy for p in chosen)
         assert any(p is duplicate_perps_position_policy for p in chosen)
@@ -756,7 +756,7 @@ class TestPolicySelection:
             "limit_price": 65000,
         }
         chosen = select_policies(intent)
-        assert len(chosen) == len(DEFAULT_POLICIES)
+        assert len(chosen) == len(SPOT_POLICIES)
         assert all(p not in PERPS_POLICIES for p in chosen)
 
     def test_explicit_policies_arg_wins(self):

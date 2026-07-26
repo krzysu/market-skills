@@ -1,13 +1,10 @@
 """strategy-breakout-confirm — L3 strategy: confirmed breakouts with volume + squeeze."""
 
 from analysis.contracts import (
-    compute_rr_to_tp,
     conviction_version,
-    enforce_min_stop_distance,
+    finalize_ideas,
     l2_classification,
-    validate_l3_tp_ladder,
 )
-from analysis.conviction_thresholds import lookup_min_conviction
 from analysis.formatting import round_price
 from analysis.indicators import compute_atr_from_candles
 from analysis.skill_loader import load_skill
@@ -114,34 +111,14 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
             }
         )
 
-    for idea in ideas:
-        idea["rr_to_tp"] = compute_rr_to_tp(idea)
-        validate_l3_tp_ladder(idea)
-
-    # Drop sub-2% stops (noise risk in swing mode).
-    stop_2pct_rejection = None
-    if ideas:
-        filtered = []
-        for idea in ideas:
-            ok, rej = enforce_min_stop_distance(idea)
-            if ok:
-                filtered.append(idea)
-            elif stop_2pct_rejection is None:
-                stop_2pct_rejection = rej
-        ideas = filtered
-
-    # Tighten entry gate (bead market-skills-6th, market-skills-oin):
-    # drop low-conviction noise. Threshold comes from the per-(ticker,
-    # interval) table in `analysis.conviction_thresholds`; ``1`` is the
-    # no-op floor and any ``>= 2`` value drops low-conviction ideas.
-    _min_conv = lookup_min_conviction(_STRATEGY_NAME, ticker, interval)
-    if ideas and _min_conv > 1:
-        ideas = [i for i in ideas if i.get("conviction", 0) >= _min_conv]
+    ideas, rejection = finalize_ideas(
+        ideas, strategy_name=_STRATEGY_NAME, ticker=ticker, interval=interval
+    )
 
     if ideas:
         narrative = f"Breakout momentum setup: {', '.join(i['direction'] for i in ideas)}."
-    elif stop_2pct_rejection is not None:
-        narrative = stop_2pct_rejection
+    elif rejection is not None:
+        narrative = rejection
     else:
         narrative = "No confirmed breakout — volume or squeeze confirmation missing."
 

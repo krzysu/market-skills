@@ -318,7 +318,9 @@ class TestFundingCarryTpLadder:
     def test_low_atr_clamps_tp3_to_5pct_floor(self, monkeypatch):
         mod = _load_strat_lib()
         candles = _make_flat_candles(n=250, base=100.0, half_range=0.2)
-        monkeypatch.setattr(mod, "enforce_min_stop_distance", lambda idea: (True, ""))
+        import analysis.contracts as _contracts
+
+        monkeypatch.setattr(_contracts, "enforce_min_stop_distance", lambda idea: (True, ""))
 
         _patch_funding(monkeypatch, mod, -0.0015)
         result = mod.analyze(candles, ticker="BTC/USDT", interval="1d", period="1y")

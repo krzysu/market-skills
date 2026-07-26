@@ -22,6 +22,10 @@ _l2_skills: list[str] = [
     "market-liquidity-sweep",
     "market-trend-quality",
 ]
+# market-basis is intentionally NOT here — it's a venue-state sidecar
+# (funding rate, spot-perp basis), not a price-derived pattern detector.
+# The LLM runs it separately during narration; it doesn't compose into L3s
+# via the batch runner pipeline.
 
 _l3_strategies: list[str] = [
     "strategy-trend-follow",

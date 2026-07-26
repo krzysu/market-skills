@@ -18,7 +18,7 @@ import os
 
 import pytest
 
-from analysis.contracts import SWING_MIN_STOP_DISTANCE, enforce_min_stop_distance
+from analysis.contracts import SWING_MIN_STOP_DISTANCE, enforce_min_stop_distance, finalize_ideas
 
 # -- unit tests for the helper ------------------------------------------------
 
@@ -92,6 +92,7 @@ STRATEGY_DIRS = [
     "strategy-accumulation-swing",
     "strategy-breakout-confirm",
     "strategy-exhaustion-fade",
+    "strategy-funding-carry",
     "strategy-liquidity-sweep",
     "strategy-mean-reversion",
     "strategy-trend-follow",
@@ -113,19 +114,19 @@ def _load_hype_fixture() -> list[list]:
 
 
 class TestStrategyWiring:
-    """Each L3 strategy imports ``enforce_min_stop_distance`` from contracts.
+    """Each L3 strategy imports ``finalize_ideas`` from contracts.
 
     Importing the lib.py and confirming the symbol is bound in the module
     namespace catches the "forgot to import after refactor" regression.
     """
 
     @pytest.mark.parametrize("strategy_dir", STRATEGY_DIRS)
-    def test_strategy_imports_enforce_min_stop_distance(self, strategy_dir: str):
+    def test_strategy_imports_finalize_ideas(self, strategy_dir: str):
         mod = _load_strat_lib(strategy_dir)
-        assert hasattr(mod, "enforce_min_stop_distance"), (
-            f"{strategy_dir}/lib.py must import enforce_min_stop_distance from analysis.contracts"
+        assert hasattr(mod, "finalize_ideas"), (
+            f"{strategy_dir}/lib.py must import finalize_ideas from analysis.contracts"
         )
-        assert mod.enforce_min_stop_distance is enforce_min_stop_distance
+        assert mod.finalize_ideas is finalize_ideas
 
 
 class TestStrategyNaturalStopsRespectGuard:
