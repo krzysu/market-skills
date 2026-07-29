@@ -22,6 +22,7 @@ ctx shape (built by run.py from the watch + tick state):
       "primary_quote": str,              # monitor's quote — "USD" | "EUR" | "GBP" | ...
       "monitor_provider": str,           # "kraken:HYPEUSD"
       "format_style": str,               # "default" | "compact" | "verbose"
+      "interval": str,                   # watch interval — "4h" | "1d" | ...
   }
 
 All prices in every event dict (``current_price``, ``stop_price``,

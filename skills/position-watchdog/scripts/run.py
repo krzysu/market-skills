@@ -510,9 +510,10 @@ def _build_ctx(
     return {
         "name": watch["name"],
         "price": float(price),
-        "primary_quote": _primary_quote(monitor_provider) or "EUR",
+        "primary_quote": _primary_quote(monitor_provider) or ("USD" if monitor_provider.startswith("hl:") else "EUR"),
         "monitor_provider": monitor_provider,
         "format_style": format_style,
+        "interval": watch.get("interval", "4h"),
     }
 
 
@@ -567,9 +568,10 @@ def _render_status_mode(watches: list[dict], args) -> int:
             ctx = {
                 "name": name,
                 "price": None,
-                "primary_quote": _primary_quote(monitor) or "EUR",
+                "primary_quote": _primary_quote(monitor) or ("USD" if monitor.startswith("hl:") else "EUR"),
                 "monitor_provider": monitor,
                 "format_style": "default",
+                "interval": watch.get("interval", "4h"),
             }
 
         event = _status_summary(
@@ -835,8 +837,9 @@ def main() -> int:
             fetch_failures += 1
             continue
 
+        interval = watch.get("interval", "4h")
         for alert in alerts:
-            print(f"[{watch['name']}] {alert}")
+            print(f"[{watch['name']} {interval}] {alert}")
             any_alerts = True
 
         if new_state is not None and not args.dry_run:
