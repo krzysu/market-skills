@@ -218,6 +218,14 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
 
+> **Worktree lifecycle (ALWAYS):** when you have committed to a worktree branch
+> (`wt/t_<card-id>`) and the work is merged/closed, never leave the branch or its
+> registered worktree dir behind. Either prune it yourself after merge, or tell
+> the dispatcher explicitly that it can be pruned (`git worktree remove --force`
+> + `git branch -D wt/t_<card-id>`). A branch that is merged but never pruned is
+> the #1 cause of orphaned-fork accumulation (24 orphans found 2026-09-02). Never
+> prune a worktree that is still running work.
+
 **Critical rules:**
 
 - Explicit user or orchestrator instructions override this Beads block.
