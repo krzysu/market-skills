@@ -18,10 +18,18 @@ The shipped (env-unset) state must satisfy these contracts:
 - ``MIN_CONVICTION_TO_EMIT_BY_STRATEGY == {}`` (no asset refs in source).
 - ``lookup_min_conviction`` returns the global default for every
   unknown combination.
+
+The module under test loads overrides at import time (explicit env var,
+or the ``MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR`` fallback), so in a
+shell where either is exported the import-time table already holds
+private asset refs. The autouse ``_hermetic_ct_module`` fixture below
+deletes both vars and reloads the module so every test starts from the
+shipped state regardless of the ambient environment.
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -30,6 +38,33 @@ from pathlib import Path
 import pytest
 
 import analysis.signals.conviction_thresholds as ct
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_ct_module(monkeypatch):
+    """Give every test the shipped module state, whatever the ambient env.
+
+    ``analysis.signals.conviction_thresholds`` calls ``_load_overrides()``
+    at import time and falls back to
+    ``$MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR/conviction_thresholds_private.json``
+    when the explicit var is unset. If either var is exported (live
+    pipeline profile), the import-time load pre-populates the table with
+    real asset refs, which would leak into the shipped-state and env-var
+    assertions below. Snapshot the ambient state, delete BOTH vars,
+    reload the module so the shipped empty table is what the tests see,
+    then restore the ambient state on exit.
+    """
+    saved_global = ct.GLOBAL_MIN_CONVICTION_TO_EMIT
+    saved_table: dict[str, dict[tuple[str, str], int]] = {
+        k: dict(v) for k, v in ct.MIN_CONVICTION_TO_EMIT_BY_STRATEGY.items()
+    }
+    monkeypatch.delenv("MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH", raising=False)
+    monkeypatch.delenv("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR", raising=False)
+    importlib.reload(ct)
+    yield
+    ct.GLOBAL_MIN_CONVICTION_TO_EMIT = saved_global
+    ct.MIN_CONVICTION_TO_EMIT_BY_STRATEGY.clear()
+    ct.MIN_CONVICTION_TO_EMIT_BY_STRATEGY.update(saved_table)
 
 
 class TestShippedState:
