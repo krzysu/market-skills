@@ -1,14 +1,22 @@
 """Tests for the strategy-fitness-heatmap skill (review finding MINOR).
 
-The heatmap orchestrates watchlist + l3_strategies registry + backtest-engine
-walk-forward replay + FillSimulator + compute metrics + FetchOnce-per-ticker
-semantics. These tests pin that orchestration end-to-end without touching the
+The heatmap has two sources behind one AXI output shape:
+
+- **default (nightly)**: reads the backtest-pipeline's ``fitness_matrix.json``
+  + latest ``runs.jsonl`` run from ``$MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR``
+  (repo-relative ``data/backtest-nightly/`` fallback) - zero network;
+- **``--fresh``** (and the missing-artifact fallback): the full walk-forward
+  replay + FillSimulator + compute grid over the registry x watchlist.
+
+The fresh-grid tests pin that orchestration end-to-end without touching the
 network: ``fetch_ohlc`` and ``load_skill`` are monkeypatched on the loaded run
 module, while the real ``backtest-engine/lib.py`` is loaded via importlib so
 the WalkForwardRunner / FillSimulator / compute / buy_and_hold_benchmark
-pipeline is exercised for real.
+pipeline is exercised for real. They all pass explicit ``--tickers`` /
+``--strategies`` overrides (which imply ``--fresh``), so they always exercise
+the fresh grid.
 
-Covers the seven cases required by the review:
+Covers the seven fresh-grid cases required by the review:
 
   1. empty ticker list
   2. empty strategy list (l3_strategies patched to [])
@@ -17,6 +25,16 @@ Covers the seven cases required by the review:
   5. insufficient candles (fewer candles than the interval warmup)
   6. strategy not found (load_skill -> None for a strategy name)
   7. synthetic candle set producing a known Sharpe value
+
+Plus the nightly-default-path cases:
+
+  8. default reads fitness_matrix.json + latest runs.jsonl run (zero network)
+  9. JSON null matrix cells are preserved, not coerced to 0.0
+  10. missing / unreadable / empty artifacts degrade to the fresh grid
+  11. --fresh (and grid overrides) force the recompute over nightly artifacts
+  12. non-dict runs.jsonl results entry degrades to the no-result shape
+  13. --help prints the skill's own flags (not the generic AXI usage)
+  14. human mode surfaces the fallback note + errors on stderr
 
 All tests are deterministic and network-free.
 """
@@ -405,3 +423,424 @@ def test_candles_fetched_once_per_ticker_per_interval(capsys, monkeypatch):
     assert intervals_seen == ["1d", "4h"]
     env = _envelope(capsys)
     assert env["count"] == 4  # 2 strategies * 1 ticker * 2 intervals
+
+
+# --- Nightly default path ------------------------------------------------------
+#
+# The default (no --fresh, no --tickers/--strategies) reads the backtest
+# pipeline's fitness_matrix.json + runs.jsonl from
+# $MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR. Fixtures below mirror the real
+# artifact shapes: values are rows=tickers x cols=strategies with JSON null
+# cells, and runs.jsonl is oldest-first with the LATEST run as the last line.
+
+
+_SEP = "\u00d7"  # × (U+00D7) — the runs.jsonl key separator
+
+
+def _nightly_matrix_fixture() -> dict:
+    """Synthetic fitness_matrix.json.
+
+    Deliberately uses a strategy name that is NOT in the registry and a
+    ticker that is NOT in the watchlist, pinning that the file's own
+    tickers/strategies lists are the source of truth. Null cells line up
+    with the run fixture: a combo absent from the latest run, and a combo
+    flagged insufficient_data (the pipeline excludes insufficient combos
+    from the matrix entirely), are both null in the real nightly matrix.
+    """
+    return {
+        "intervals": {
+            "1d": {
+                "tickers": ["BTCUSD", "ZTESTUSD"],
+                "strategies": ["strategy-trend-follow", "strategy-not-in-registry"],
+                "values": [[1.23, None], [None, None]],
+            },
+            "4h": {
+                "tickers": ["BTCUSD", "ZTESTUSD"],
+                "strategies": ["strategy-trend-follow", "strategy-not-in-registry"],
+                "values": [[0.11, None], [2.5, None]],
+            },
+        },
+        "generated_at": "2026-09-03T00:52:22+00:00",
+    }
+
+
+def _nightly_run_fixture(ts: str, sharpe_offset: float = 0.0) -> dict:
+    """One runs.jsonl line, mirroring the backtest-pipeline's run record."""
+
+    def _res(strategy: str, ticker: str, sharpe: float, trades: int, *, insufficient: bool = False) -> dict:
+        return {
+            "strategy": strategy,
+            "ticker": ticker if ":" in ticker else f"kraken:{ticker}",
+            "asof": ts,
+            "ideas": 3,
+            "trades": trades,
+            "strategy_sharpe": sharpe,
+            "strategy_total_return": 0.42,
+            "strategy_max_dd": -0.1,
+            "strategy_profit_factor": 1.7,
+            "benchmark_sharpe": 0.9,
+            "benchmark_total_return": 0.3,
+            "bars": 500,
+            "windows": 400,
+            "provider": "kraken",
+            "insufficient_data": insufficient,
+        }
+
+    return {
+        "ts": ts,
+        "strategies": ["strategy-trend-follow", "strategy-not-in-registry"],
+        "tickers": ["BTCUSD", "ZTESTUSD"],
+        "results": {
+            f"1d{_SEP}strategy-trend-follow{_SEP}BTCUSD": _res(
+                "strategy-trend-follow", "BTCUSD", 1.23 + sharpe_offset, 12
+            ),
+            f"1d{_SEP}strategy-not-in-registry{_SEP}ZTESTUSD": _res(
+                "strategy-not-in-registry", "ZTESTUSD", 0.0 + sharpe_offset, 4, insufficient=True
+            ),
+            f"4h{_SEP}strategy-trend-follow{_SEP}BTCUSD": _res(
+                "strategy-trend-follow", "BTCUSD", 0.11 + sharpe_offset, 30
+            ),
+            f"4h{_SEP}strategy-trend-follow{_SEP}ZTESTUSD": _res(
+                "strategy-trend-follow", "ZTESTUSD", 2.5 + sharpe_offset, 8
+            ),
+        },
+        "errors": [f"1d{_SEP}strategy-not-in-registry{_SEP}BTCUSD"],
+        "insufficient_data": [f"1d{_SEP}strategy-not-in-registry{_SEP}ZTESTUSD (bars=214, provider=kraken)"],
+    }
+
+
+def _write_nightly_artifacts(out_dir, *, matrix: dict | None, runs: list[dict] | None) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if matrix is not None:
+        (out_dir / "fitness_matrix.json").write_text(json.dumps(matrix))
+    if runs is not None:
+        (out_dir / "runs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in runs))
+
+
+def _forbid_network_and_skills(mod, monkeypatch) -> None:
+    """Default-path guard: any fetch or skill load means the nightly path leaked."""
+
+    def _no_fetch(*a, **kw):
+        raise AssertionError("fetch_ohlc called in the default nightly path (network leak)")
+
+    def _no_load(name):
+        raise AssertionError(f"load_skill({name!r}) called in the default nightly path")
+
+    monkeypatch.setattr(mod, "fetch_ohlc", _no_fetch)
+    monkeypatch.setattr(mod, "load_skill", _no_load)
+
+
+def test_default_reads_nightly_artifacts(capsys, monkeypatch, tmp_path):
+    """Default mode: matrix verbatim from fitness_matrix.json, details from the LATEST run.
+
+    Two runs are written (oldest first); the oldest carries a +100 Sharpe
+    offset, so any detail showing the un-offset value proves the LAST
+    non-empty line is the source. fetch_ohlc / load_skill raise if called,
+    proving zero network and no recompute.
+    """
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path))
+    _write_nightly_artifacts(
+        tmp_path,
+        matrix=_nightly_matrix_fixture(),
+        runs=[
+            _nightly_run_fixture("2026-09-02T00:52:22+00:00", sharpe_offset=100.0),
+            _nightly_run_fixture("2026-09-03T00:52:22+00:00"),
+        ],
+    )
+    _forbid_network_and_skills(_RUN, monkeypatch)
+
+    rc = _run_main(_RUN, monkeypatch, "--json")
+    assert rc == 0
+    env = _envelope(capsys)
+    assert env["count"] == 8  # 2 tickers * 2 strategies * 2 intervals
+    data = env["data"]
+
+    # Matrix emitted exactly as read (tickers/strategies from the FILE, nulls kept).
+    matrix_fx = _nightly_matrix_fixture()
+    for iv in ("1d", "4h"):
+        matrix = data["intervals"][iv]["matrix"]
+        assert matrix["tickers"] == matrix_fx["intervals"][iv]["tickers"]
+        assert matrix["strategies"] == matrix_fx["intervals"][iv]["strategies"]
+        assert matrix["values"] == matrix_fx["intervals"][iv]["values"]
+    # Flat lists stay consistent with the file (not the registry/watchlist).
+    assert data["strategies"] == ["strategy-trend-follow", "strategy-not-in-registry"]
+    assert data["tickers"] == ["BTCUSD", "ZTESTUSD"]
+    assert data["config"]["source"] == "nightly"
+    assert data["config"]["env_var"] == "MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR"
+    assert data["config"]["generated_at"] == "2026-09-03T00:52:22+00:00"
+    assert data["config"]["run_ts"] == "2026-09-03T00:52:22+00:00"
+
+    # details[0] = (1d, BTCUSD, strategy-trend-follow): enriched from the latest run.
+    d = data["intervals"]["1d"]["details"][0]
+    assert d["ticker"] == "BTCUSD"  # bare watchlist key, not the run's kraken:BTCUSD
+    assert d["strategy"] == "strategy-trend-follow"
+    assert d["interval"] == "1d"
+    assert d["sharpe"] == 1.23  # latest run, not the +100-offset older run
+    assert d["strategy_sharpe"] == 1.23
+    assert d["trade_count"] == 12
+    assert d["trades"] == 12
+    assert d["profit_factor"] == 1.7
+    assert d["max_dd"] == -0.1
+    assert d["benchmark_sharpe"] == 0.9
+    assert d["bars"] == 500
+    assert d["provider"] == "kraken"
+    assert d["insufficient_data"] is False
+    assert d["error"] is None
+    assert d["metrics"]["sharpe"] == 1.23
+    assert d["metrics"]["trade_count"] == 12
+    assert d["benchmark"]["sharpe"] == 0.9
+    assert d["asof"] == "2026-09-03T00:52:22+00:00"
+
+    # Combo absent from the latest run (matrix cell null): unknowns stay null.
+    d = data["intervals"]["1d"]["details"][1]
+    assert d["strategy"] == "strategy-not-in-registry"
+    assert d["sharpe"] is None
+    assert d["trade_count"] is None
+    assert d["bars"] is None
+    assert d["provider"] is None
+    assert d["error"] == "no result in latest nightly run"
+
+    # Combo flagged insufficient_data by the nightly: the pipeline excludes it
+    # from the matrix (cell is JSON null), so the detail sharpe mirrors null
+    # rather than the stored placeholder 0.0; the enriched metrics fields stay
+    # populated from the stored run record.
+    d = data["intervals"]["1d"]["details"][3]
+    assert d["strategy"] == "strategy-not-in-registry"
+    assert d["insufficient_data"] is True
+    assert d["error"] == "insufficient_data"
+    assert d["sharpe"] is None
+    assert d["strategy_sharpe"] is None
+    assert d["metrics"]["sharpe"] is None
+    assert d["trade_count"] == 4
+    assert d["bars"] == 500
+    assert d["provider"] == "kraken"
+
+    # 4h trend-follow rows enriched too.
+    assert data["intervals"]["4h"]["details"][0]["sharpe"] == 0.11
+    assert data["intervals"]["4h"]["details"][2]["sharpe"] == 2.5
+
+    # Deduped per-combo errors surface at the envelope level (fresh-path contract).
+    assert env["errors"] == ["no result in latest nightly run", "insufficient_data"]
+
+
+def test_nightly_null_cells_preserved(capsys, monkeypatch, tmp_path):
+    """JSON null matrix cells are emitted as null, never coerced to 0.0."""
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path))
+    _write_nightly_artifacts(
+        tmp_path,
+        matrix=_nightly_matrix_fixture(),
+        runs=[_nightly_run_fixture("2026-09-03T00:52:22+00:00")],
+    )
+    _forbid_network_and_skills(_RUN, monkeypatch)
+
+    rc = _run_main(_RUN, monkeypatch, "--json")
+    assert rc == 0
+    env = _envelope(capsys)
+    values_1d = env["data"]["intervals"]["1d"]["matrix"]["values"]
+    values_4h = env["data"]["intervals"]["4h"]["matrix"]["values"]
+    # Exact positions, exactly as stored in the fixture file.
+    assert values_1d == [[1.23, None], [None, None]]
+    assert values_4h == [[0.11, None], [2.5, None]]
+    assert values_1d[0][1] is None
+    assert values_1d[1][0] is None
+    # A null cell's detail mirrors the null (no fabricated 0.0 sharpe).
+    detail = env["data"]["intervals"]["1d"]["details"][1]
+    assert detail["sharpe"] is None
+    assert detail["error"] == "no result in latest nightly run"
+
+
+def test_missing_nightly_artifacts_falls_back_to_fresh(capsys, monkeypatch, tmp_path):
+    """Empty artifact dir -> fresh grid runs, with the fallback note in errors + help."""
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path / "does-not-exist"))
+    _install_load_skill(_RUN, monkeypatch, bt_lib=_BT, strategies_map={"no-idea": _NoIdeaStrategy()})
+    # No --tickers/--strategies override (that would skip the nightly read), so
+    # shrink the default fresh grid to one combo via the module's list providers.
+    monkeypatch.setattr(_RUN, "l3_strategies", lambda: ["no-idea"])
+    monkeypatch.setattr(_RUN, "_default_tickers", lambda: ["BTCUSD"])
+    calls: list[tuple] = []
+    monkeypatch.setattr(_RUN, "fetch_ohlc", lambda *a, **kw: calls.append(kw) or _make_candles(n=600))
+
+    rc = _run_main(_RUN, monkeypatch, "--json")
+    assert rc == 0
+    env = _envelope(capsys)
+    # Fallback note first, then the (none) fresh-grid combo errors.
+    assert env["errors"] == ["nightly fitness_matrix.json not found — falling back to fresh grid"]
+    assert any("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR" in h for h in env["help"])
+    assert any("backtest-pipeline" in h for h in env["help"])
+    # The fresh grid actually ran (both intervals fetched, known no-idea Sharpe).
+    assert len(calls) == 2
+    data = env["data"]
+    for iv in ("1d", "4h"):
+        assert data["intervals"][iv]["matrix"]["values"] == [[0.0]]
+    # Fresh payload config shape (not the nightly source marker).
+    assert "base_capital" in data["config"]
+    assert "source" not in data["config"]
+
+
+def test_unreadable_fitness_matrix_falls_back_to_fresh(capsys, monkeypatch, tmp_path):
+    """Malformed fitness_matrix.json -> unreadable note + fresh grid, no crash."""
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path))
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fitness_matrix.json").write_text("{not valid json")
+    _install_load_skill(_RUN, monkeypatch, bt_lib=_BT, strategies_map={"no-idea": _NoIdeaStrategy()})
+    monkeypatch.setattr(_RUN, "l3_strategies", lambda: ["no-idea"])
+    monkeypatch.setattr(_RUN, "_default_tickers", lambda: ["BTCUSD"])
+    _install_fetch_ohlc(_RUN, monkeypatch, _make_candles(n=600))
+
+    rc = _run_main(_RUN, monkeypatch, "--json")
+    assert rc == 0
+    env = _envelope(capsys)
+    assert env["errors"] == ["nightly fitness_matrix.json unreadable — falling back to fresh grid"]
+    assert env["data"]["intervals"]["1d"]["matrix"]["values"] == [[0.0]]
+
+
+def test_empty_runs_jsonl_falls_back_to_fresh(capsys, monkeypatch, tmp_path):
+    """Valid matrix but zero usable runs -> runs.jsonl note + fresh grid."""
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path))
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fitness_matrix.json").write_text(json.dumps(_nightly_matrix_fixture()))
+    (tmp_path / "runs.jsonl").write_text("\n \n")  # exists but no non-empty lines
+    _install_load_skill(_RUN, monkeypatch, bt_lib=_BT, strategies_map={"no-idea": _NoIdeaStrategy()})
+    monkeypatch.setattr(_RUN, "l3_strategies", lambda: ["no-idea"])
+    monkeypatch.setattr(_RUN, "_default_tickers", lambda: ["BTCUSD"])
+    _install_fetch_ohlc(_RUN, monkeypatch, _make_candles(n=600))
+
+    rc = _run_main(_RUN, monkeypatch, "--json")
+    assert rc == 0
+    env = _envelope(capsys)
+    assert env["errors"] == ["nightly runs.jsonl not found or empty — falling back to fresh grid"]
+    assert env["data"]["intervals"]["1d"]["matrix"]["values"] == [[0.0]]
+
+
+def test_fresh_flag_forces_recompute_over_nightly(capsys, monkeypatch, tmp_path):
+    """--fresh ignores present nightly artifacts and recomputes the grid live."""
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path))
+    _write_nightly_artifacts(
+        tmp_path,
+        matrix=_nightly_matrix_fixture(),
+        runs=[_nightly_run_fixture("2026-09-03T00:52:22+00:00")],
+    )
+    _install_load_skill(_RUN, monkeypatch, bt_lib=_BT, strategies_map={"no-idea": _NoIdeaStrategy()})
+    # Pure --fresh (no overrides): shrink the default grid to one combo.
+    monkeypatch.setattr(_RUN, "l3_strategies", lambda: ["no-idea"])
+    monkeypatch.setattr(_RUN, "_default_tickers", lambda: ["BTCUSD"])
+    calls: list[tuple] = []
+    monkeypatch.setattr(_RUN, "fetch_ohlc", lambda *a, **kw: calls.append(kw) or _make_candles(n=600))
+
+    rc = _run_main(_RUN, monkeypatch, "--json", "--fresh")
+    assert rc == 0
+    env = _envelope(capsys)
+    assert len(calls) == 2  # live recompute happened
+    # Fresh-computed values, NOT the nightly 1.23 / 0.11 cells.
+    for iv in ("1d", "4h"):
+        assert env["data"]["intervals"][iv]["matrix"]["values"] == [[0.0]]
+    assert env["errors"] == []  # no fallback note when --fresh was explicit
+    assert "base_capital" in env["data"]["config"]
+    assert "source" not in env["data"]["config"]
+
+
+def test_grid_override_forces_fresh_over_nightly(capsys, monkeypatch, tmp_path):
+    """--tickers/--strategies select fresh-recompute inputs, so they imply --fresh."""
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path))
+    _write_nightly_artifacts(
+        tmp_path,
+        matrix=_nightly_matrix_fixture(),
+        runs=[_nightly_run_fixture("2026-09-03T00:52:22+00:00")],
+    )
+    _install_load_skill(_RUN, monkeypatch, bt_lib=_BT, strategies_map={"no-idea": _NoIdeaStrategy()})
+    calls: list[tuple] = []
+    monkeypatch.setattr(_RUN, "fetch_ohlc", lambda *a, **kw: calls.append(kw) or _make_candles(n=600))
+
+    rc = _run_main(_RUN, monkeypatch, "--json", "--tickers", "BTCUSD", "--strategies", "no-idea")
+    assert rc == 0
+    env = _envelope(capsys)
+    assert len(calls) == 2
+    assert env["data"]["intervals"]["1d"]["matrix"]["values"] == [[0.0]]
+    assert env["data"]["strategies"] == ["no-idea"]
+    assert env["data"]["tickers"] == ["BTCUSD"]
+    assert env["errors"] == []  # nightly artifacts present, so no fallback note
+
+
+# --- Non-dict runs.jsonl results value (Finding: guard _nightly_detail) --------
+
+
+def test_nightly_non_dict_results_value_degrades(capsys, monkeypatch, tmp_path):
+    """A runs.jsonl ``results`` entry that is not a dict must not crash.
+
+    ``_load_runs`` only validates top-level lines as dicts, so a ``results``
+    value like a bare string used to hit ``result.get(...)`` and raise
+    AttributeError. It must degrade to the "no result in latest nightly run"
+    detail shape instead of taking down the default path.
+    """
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path))
+    run_fx = _nightly_run_fixture("2026-09-03T00:52:22+00:00")
+    run_fx["results"][f"1d{_SEP}strategy-trend-follow{_SEP}BTCUSD"] = "not a dict"
+    _write_nightly_artifacts(tmp_path, matrix=_nightly_matrix_fixture(), runs=[run_fx])
+    _forbid_network_and_skills(_RUN, monkeypatch)
+
+    rc = _run_main(_RUN, monkeypatch, "--json")
+    assert rc == 0
+    env = _envelope(capsys)
+    # The malformed combo degrades to the no-result shape (sharpe from the
+    # matrix cell, all enriched fields null).
+    d = env["data"]["intervals"]["1d"]["details"][0]
+    assert d["strategy"] == "strategy-trend-follow"
+    assert d["ticker"] == "BTCUSD"
+    assert d["error"] == "no result in latest nightly run"
+    assert d["sharpe"] == 1.23
+    assert d["trade_count"] is None
+    # The remaining combos still enrich normally.
+    assert env["data"]["intervals"]["1d"]["details"][3]["trade_count"] == 4
+
+
+# --- --help surface (Finding: parse_axi_flags intercepts -h/--help) ------------
+
+
+def test_help_prints_skill_flags_not_generic_axi_usage(capsys, monkeypatch):
+    """--help / -h show this skill's own flags, not the ticker-based AXI usage."""
+    for argv in (["--help"], ["-h"]):
+        rc = _run_main(_RUN, monkeypatch, *argv)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "usage: strategy-fitness-heatmap" in out
+        for flag in ("--json", "--fresh", "--tickers", "--strategies"):
+            assert flag in out
+        # The generic AXI usage implies a positional TICKER + --source this
+        # skill does not accept - it must not leak through.
+        assert "TICKER [--json]" not in out
+        assert "--source=PROVIDER" not in out
+
+
+# --- Human (non---json) mode error/fallback visibility (Finding 4) -------------
+
+
+def test_human_mode_surfaces_fallback_and_errors(capsys, monkeypatch, tmp_path):
+    """Without --json, the fallback note + errors print on stderr, matrix on stdout."""
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path / "does-not-exist"))
+    _install_load_skill(_RUN, monkeypatch, bt_lib=_BT, strategies_map={"no-idea": _NoIdeaStrategy()})
+    monkeypatch.setattr(_RUN, "l3_strategies", lambda: ["no-idea"])
+    monkeypatch.setattr(_RUN, "_default_tickers", lambda: ["BTCUSD"])
+    calls: list[tuple] = []
+    monkeypatch.setattr(_RUN, "fetch_ohlc", lambda *a, **kw: calls.append(kw) or _make_candles(n=600))
+
+    rc = _run_main(_RUN, monkeypatch)  # no --json -> human mode
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "nightly fitness_matrix.json not found" in captured.err
+    assert "MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR" in captured.err  # _HELP_FALLBACK line
+    assert "strategy-fitness-heatmap" in captured.out  # human matrix header intact
+    assert len(calls) == 2  # the previously-un-surfaced fresh recompute did run
+
+    # Nightly artifacts present with per-combo errors: those surface too.
+    monkeypatch.setenv(_RUN.ENV_OUT_DIR, str(tmp_path))
+    _write_nightly_artifacts(
+        tmp_path,
+        matrix=_nightly_matrix_fixture(),
+        runs=[_nightly_run_fixture("2026-09-03T00:52:22+00:00")],
+    )
+    rc = _run_main(_RUN, monkeypatch)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "error: no result in latest nightly run" in captured.err
+    assert "error: insufficient_data" in captured.err
+    assert "source: nightly" in captured.out
