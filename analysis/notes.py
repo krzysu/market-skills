@@ -21,6 +21,7 @@ from analysis.notes_format import (
     STATES,
     STATUSES,
     TYPES,
+    Finding,
     filter_active,
     format_note,
     is_active,
@@ -29,7 +30,9 @@ from analysis.notes_format import (
     now_utc,
     parse_expires,
     validate_entry,
+    validate_entry_findings,
     validate_storage,
+    validate_storage_findings,
 )
 
 
@@ -155,6 +158,7 @@ def prune_expired(path: str | os.PathLike | None = None) -> int:
 
 
 __all__ = [
+    "Finding",
     "add_note",
     "default_path",
     "filter_active",
@@ -174,5 +178,7 @@ __all__ = [
     "STATUSES",
     "TYPES",
     "validate_entry",
+    "validate_entry_findings",
     "validate_storage",
+    "validate_storage_findings",
 ]

@@ -79,20 +79,24 @@ def test_add_note_with_typed_fields(tmp_notes_path):
     assert e["tags"] == ["wait"]
 
 
-def test_add_note_rejects_invalid_status(tmp_notes_path):
+def test_add_note_rejects_non_string_status(tmp_notes_path):
     import pytest
 
     with pytest.raises(ValueError):
-        notes_mod.add_note("BTCUSD", "thesis", status="bogus")
+        notes_mod.add_note("BTCUSD", "thesis", status=123)
 
 
 def test_add_note_rejects_invalid_price_refs(tmp_notes_path):
     import pytest
 
     with pytest.raises(ValueError):
-        notes_mod.add_note("BTCUSD", "thesis", price_refs={"bogus": 1.0})
-    with pytest.raises(ValueError):
         notes_mod.add_note("BTCUSD", "thesis", price_refs={"stop": "not-a-number"})
+
+
+def test_add_note_preserves_unknown_price_refs_keys(tmp_notes_path):
+    e = notes_mod.add_note("BTCUSD", "thesis", price_refs={"stop": 100.0, "custom_key": "value"})
+    assert e["price_refs"]["stop"] == 100.0
+    assert e["price_refs"]["custom_key"] == "value"
 
 
 def test_migrate_legacy_meta_translates_typed_fields(tmp_notes_path):

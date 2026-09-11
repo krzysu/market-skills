@@ -8,15 +8,15 @@ Notes are stored as `{pair: [note, ...]}` JSON at
 
 Exit codes:
   0 — success
-  1 — fatal (bad args, file error)
+  1 — fatal (bad args, file error, validation error, or --strict with warnings)
   2 — invalid usage (missing arguments, unknown subcommand)
 
 CLI:
   uv run skills/market-notes/scripts/run.py add PAIR "note text" [options]
       --expires 14d                      shorthand (default: 14d; use 'never' for none)
-      --status STATUS                    lifecycle state
-      --type TYPE                        kind of note
-      --state STATE                      structural state of underlying
+      --status STATUS                    lifecycle state (recommended vocabulary)
+      --type TYPE                        kind of note (recommended vocabulary)
+      --state STATE                      structural state (recommended vocabulary)
       --active-timeframe 1d              first-class timeframe (e.g. 1d, 4h)
       --dependencies BTCUSD,ETHUSD       other pair keys this note rides on
       --price-refs '{"stop": 2.54}'      typed price levels (JSON literal or @path)
@@ -27,7 +27,7 @@ CLI:
   uv run skills/market-notes/scripts/run.py remove PAIR INDEX
   uv run skills/market-notes/scripts/run.py prune
   uv run skills/market-notes/scripts/run.py migrate [--dry-run]
-  uv run skills/market-notes/scripts/run.py validate
+  uv run skills/market-notes/scripts/run.py validate [--strict]
   uv run skills/market-notes/scripts/run.py --json list [PAIR]        # machine output
 """
 
@@ -48,9 +48,8 @@ from analysis.notes import (
     prune_expired,
     remove_note,
     save_raw,
-    validate_storage,
 )
-from analysis.notes_format import validate_entry
+from analysis.notes_format import validate_entry, validate_storage_findings
 
 
 def _parse_kv_json(value: str | None, flag: str) -> dict | None:
@@ -97,6 +96,18 @@ def _cmd_add(args: argparse.Namespace) -> int:
         except (json.JSONDecodeError, OSError) as e:
             print(f"error: bad --meta: {e}", file=sys.stderr)
             return 1
+
+    for fld, val, recommended in (
+        ("status", args.status, STATUSES),
+        ("type", args.type, TYPES),
+        ("state", args.state, STATES),
+    ):
+        if val is not None and val not in recommended:
+            print(
+                f"WARNING: {fld}='{val}' is not in the recommended vocabulary "
+                f"{sorted(recommended)} — allowed, but consider widening/documenting",
+                file=sys.stderr,
+            )
 
     try:
         entry = add_note(
@@ -268,16 +279,38 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
 
 def _cmd_validate(args: argparse.Namespace) -> int:
     data = load_raw(args.config)
-    errors = validate_storage(data)
+    findings = validate_storage_findings(data)
+    errors = [f.message for f in findings if f.severity == "error"]
+    warnings = [f.message for f in findings if f.severity == "warning"]
+    strict = bool(args.strict)
+
     if args.json:
-        print(json.dumps({"errors": errors, "pairs": list(data.keys())}))
-        return 0 if not errors else 1
+        print(json.dumps({"errors": errors, "warnings": warnings, "strict": strict, "pairs": list(data.keys())}))
+        if errors:
+            return 1
+        if strict and warnings:
+            return 1
+        return 0
+
+    for w in warnings:
+        print(f"WARNING: {w}", file=sys.stderr)
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+
+    total_pairs = len(data)
+    total_notes = sum(len(v) for v in data.values()) if isinstance(data, dict) else 0
+
     if errors:
-        print("VALIDATION ERRORS:")
-        for e in errors:
-            print(f"  {e}")
+        print(f"VALIDATION FAILED — {len(errors)} error(s), {len(warnings)} warning(s)")
         return 1
-    print(f"OK — {len(data)} pair(s) with notes, {sum(len(v) for v in data.values())} note(s) total")
+    if strict and warnings:
+        print(f"VALIDATION FAILED — {len(errors)} error(s), {len(warnings)} warning(s)")
+        return 1
+
+    status_line = f"OK — {total_pairs} pair(s) with notes, {total_notes} note(s) total"
+    if warnings:
+        status_line += f", {len(warnings)} warning(s)"
+    print(status_line)
     return 0
 
 
@@ -296,9 +329,9 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument(
         "--expires", default="14d", help="Shorthand (14d/2w/1m/6h) or ISO date (default: 14d, use 'never' for none)"
     )
-    pa.add_argument("--status", choices=sorted(STATUSES), help="Lifecycle state")
-    pa.add_argument("--type", dest="type", choices=sorted(TYPES), help="Kind of note")
-    pa.add_argument("--state", choices=sorted(STATES), help="Structural state of underlying")
+    pa.add_argument("--status", help="Lifecycle state (recommended vocabulary, any string accepted)")
+    pa.add_argument("--type", dest="type", help="Kind of note (recommended vocabulary, any string accepted)")
+    pa.add_argument("--state", help="Structural state of underlying (recommended vocabulary, any string accepted)")
     pa.add_argument("--active-timeframe", help="Timeframe the note applies to (e.g. 1d, 4h, 1wk)")
     pa.add_argument("--dependencies", help="Comma-separated pair keys this note rides on")
     pa.add_argument("--price-refs", help="Typed price levels as JSON literal or @path/to/file.json")
@@ -331,6 +364,7 @@ def build_parser() -> argparse.ArgumentParser:
     pm.set_defaults(func=_cmd_migrate)
 
     pv = sub.add_parser("validate", help="Validate the storage file")
+    pv.add_argument("--strict", action="store_true", help="Promote warnings to errors for exit code")
     pv.set_defaults(func=_cmd_validate)
 
     return p

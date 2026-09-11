@@ -150,3 +150,136 @@ class TestNotesCliInit:
         _run_cli(mod, "--json", f"--config={notes_path}", "migrate", "--dry-run")
         result = json.loads(capsys.readouterr().out)
         assert result["notes_migrated"] == 0
+
+
+class TestNotesValidateSeverity:
+    def test_validate_warnings_only_exits_zero(self, notes_path, capsys):
+        """A note with a non-recommended status value should warn, not error."""
+        import json as json_mod
+
+        data = {
+            "AAAUSD": [
+                {
+                    "note": "test",
+                    "added": "2026-01-01T00:00:00+00:00",
+                    "expires": None,
+                    "updated": None,
+                    "status": "active_hold_pending_add",
+                    "type": "thesis",
+                    "state": None,
+                    "active_timeframe": None,
+                    "dependencies": None,
+                    "price_refs": None,
+                    "invalidates_on": None,
+                    "tags": None,
+                }
+            ]
+        }
+        notes_path.write_text(json_mod.dumps(data))
+        mod = _load_mod()
+        rc = _run_cli(mod, f"--config={notes_path}", "validate")
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "WARNING:" in captured.err
+        assert "OK" in captured.out
+
+    def test_validate_strict_exits_one_on_warnings(self, notes_path, capsys):
+        import json as json_mod
+
+        data = {
+            "AAAUSD": [
+                {
+                    "note": "test",
+                    "added": "2026-01-01T00:00:00+00:00",
+                    "expires": None,
+                    "updated": None,
+                    "status": "custom_status",
+                    "type": "thesis",
+                    "state": None,
+                    "active_timeframe": None,
+                    "dependencies": None,
+                    "price_refs": None,
+                    "invalidates_on": None,
+                    "tags": None,
+                }
+            ]
+        }
+        notes_path.write_text(json_mod.dumps(data))
+        mod = _load_mod()
+        rc = _run_cli(mod, f"--config={notes_path}", "validate", "--strict")
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert "WARNING:" in captured.err
+        assert "VALIDATION FAILED" in captured.out
+
+    def test_validate_canonical_non_number_exits_one(self, notes_path, capsys):
+        import json as json_mod
+
+        data = {
+            "AAAUSD": [
+                {
+                    "note": "test",
+                    "added": "2026-01-01T00:00:00+00:00",
+                    "expires": None,
+                    "updated": None,
+                    "status": "thesis",
+                    "type": "thesis",
+                    "state": None,
+                    "active_timeframe": None,
+                    "dependencies": None,
+                    "price_refs": {"stop": "not-a-number"},
+                    "invalidates_on": None,
+                    "tags": None,
+                }
+            ]
+        }
+        notes_path.write_text(json_mod.dumps(data))
+        mod = _load_mod()
+        rc = _run_cli(mod, f"--config={notes_path}", "validate")
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert "ERROR:" in captured.err
+
+    def test_validate_json_emits_errors_and_warnings(self, notes_path, capsys):
+        import json as json_mod
+
+        data = {
+            "AAAUSD": [
+                {
+                    "note": "test",
+                    "added": "2026-01-01T00:00:00+00:00",
+                    "expires": None,
+                    "updated": None,
+                    "status": "custom_status",
+                    "type": "thesis",
+                    "state": None,
+                    "active_timeframe": None,
+                    "dependencies": None,
+                    "price_refs": None,
+                    "invalidates_on": None,
+                    "tags": None,
+                }
+            ]
+        }
+        notes_path.write_text(json_mod.dumps(data))
+        mod = _load_mod()
+        rc = _run_cli(mod, "--json", f"--config={notes_path}", "validate")
+        captured = capsys.readouterr()
+        assert rc == 0
+        result = json_mod.loads(captured.out)
+        assert "errors" in result
+        assert "warnings" in result
+        assert "strict" in result
+        assert result["errors"] == []
+        assert len(result["warnings"]) > 0
+
+    def test_add_novel_status_succeeds(self, notes_path, capsys):
+        mod = _load_mod()
+        rc = _run_cli(mod, f"--config={notes_path}", "add", "AAAUSD", "test note", "--status=active_hold_pending_add")
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "WARNING:" in captured.err
+        _run_cli(mod, "--json", f"--config={notes_path}", "list")
+        env = json.loads(capsys.readouterr().out)
+        note = env["data"]["pairs"]["AAAUSD"][0]
+        assert note["status"] == "active_hold_pending_add"

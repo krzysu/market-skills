@@ -86,12 +86,12 @@ Default: `skills/market-notes/data/notes.json`. Override via:
 | `added` | yes | ISO timestamp, UTC. Set automatically on `add`. |
 | `expires` | no | ISO timestamp or `null`. Accepts shorthand on input: `14d`, `2w`, `1m`, `6h`. Pass `--expires never` to omit. |
 | `updated` | no | ISO timestamp of last edit. Not yet auto-managed — reserved for future `edit` command. |
-| `status` | recommended | Lifecycle state — one of `thesis`, `open`, `setup`, `watchlist`, `hedge`, `starter`, `invalidated`, `post_mortem`. |
-| `type` | recommended | Kind of note — one of `thesis`, `setup`, `observation`, `plan`, `note`. |
-| `state` | optional | Structural state of the underlying — one of `coiled_range_intact`, `coiled_range_broken`, `trending_up`, `trending_down`, `range_bound`, `unknown`. Queryable separately from prose. |
+| `status` | recommended | Lifecycle state — any string accepted; RECOMMENDED vocabulary: `thesis`, `open`, `setup`, `watchlist`, `hedge`, `starter`, `invalidated`, `post_mortem`. |
+| `type` | recommended | Kind of note — any string accepted; RECOMMENDED vocabulary: `thesis`, `setup`, `observation`, `plan`, `note`. |
+| `state` | optional | Structural state of the underlying — any string accepted; RECOMMENDED vocabulary: `coiled_range_intact`, `coiled_range_broken`, `trending_up`, `trending_down`, `range_bound`, `unknown`. |
 | `active_timeframe` | optional | First-class timeframe the note applies to (e.g. `"1d"`, `"4h"`). Distinguishes cross-TF theses like NEAR's 4h setup vs 1d macro. |
 | `dependencies` | optional | List of pair keys whose thesis this note rides on. Lets the scanner warn when a base thesis is invalidated. |
-| `price_refs` | optional | Typed price levels — keys: `stop`, `target`, `target_2`, `target_3`, `entry`, `invalidation_below`, `invalidation_above`. Replaces ad-hoc `meta.stop`, `meta.target`, etc. |
+| `price_refs` | optional | Typed price levels — canonical keys: `stop`, `target`, `target_2`, `target_3`, `entry`, `invalidation_below`, `invalidation_above` (must be numeric). Use `price_refs.extra` (free-form object) for per-timeframe ladders and non-price research metrics. |
 | `invalidates_on` | optional | Free-text condition (e.g. `"weekly_close_above_EMA21"`, `"structure_break_below_484"`). |
 | `tags` | optional | Escape-hatch for ad-hoc markers that don't fit the triple (`"wait"`, `"re-scoped"`, etc.). |
 
@@ -169,11 +169,54 @@ uv run skills/market-notes/scripts/run.py prune
 
 ## Validation
 
-`validate` walks the file and reports schema errors. Use after manual edits:
+`validate` walks the file and reports findings as errors (hard failures) or warnings (advisory):
 
 ```bash
 uv run skills/market-notes/scripts/run.py validate
-# OK — 7 pair(s) with notes, 11 note(s) total
+# OK — 7 pair(s) with notes, 11 note(s) total, 3 warning(s)
+
+uv run skills/market-notes/scripts/run.py validate --strict
+# VALIDATION FAILED — 0 error(s), 3 warning(s)
+```
+
+### Warning vs error semantics
+
+**Errors (exit 1):** structural problems — non-dict root, non-list pair value, missing/empty `note`,
+missing `added`, non-string `status`/`type`/`state`, non-numeric canonical `price_refs` key,
+non-dict `price_refs.extra`, legacy `meta` field.
+
+**Warnings (exit 0 unless `--strict`):** unrecognised `status`/`type`/`state` string values
+(not in the recommended vocabulary), unknown top-level `price_refs` keys (should migrate into
+`price_refs.extra`).
+
+### `--strict` flag
+
+Promotes warnings to errors for exit-code purposes. Use in CI to enforce vocabulary and
+`price_refs` hygiene:
+
+```bash
+uv run skills/market-notes/scripts/run.py validate --strict  # exit 1 if any warnings
+```
+
+### `price_refs.extra` escape hatch
+
+Per-timeframe ladders and non-price research metrics (holder concentration, funding totals,
+RSI/vol percentiles) belong in `price_refs.extra` — a free-form JSON object that is accepted
+without warnings:
+
+```json
+{
+  "price_refs": {
+    "stop": 2.54,
+    "target": 3.12,
+    "extra": {
+      "entry_zone_low": 2.40,
+      "entry_zone_high": 2.50,
+      "rsi_4h": 42.3,
+      "funding_total_usd": 15000000
+    }
+  }
+}
 ```
 
 ## Note content structure
@@ -200,6 +243,6 @@ Good note patterns:
 
 ## Exit codes
 
-- `0` — success
-- `1` — fatal (bad `--meta`, file I/O error, schema error)
+- `0` — success (no errors; warnings allowed unless `--strict`)
+- `1` — fatal (bad `--meta`, file I/O error, validation error, or `--strict` with warnings)
 - `2` — invalid usage (missing args, unknown subcommand)

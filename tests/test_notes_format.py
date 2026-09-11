@@ -10,7 +10,9 @@ from analysis.notes_format import (
     now_utc,
     parse_expires,
     validate_entry,
+    validate_entry_findings,
     validate_storage,
+    validate_storage_findings,
 )
 
 
@@ -109,11 +111,11 @@ def test_make_entry_typed_shape():
     assert e["tags"] == ["wait"]
 
 
-def test_make_entry_rejects_bad_status():
+def test_make_entry_rejects_non_string_status():
     import pytest
 
     with pytest.raises(ValueError):
-        make_entry("x", status="bogus")
+        make_entry("x", status=123)
 
 
 def test_migrate_translates_meta_tags_to_triple():
@@ -237,3 +239,122 @@ def test_validate_storage_nested_bad_note():
     data = {"BTCUSD": [{"added": "2026-01-01"}]}
     errs = validate_storage(data)
     assert any("note" in e for e in errs)
+
+
+def test_validate_entry_findings_unknown_status_is_warning():
+    e = make_entry("x", expires="7d", status="active_hold_pending_add")
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warning"]
+    assert errors == []
+    assert len(warnings) == 1
+    assert "status" in warnings[0].message
+    assert "active_hold_pending_add" in warnings[0].message
+
+
+def test_validate_entry_findings_unknown_type_is_warning():
+    e = make_entry("x", expires="7d", type_="custom_type")
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warning"]
+    assert errors == []
+    assert len(warnings) == 1
+    assert "type" in warnings[0].message
+
+
+def test_validate_entry_findings_unknown_state_is_warning():
+    e = make_entry("x", expires="7d", state="extended_breakout_pending_pullback")
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warning"]
+    assert errors == []
+    assert len(warnings) == 1
+    assert "state" in warnings[0].message
+
+
+def test_validate_entry_findings_non_string_status_is_error():
+    e = make_entry("x", expires="7d")
+    e["status"] = 123
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    assert any("status" in f.message and "string" in f.message for f in errors)
+
+
+def test_validate_entry_findings_non_string_type_is_error():
+    e = make_entry("x", expires="7d")
+    e["type"] = ["not", "a", "string"]
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    assert any("type" in f.message and "string" in f.message for f in errors)
+
+
+def test_validate_entry_findings_non_string_state_is_error():
+    e = make_entry("x", expires="7d")
+    e["state"] = 42
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    assert any("state" in f.message and "string" in f.message for f in errors)
+
+
+def test_validate_entry_findings_unknown_price_refs_key_is_warning():
+    e = make_entry("x", expires="7d")
+    e["price_refs"] = {"stop": 100.0, "entry_zone_low": 95.0}
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warning"]
+    assert errors == []
+    assert any("entry_zone_low" in f.message and "extra" in f.message for f in warnings)
+
+
+def test_validate_entry_findings_canonical_non_numeric_is_error():
+    e = make_entry("x", expires="7d")
+    e["price_refs"] = {"stop": "not-a-number"}
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    assert any("price_refs.stop" in f.message for f in errors)
+
+
+def test_validate_entry_findings_extra_dict_accepted():
+    e = make_entry("x", expires="7d")
+    e["price_refs"] = {
+        "stop": 100.0,
+        "extra": {
+            "rsi_4h": 42.3,
+            "ladder": [1.0, 2.0, 3.0],
+            "nested": {"a": 1, "b": "two"},
+        },
+    }
+    findings = validate_entry_findings(e)
+    assert findings == []
+
+
+def test_validate_entry_findings_extra_non_dict_is_error():
+    e = make_entry("x", expires="7d")
+    e["price_refs"] = {"stop": 100.0, "extra": "not-a-dict"}
+    findings = validate_entry_findings(e)
+    errors = [f for f in findings if f.severity == "error"]
+    assert any("price_refs.extra" in f.message for f in errors)
+
+
+def test_validate_entry_findings_non_dict_entry_is_error():
+    findings = validate_entry_findings("not-a-dict")
+    errors = [f for f in findings if f.severity == "error"]
+    assert any("entry must be an object" in f.message for f in errors)
+
+
+def test_validate_storage_findings_non_dict_entry_no_exception():
+    data = {"AAAUSD": ["not-a-dict", {"note": "ok", "added": "2026-01-01"}]}
+    findings = validate_storage_findings(data)
+    errors = [f for f in findings if f.severity == "error"]
+    assert any("entry must be an object" in f.message for f in errors)
+
+
+def test_validate_entry_backward_compat_warnings_only_returns_empty():
+    e = make_entry("x", expires="7d", status="custom_status")
+    assert validate_entry(e) == []
+
+
+def test_validate_storage_backward_compat_warnings_only_returns_empty():
+    e = make_entry("x", expires="7d", status="custom_status")
+    data = {"AAAUSD": [e]}
+    assert validate_storage(data) == []
