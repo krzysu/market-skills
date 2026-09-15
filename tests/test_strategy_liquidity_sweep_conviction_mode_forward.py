@@ -21,9 +21,7 @@ import pytest
 
 
 def _load_lib():
-    lib_path = os.path.join(
-        os.path.dirname(__file__), "..", "skills", "strategy-liquidity-sweep", "lib.py"
-    )
+    lib_path = os.path.join(os.path.dirname(__file__), "..", "skills", "strategy-liquidity-sweep", "lib.py")
     spec = importlib.util.spec_from_file_location("strategy_liquidity_sweep_lib", lib_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -102,24 +100,21 @@ class TestConvictionModeForwarding:
         result = mod.analyze(_make_candles(), ticker="T")
         assert result["ideas"], f"Expected branch1 idea with stubbed L2s, got {result}"
         assert result["ideas"][0]["conviction"] == 3, (
-            f"Default conviction on (sweep=2, accum=3) should be 3 (current); "
-            f"got {result['ideas'][0]['conviction']}"
+            f"Default conviction on (sweep=2, accum=3) should be 3 (current); got {result['ideas'][0]['conviction']}"
         )
 
     @pytest.mark.parametrize(
         "mode,expected",
         [
-            ("current", 3),         # 2 + 3 // 2 = 2 + 1 = 3
-            ("add", 5),             # 2 + 3 = 5
-            ("add_minus_one", 4),   # 2 + 3 - 1 = 4
-            ("max_plus_one", 4),    # max(2, 3) + 1 = 4
+            ("current", 3),  # 2 + 3 // 2 = 2 + 1 = 3
+            ("add", 5),  # 2 + 3 = 5
+            ("add_minus_one", 4),  # 2 + 3 - 1 = 4
+            ("max_plus_one", 4),  # max(2, 3) + 1 = 4
         ],
     )
     def test_each_mode_routes_correctly(self, stub_skills, mode, expected):
         mod = _load_lib()
-        result = mod.analyze(
-            _make_candles(), ticker="T", conviction_mode=mode
-        )
+        result = mod.analyze(_make_candles(), ticker="T", conviction_mode=mode)
         assert result["ideas"], f"Expected branch1 idea in mode={mode!r}, got {result}"
         assert result["ideas"][0]["conviction"] == expected, (
             f"mode={mode!r} on (sweep=2, accum=3) must yield {expected} "
@@ -131,6 +126,4 @@ class TestConvictionModeForwarding:
         passing that mode through analyze() must surface the same error."""
         mod = _load_lib()
         with pytest.raises(ValueError, match="unknown conviction mode"):
-            mod.analyze(
-                _make_candles(), ticker="T", conviction_mode="bogus"
-            )
+            mod.analyze(_make_candles(), ticker="T", conviction_mode="bogus")

@@ -24,9 +24,7 @@ import os
 
 
 def _load_lib():
-    lib_path = os.path.join(
-        os.path.dirname(__file__), "..", "skills", "strategy-liquidity-sweep", "lib.py"
-    )
+    lib_path = os.path.join(os.path.dirname(__file__), "..", "skills", "strategy-liquidity-sweep", "lib.py")
     spec = importlib.util.spec_from_file_location("strategy_liquidity_sweep_lib", lib_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -72,6 +70,4 @@ def test_explicit_max_plus_one_still_computes_that_formula():
     when the default mode is reverted."""
     mod = _load_lib()
     out = mod.conviction_from_confidences(2, 3, mode="max_plus_one")
-    assert out == 4, (
-        f"Explicit mode='max_plus_one' must yield max(2,3)+1=4; got {out}"
-    )
+    assert out == 4, f"Explicit mode='max_plus_one' must yield max(2,3)+1=4; got {out}"

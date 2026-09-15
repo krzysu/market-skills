@@ -37,18 +37,18 @@ def test_current_mode_matches_legacy_expression():
 
 def test_formula_variants():
     # Hand-computed reference values for the candidate modes.
-    assert conviction_from_confidences(3, 3, mode="current") == 4        # 3 + 3//2 = 4
-    assert conviction_from_confidences(3, 3, mode="add") == 5            # 3 + 3 = 6 -> cap 5
+    assert conviction_from_confidences(3, 3, mode="current") == 4  # 3 + 3//2 = 4
+    assert conviction_from_confidences(3, 3, mode="add") == 5  # 3 + 3 = 6 -> cap 5
     assert conviction_from_confidences(3, 3, mode="add_minus_one") == 5  # 3 + 3 - 1 = 5
-    assert conviction_from_confidences(3, 3, mode="max_plus_one") == 4   # max(3,3)+1 = 4
+    assert conviction_from_confidences(3, 3, mode="max_plus_one") == 4  # max(3,3)+1 = 4
     # A low-accumulation case shows where the modes diverge most.
-    assert conviction_from_confidences(3, 1, mode="current") == 3        # 3 + 0 = 3
-    assert conviction_from_confidences(3, 1, mode="add") == 4            # 3 + 1 = 4
-    assert conviction_from_confidences(3, 1, mode="max_plus_one") == 4   # max(3,1)+1 = 4
+    assert conviction_from_confidences(3, 1, mode="current") == 3  # 3 + 0 = 3
+    assert conviction_from_confidences(3, 1, mode="add") == 4  # 3 + 1 = 4
+    assert conviction_from_confidences(3, 1, mode="max_plus_one") == 4  # max(3,1)+1 = 4
 
 
 def test_conviction_is_capped():
-    assert conviction_from_confidences(5, 5, mode="add") == 5            # cap at 5
+    assert conviction_from_confidences(5, 5, mode="add") == 5  # cap at 5
     # "current" matches the legacy formula exactly, including the no-floor edge.
     assert conviction_from_confidences(0, 0, mode="current") == 0
     assert conviction_from_confidences(1, 1, mode="current") == 1

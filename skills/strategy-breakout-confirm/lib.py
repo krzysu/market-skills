@@ -111,9 +111,7 @@ def analyze(candles, *, ticker, interval="1d", period="1y", asset_class=None):
             }
         )
 
-    ideas, rejection = finalize_ideas(
-        ideas, strategy_name=_STRATEGY_NAME, ticker=ticker, interval=interval
-    )
+    ideas, rejection = finalize_ideas(ideas, strategy_name=_STRATEGY_NAME, ticker=ticker, interval=interval)
 
     if ideas:
         narrative = f"Breakout momentum setup: {', '.join(i['direction'] for i in ideas)}."
