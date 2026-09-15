@@ -53,6 +53,23 @@ All files are written to `$MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR`:
 | `swing_scan_skip_list.json` | Swing Scan | `<OUT_DIR>/swing_scan_skip_list.json` |
 | `regime_health_brief.md` | Morning Brief | `<OUT_DIR>/regime_health_brief.md` |
 
+`swing_scan_skip_list.json` splits tickers three ways: `skip_tickers` (all strategies
+negative Sharpe), `no_trade_tickers` (zero-signal / blind pairs — no trade signals on
+any strategy/interval), and `keep_tickers`. Blind pairs are surfaced, not silently
+excluded. The `reason` names each bucket it covers.
+
+## Engine child isolation
+
+Each per-pair backtest runs the engine as a child process with a sanitised environment
+(`_engine_child_env()`): both `MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH` and
+`MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR` are removed, and
+`MARKET_SKILLS_CONVICTION_GATE=off` is set. This prevents the engine from loading the
+`conviction_thresholds_private.json` file the pipeline itself writes — a floor of 99
+inherited from last night would drop every idea, record zero trades, and re-lock the
+floor at 99. The gate module (`analysis/signals/conviction_thresholds.py`) treats
+`MARKET_SKILLS_CONVICTION_GATE` off/0/false/no as a kill switch: no overrides are
+loaded and lookups return the shipped default floor 1.
+
 Consumer-side env vars are **overrides** — unset them to use the default `<OUT_DIR>/<filename>`. The typical cron config sets only ``OUT_DIR`` and the two existing consumer-side overrides for backward compat.
 
 ## Contracts

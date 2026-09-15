@@ -218,8 +218,9 @@ class TestValidateWatchdogRegime:
 
 _VALID_SWING_SCAN = {
     "skip_tickers": ["A", "B"],
+    "no_trade_tickers": ["D"],
     "keep_tickers": ["C"],
-    "reason": "all strategies have negative Sharpe",
+    "reason": "2 ticker(s): all strategies negative Sharpe; 1 ticker(s): no trade signals",
 }
 
 
@@ -234,19 +235,30 @@ class TestValidateSwingScanSkip:
         assert "expected a JSON object" in err
 
     def test_missing_skip_tickers(self):
-        data, err = validate_swing_scan_skip({"keep_tickers": [], "reason": "..."})
+        data, err = validate_swing_scan_skip({"keep_tickers": [], "reason": "...", "no_trade_tickers": []})
         assert data is None
         assert "skip_tickers" in err
 
     def test_missing_keep_tickers(self):
-        data, err = validate_swing_scan_skip({"skip_tickers": [], "reason": "..."})
+        data, err = validate_swing_scan_skip({"skip_tickers": [], "reason": "...", "no_trade_tickers": []})
         assert data is None
         assert "keep_tickers" in err
 
     def test_missing_reason(self):
-        data, err = validate_swing_scan_skip({"skip_tickers": [], "keep_tickers": []})
+        data, err = validate_swing_scan_skip({"skip_tickers": [], "keep_tickers": [], "no_trade_tickers": []})
         assert data is None
         assert "reason" in err
+
+    def test_missing_no_trade_tickers(self):
+        data, err = validate_swing_scan_skip({"skip_tickers": [], "keep_tickers": [], "reason": "..."})
+        assert data is None
+        assert "no_trade_tickers" in err
+
+    def test_no_trade_tickers_not_a_list(self):
+        payload = {"skip_tickers": [], "keep_tickers": [], "no_trade_tickers": "D", "reason": "..."}
+        data, err = validate_swing_scan_skip(payload)
+        assert data is None
+        assert "no_trade_tickers" in err
 
 
 # ── regime_brief ───────────────────────────────────────────────────
@@ -467,3 +479,247 @@ class TestErrorReporting:
         run_mod.main()
         captured = capsys.readouterr()
         assert "pair(s) errored" in captured.out
+
+
+# ── conviction-gate self-pollution isolation (bead market-skills-0rk) ──
+
+
+def _load_fresh_ct(spec_name: str):
+    """Execute analysis/signals/conviction_thresholds.py as a fresh module
+    object (unique spec name) so the import-time ``_load_overrides()`` runs
+    against the current ``os.environ`` without disturbing the canonical
+    ``ct`` module — mirroring how the engine child process starts."""
+    ct_origin = importlib.util.find_spec("analysis.signals.conviction_thresholds").origin
+    spec = importlib.util.spec_from_file_location(spec_name, ct_origin)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestEngineChildEnv:
+    """``_engine_child_env`` must strip both leak paths and set the gate marker."""
+
+    def test_leak_vars_removed_gate_marker_set(self, monkeypatch):
+        run_mod = _load_run_mod("bp_child_env")
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH", "/tmp/leaky/thresholds.json")
+        monkeypatch.setenv("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR", "/tmp/leaky/pipeline-out")
+
+        child_env = run_mod._engine_child_env()
+
+        assert "MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH" not in child_env
+        assert "MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR" not in child_env
+        assert child_env["MARKET_SKILLS_CONVICTION_GATE"] == "off"
+
+    def test_preserves_unrelated_keys(self, monkeypatch):
+        run_mod = _load_run_mod("bp_child_env_keep")
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH", "/tmp/leaky/thresholds.json")
+        monkeypatch.setenv("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR", "/tmp/leaky/pipeline-out")
+
+        child_env = run_mod._engine_child_env()
+
+        # env vars unrelated to the leak must survive (PATH is the sentinel).
+        assert child_env["PATH"] == os.environ["PATH"]
+        assert child_env["HOME"] == os.environ["HOME"]
+
+    def test_unset_leak_vars_still_marks_gate(self, monkeypatch):
+        run_mod = _load_run_mod("bp_child_env_unset")
+        monkeypatch.delenv("MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH", raising=False)
+        monkeypatch.delenv("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR", raising=False)
+
+        child_env = run_mod._engine_child_env()
+
+        assert "MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH" not in child_env
+        assert "MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR" not in child_env
+        assert child_env["MARKET_SKILLS_CONVICTION_GATE"] == "off"
+
+
+class TestRunPairPassesSanitisedEnv:
+    """``_run_pair`` must pass the sanitised env to ``subprocess.run`` so the
+    engine child can never see the thresholds file it is about to overwrite."""
+
+    def test_captured_env_lacks_leak_vars(self, monkeypatch):
+        run_mod = _load_run_mod("bp_run_pair_env")
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH", "/tmp/leaky/thresholds.json")
+        monkeypatch.setenv("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR", "/tmp/leaky/pipeline-out")
+
+        captured_env = {}
+
+        def fake_run(cmd, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+
+            class R:
+                returncode = 1  # engine "failure" → _run_pair returns None; env already captured
+                stdout = ""
+
+            return R()
+
+        monkeypatch.setattr(run_mod.subprocess, "run", fake_run)
+        res = run_mod._run_pair("strategy-trend-follow", "BTCUSD", "kraken:BTCUSD", interval="1d")
+        assert res is None
+        assert "MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH" not in captured_env
+        assert "MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR" not in captured_env
+        assert captured_env["MARKET_SKILLS_CONVICTION_GATE"] == "off"
+        assert captured_env["PATH"] == os.environ["PATH"]
+
+
+class TestGateLockInIsolation:
+    """Regression for the nightly lock-in loop (bead market-skills-0rk).
+
+    Pre-fix failure: with a floor-99 ``conviction_thresholds_private.json``
+    in ``MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR``, the engine child
+    inherited the var (``subprocess.run`` had no ``env=``) and the gate
+    module loaded the floor at import — ``lookup_min_conviction`` returned
+    99 and every idea was dropped. Post-fix the sanitised child env (both
+    vars popped + ``MARKET_SKILLS_CONVICTION_GATE=off``) makes a fresh
+    engine import resolve the shipped default floor 1 with an empty table.
+    """
+
+    @staticmethod
+    def _write_thresholds(out_dir, table: dict) -> None:
+        out_dir.joinpath("conviction_thresholds_private.json").write_text(
+            json.dumps(
+                {
+                    "GLOBAL_MIN_CONVICTION_TO_EMIT": 1,
+                    "MIN_CONVICTION_TO_EMIT_BY_STRATEGY": table,
+                }
+            )
+        )
+
+    def test_floor99_file_inert_with_gate_off(self, monkeypatch, tmp_path):
+        self._write_thresholds(tmp_path, {"strategy-trend-follow": {"kraken:BTCUSD": {"1d": 99, "4h": 99}}})
+        monkeypatch.setenv("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR", str(tmp_path))
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_GATE", "off")
+
+        fresh = _load_fresh_ct("bp_ct_floor99")
+
+        assert fresh.MIN_CONVICTION_TO_EMIT_BY_STRATEGY == {}
+        assert fresh.lookup_min_conviction("strategy-trend-follow", "kraken:BTCUSD", "1d") == 1
+        assert fresh.lookup_min_conviction("strategy-trend-follow", "kraken:BTCUSD", "4h") == 1
+
+    def test_floor_1_4_table_also_inert_no_gate_applied(self, monkeypatch, tmp_path):
+        """Even a benign floor-1/4 overrides file must not reach the engine
+        child once the gate is off — the backtest measures raw strategy
+        behaviour, unmodulated by any conviction floor."""
+        self._write_thresholds(
+            tmp_path,
+            {"strategy-trend-follow": {"kraken:PENDLE": {"4h": 1}, "hl:SOMETHING": {"1d": 4}}},
+        )
+        monkeypatch.setenv("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR", str(tmp_path))
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_GATE", "off")
+
+        fresh = _load_fresh_ct("bp_ct_floor14")
+
+        assert fresh.MIN_CONVICTION_TO_EMIT_BY_STRATEGY == {}
+        assert fresh.lookup_min_conviction("strategy-trend-follow", "kraken:PENDLE", "4h") == 1
+        assert fresh.lookup_min_conviction("strategy-trend-follow", "hl:SOMETHING", "1d") == 1
+
+
+class TestWriteSwingScanSkipPartition:
+    """Zero-trade tickers must land in ``no_trade_tickers``, not be folded
+    into the negative-Sharpe skip bucket with a factually wrong reason."""
+
+    @staticmethod
+    def _combo(strategy, ticker, sharpe, trades, insufficient=False):
+        return {
+            "strategy": strategy,
+            "ticker": ticker,
+            "strategy_sharpe": sharpe,
+            "trades": trades,
+            "insufficient_data": insufficient,
+        }
+
+    def test_partition_buckets_and_reason(self, tmp_path):
+        run_mod = _load_run_mod("bp_skip_partition")
+        current = {
+            "1d\u00d7strategy-a\u00d7NEG": self._combo("strategy-a", "kraken:NEG", -0.5, 3),
+            "4h\u00d7strategy-a\u00d7NEG": self._combo("strategy-a", "kraken:NEG", -1.0, 2),
+            "1d\u00d7strategy-a\u00d7BLIND": self._combo("strategy-a", "kraken:BLIND", 0.0, 0),
+            "4h\u00d7strategy-a\u00d7BLIND": self._combo("strategy-a", "kraken:BLIND", 0.0, 0),
+            "1d\u00d7strategy-a\u00d7GOOD": self._combo("strategy-a", "kraken:GOOD", 1.0, 5),
+            "1d\u00d7strategy-a\u00d7MIXED": self._combo("strategy-a", "kraken:MIXED", -0.3, 2),
+            "4h\u00d7strategy-a\u00d7MIXED": self._combo("strategy-a", "kraken:MIXED", -0.8, 1),
+            # insufficient-data entries must be excluded from the partition.
+            "1d\u00d7strategy-a\u00d7SHORT": self._combo("strategy-a", "kraken:SHORT", 0.0, 0, insufficient=True),
+        }
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        run_mod._write_swing_scan_skip(current, {}, out_dir)
+
+        payload = json.loads((out_dir / "swing_scan_skip_list.json").read_text())
+        assert payload["skip_tickers"] == ["kraken:MIXED", "kraken:NEG"]
+        assert payload["no_trade_tickers"] == ["kraken:BLIND"]
+        assert payload["keep_tickers"] == ["kraken:GOOD"]
+        assert payload["reason"] == (
+            "2 ticker(s): all strategies negative Sharpe; "
+            "1 ticker(s): no trade signals generated on any strategy/interval"
+        )
+
+    def test_blind_tickers_not_in_skip_tickers(self, tmp_path):
+        """The BTCUSD/ETHUSD bug shape: all-zero-trade, all-0.0-Sharpe tickers
+        must NOT be listed as skip_tickers (the old ``all(s <= 0 ...)`` test
+        put them there with a 'negative Sharpe' reason)."""
+        run_mod = _load_run_mod("bp_skip_blind_only")
+        current = {
+            "1d\u00d7strategy-a\u00d7BTCUSD": self._combo("strategy-a", "kraken:BTCUSD", 0.0, 0),
+            "4h\u00d7strategy-a\u00d7BTCUSD": self._combo("strategy-a", "kraken:BTCUSD", 0.0, 0),
+        }
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        run_mod._write_swing_scan_skip(current, {}, out_dir)
+
+        payload = json.loads((out_dir / "swing_scan_skip_list.json").read_text())
+        assert payload["skip_tickers"] == []
+        assert payload["no_trade_tickers"] == ["kraken:BTCUSD"]
+        assert payload["keep_tickers"] == []
+        assert payload["reason"] == "1 ticker(s): no trade signals generated on any strategy/interval"
+
+    def test_empty_current_reason(self, tmp_path):
+        run_mod = _load_run_mod("bp_skip_empty")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        run_mod._write_swing_scan_skip({}, {}, out_dir)
+
+        payload = json.loads((out_dir / "swing_scan_skip_list.json").read_text())
+        assert payload["skip_tickers"] == []
+        assert payload["no_trade_tickers"] == []
+        assert payload["keep_tickers"] == []
+        assert payload["reason"] == "no tickers skipped"
+
+
+class TestRegimeHealthBriefPartition:
+    """The brief must use the same three-way partition: negative tickers under
+    the skipped heading, zero-trade tickers on their own no-trade heading."""
+
+    def test_brief_lists_both_buckets(self, tmp_path, capsys):
+        run_mod = _load_run_mod("bp_brief_partition")
+        current = {
+            "1d\u00d7strategy-a\u00d7NEG": {
+                "strategy": "strategy-a",
+                "ticker": "kraken:NEG",
+                "strategy_sharpe": -0.5,
+                "trades": 3,
+                "insufficient_data": False,
+            },
+            "1d\u00d7strategy-a\u00d7BLIND": {
+                "strategy": "strategy-a",
+                "ticker": "kraken:BLIND",
+                "strategy_sharpe": 0.0,
+                "trades": 0,
+                "insufficient_data": False,
+            },
+        }
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        run_mod._write_regime_health_brief(current, {}, out_dir)
+
+        text = (out_dir / "regime_health_brief.md").read_text()
+        assert text.startswith("## ")
+        assert "1 tickers skipped (all strategies negative)" in text
+        assert "kraken:NEG" in text
+        assert "1 tickers produce no trade signals" in text
+        assert "kraken:BLIND" in text

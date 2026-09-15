@@ -129,6 +129,7 @@ def validate_watchdog_regime(data: object) -> tuple[WatchdogRegimeState | None, 
 
 class SwingScanSkipList(TypedDict):
     skip_tickers: list[str]
+    no_trade_tickers: list[str]
     keep_tickers: list[str]
     reason: str
 
@@ -137,10 +138,13 @@ def validate_swing_scan_skip(data: object) -> tuple[SwingScanSkipList | None, st
     if not isinstance(data, dict):
         return None, "swing_scan_skip: expected a JSON object"
     skip = data.get("skip_tickers")
+    no_trade = data.get("no_trade_tickers")
     keep = data.get("keep_tickers")
     reason = data.get("reason")
     if not isinstance(skip, list):
         return None, "swing_scan_skip: missing or invalid 'skip_tickers' (expected list)"
+    if not isinstance(no_trade, list):
+        return None, "swing_scan_skip: missing or invalid 'no_trade_tickers' (expected list)"
     if not isinstance(keep, list):
         return None, "swing_scan_skip: missing or invalid 'keep_tickers' (expected list)"
     if not isinstance(reason, str):

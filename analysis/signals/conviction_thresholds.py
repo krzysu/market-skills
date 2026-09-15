@@ -42,6 +42,27 @@ import time it resolves the overrides file via:
    Missing here is not an error (pipeline hasn't run yet).
 3. Neither → shipped empty table, ``GLOBAL_MIN_CONVICTION_TO_EMIT=1``.
 
+### Gate kill switch
+
+``MARKET_SKILLS_CONVICTION_GATE`` disables the gate entirely when its
+value (stripped, lowercased) is one of ``off``, ``0``, ``false``, ``no``.
+When disabled:
+
+- ``_load_overrides()`` returns immediately at import time — the
+  overrides file is never read and the shipped empty table survives
+  even when either path env var is set.
+- :func:`lookup_min_conviction` returns the shipped default ``1``
+  (never the possibly-overridden ``GLOBAL_MIN_CONVICTION_TO_EMIT``).
+
+This exists so the nightly backtest pipeline can spawn the backtest
+engine as a child process without the engine applying last night's
+floors to tonight's runs (a floor of ``99`` would drop every idea, the
+backtest would measure zero trades, and the zero-trade result would
+re-lock the floor at ``99`` — a self-pollution loop). The pipeline
+strips both path env vars from the child environment and sets this
+marker to ``off``; any future caller that spawns strategies in-process
+should do the same.
+
     {
       "GLOBAL_MIN_CONVICTION_TO_EMIT": 1,
       "MIN_CONVICTION_TO_EMIT_BY_STRATEGY": {
@@ -75,10 +96,23 @@ import os
 
 ENV_OVERRIDES_PATH = "MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH"
 
-# Global default threshold. Raise to tighten the gate for every strategy /
+# Belt-and-braces kill switch: when set to one of _GATE_OFF_VALUES the
+# conviction gate is inert — the overrides file is never loaded and
+# lookups return the shipped default. The backtest pipeline sets this
+# in the engine child's environment so a backtest can never consume the
+# thresholds file that the pipeline itself is about to write.
+ENV_GATE = "MARKET_SKILLS_CONVICTION_GATE"
+
+_GATE_OFF_VALUES = frozenset({"off", "0", "false", "no"})
+
+# Shipped default threshold. Raise to tighten the gate for every strategy /
 # (ticker, interval) that does not have a more-specific entry below. ``1``
 # preserves the legacy "emit all surviving ideas" behaviour.
-GLOBAL_MIN_CONVICTION_TO_EMIT = 1
+_DEFAULT_GLOBAL_MIN_CONVICTION_TO_EMIT = 1
+
+# Live global threshold — starts at the shipped default and is replaced
+# when the overrides JSON provides ``GLOBAL_MIN_CONVICTION_TO_EMIT``.
+GLOBAL_MIN_CONVICTION_TO_EMIT = _DEFAULT_GLOBAL_MIN_CONVICTION_TO_EMIT
 
 # Per-strategy per-(ticker, interval) overrides. Shipped empty; populated
 # at import time from $MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH if the
@@ -126,8 +160,16 @@ def _resolve_path() -> str | None:
     return None
 
 
+def _gate_disabled() -> bool:
+    """Return True when the ``MARKET_SKILLS_CONVICTION_GATE`` kill switch is off."""
+    return os.environ.get(ENV_GATE, "").strip().lower() in _GATE_OFF_VALUES
+
+
 def _load_overrides() -> None:
     """Load overrides from the resolved path.
+
+    No-op when the ``MARKET_SKILLS_CONVICTION_GATE`` kill switch is off —
+    the shipped empty table survives even if a path env var is set.
 
     Idempotent — safe to call multiple times; existing entries are merged
     (later calls overwrite on conflict). No-op when no path is resolved
@@ -138,6 +180,8 @@ def _load_overrides() -> None:
     override file is a configuration bug). When the fallback OUT_DIR path
     is missing, silently uses the empty table (the pipeline hasn't run yet).
     """
+    if _gate_disabled():
+        return
     path = _resolve_path()
     if not path:
         return
@@ -203,7 +247,13 @@ def lookup_min_conviction(strategy_name: str, ticker: str, interval: str) -> int
         value drops ideas whose conviction is strictly below it.
         Unknown ``(strategy_name, ticker, interval)`` combinations
         fall through to :data:`GLOBAL_MIN_CONVICTION_TO_EMIT`.
+
+        When the ``MARKET_SKILLS_CONVICTION_GATE`` kill switch is off,
+        returns the shipped default ``1`` regardless of the live table
+        or ``GLOBAL_MIN_CONVICTION_TO_EMIT``.
     """
+    if _gate_disabled():
+        return _DEFAULT_GLOBAL_MIN_CONVICTION_TO_EMIT
     table = MIN_CONVICTION_TO_EMIT_BY_STRATEGY.get(strategy_name)
     if table:
         entry = table.get((ticker, interval))

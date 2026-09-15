@@ -147,6 +147,35 @@ def _append_run_log(run_record: dict, out_dir: Path) -> None:
 # ── Per-pair backtest execution ────────────────────────────────────
 
 
+ENV_CONVICTION_GATE = "MARKET_SKILLS_CONVICTION_GATE"
+
+
+def _engine_child_env() -> dict[str, str]:
+    """Sanitised environment for the backtest-engine child process.
+
+    Removes two env vars that would otherwise leak this pipeline's own
+    output back into the engine:
+
+    - ``MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH`` — points at the
+      thresholds file this pipeline writes; if the child sees it, every
+      L3 strategy applies last night's floors to tonight's runs.
+    - ``MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR`` — resolves (via
+      ``conviction_thresholds``' fallback) to the same file, and is not
+      read anywhere under ``skills/backtest-engine/``.
+
+    With a floor of 99 in that file the gate drops every idea, the
+    backtest records zero trades, and the zero-trade Sharpe re-locks the
+    floor at 99 — a self-pollution loop. ``MARKET_SKILLS_CONVICTION_GATE=off``
+    is the belt-and-braces marker: the gate module itself treats it as a
+    kill switch, so a backtest run can never apply the gate at all.
+    """
+    child_env = os.environ.copy()
+    child_env.pop(_lib.ENV_CONVICTION_THRESHOLDS, None)
+    child_env.pop(_lib.ENV_OUT_DIR, None)
+    child_env[ENV_CONVICTION_GATE] = "off"
+    return child_env
+
+
 def _run_pair(
     strategy: str,
     ticker_key: str,
@@ -174,7 +203,7 @@ def _run_pair(
         f"--fill-sim --metrics --json {demo_flag}2>&1",
     ]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=PAIR_TIMEOUT)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=PAIR_TIMEOUT, env=_engine_child_env())
     except subprocess.TimeoutExpired:
         return None
     if r.returncode != 0:
@@ -467,8 +496,25 @@ def _write_watchdog_regime(current: dict, state: dict, out_dir: Path) -> None:
     print(f"  \u2192 watchdog regime written ({len(regime['positions'])} watches)", flush=True)
 
 
-def _write_swing_scan_skip(current: dict, state: dict, out_dir: Path) -> None:
-    ticker_sharpes: dict[str, list[float]] = {}
+def _partition_ticker_outcomes(current: dict) -> tuple[list[str], list[str], list[str]]:
+    """Three-way partition of tickers by their per-combo outcome mix.
+
+    Computed over entries where ``insufficient_data`` is falsy, keyed by
+    ``info["ticker"]``, collecting ``(strategy_sharpe, trades)`` per
+    combo:
+
+    - ``negative`` — not keep, and at least one combo has ``trades > 0``
+      (genuinely losing; every combo's Sharpe is ``<= 0``).
+    - ``no_trades`` — not keep, and every combo has ``trades == 0``
+      (zero-signal / blind pair: the engine produced no trade signals).
+    - ``keep`` — at least one combo with ``strategy_sharpe > 0``.
+
+    A 0.0 Sharpe from zero trades is a measurement of "nothing fired",
+    not a losing strategy — folding it into the negative bucket would
+    put blind pairs on the skip list with a factually wrong reason.
+    Returns ``(negative, no_trades, keep)``, each sorted.
+    """
+    combos: dict[str, list[tuple[float, int]]] = {}
     for key, info in current.items():
         if not isinstance(info, dict):
             continue
@@ -476,28 +522,48 @@ def _write_swing_scan_skip(current: dict, state: dict, out_dir: Path) -> None:
             continue
         ticker = info.get("ticker")
         sharpe = info.get("strategy_sharpe")
-        if ticker and isinstance(sharpe, (int, float)):
-            ticker_sharpes.setdefault(ticker, []).append(sharpe)
+        if not ticker or not isinstance(sharpe, (int, float)):
+            continue
+        combos.setdefault(ticker, []).append((sharpe, info.get("trades", 0)))
 
-    skip_tickers = []
-    keep_tickers = []
-    for ticker, sharpes in ticker_sharpes.items():
-        if all(s <= 0 for s in sharpes):
-            skip_tickers.append(ticker)
+    negative: list[str] = []
+    no_trades: list[str] = []
+    keep: list[str] = []
+    for ticker, results in combos.items():
+        if any(s > 0 for s, _ in results):
+            keep.append(ticker)
+        elif all(trades == 0 for _, trades in results):
+            no_trades.append(ticker)
         else:
-            keep_tickers.append(ticker)
+            negative.append(ticker)
+    return sorted(negative), sorted(no_trades), sorted(keep)
+
+
+def _write_swing_scan_skip(current: dict, state: dict, out_dir: Path) -> None:
+    negative, no_trades, keep = _partition_ticker_outcomes(current)
+
+    reason_parts: list[str] = []
+    if negative:
+        reason_parts.append(f"{len(negative)} ticker(s): all strategies negative Sharpe")
+    if no_trades:
+        reason_parts.append(f"{len(no_trades)} ticker(s): no trade signals generated on any strategy/interval")
+    reason = "; ".join(reason_parts) if reason_parts else "no tickers skipped"
 
     payload = {
-        "skip_tickers": sorted(skip_tickers),
-        "keep_tickers": sorted(keep_tickers),
-        "reason": "all strategies have negative Sharpe on these tickers",
+        "skip_tickers": negative,
+        "no_trade_tickers": no_trades,
+        "keep_tickers": keep,
+        "reason": reason,
     }
     _, validate_err = _lib.validate_swing_scan_skip(payload)
     if validate_err:
         print(f"  [WARN] swing scan skip validation failed: {validate_err}", flush=True)
     path = out_dir / "swing_scan_skip_list.json"
     path.write_text(json.dumps(payload, indent=2))
-    print(f"  \u2192 swing scan skip list written ({len(skip_tickers)} skip, {len(keep_tickers)} keep)", flush=True)
+    print(
+        f"  \u2192 swing scan skip list written ({len(negative)} skip, {len(no_trades)} no-trade, {len(keep)} keep)",
+        flush=True,
+    )
 
 
 def _write_regime_health_brief(current: dict, state: dict, out_dir: Path) -> None:
@@ -550,20 +616,14 @@ def _write_regime_health_brief(current: dict, state: dict, out_dir: Path) -> Non
         lines.append(f"| {key} | {sharpe:+.2f} | {trades} |")
     lines.append("")
 
-    skip_data = {}
-    for key, info in current.items():
-        if not isinstance(info, dict):
-            continue
-        if info.get("insufficient_data"):
-            continue
-        ticker = info.get("ticker")
-        s = info.get("strategy_sharpe")
-        if ticker and isinstance(s, (int, float)):
-            skip_data.setdefault(ticker, []).append(s)
-    all_neg = [t for t, ss in skip_data.items() if all(s <= 0 for s in ss)]
-    if all_neg:
-        lines.append(f"### \u23ed\ufe0f  {len(all_neg)} tickers skipped (all strategies negative)")
-        lines.append(", ".join(sorted(all_neg)))
+    negative, no_trades, _keep = _partition_ticker_outcomes(current)
+    if negative:
+        lines.append(f"### \u23ed\ufe0f  {len(negative)} tickers skipped (all strategies negative)")
+        lines.append(", ".join(negative))
+        lines.append("")
+    if no_trades:
+        lines.append(f"### \u23ed\ufe0f  {len(no_trades)} tickers produce no trade signals")
+        lines.append(", ".join(no_trades))
         lines.append("")
 
     text = "\n".join(lines) + "\n"

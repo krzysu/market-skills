@@ -60,6 +60,10 @@ def _hermetic_ct_module(monkeypatch):
     }
     monkeypatch.delenv("MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH", raising=False)
     monkeypatch.delenv("MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR", raising=False)
+    # A ambient gate kill switch (e.g. the backtest profile exporting
+    # MARKET_SKILLS_CONVICTION_GATE=off) would make _load_overrides a
+    # silent no-op and break the env-var-loading assertions below.
+    monkeypatch.delenv("MARKET_SKILLS_CONVICTION_GATE", raising=False)
     importlib.reload(ct)
     yield
     ct.GLOBAL_MIN_CONVICTION_TO_EMIT = saved_global
@@ -252,6 +256,83 @@ class TestEnvVarLoading:
         with _snapshot():
             ct._load_overrides()
             assert ct.GLOBAL_MIN_CONVICTION_TO_EMIT == 0
+
+
+class TestConvictionGateKillSwitch:
+    """``MARKET_SKILLS_CONVICTION_GATE=off`` must disable the gate entirely.
+
+    Regression for the nightly backtest self-pollution loop (bead
+    market-skills-0rk): the engine child inherited the pipeline's own
+    thresholds file, a floor of 99 dropped every idea, the zero-trade
+    result re-locked the floor at 99. Pre-fix failure: with the gate
+    marker set, ``lookup_min_conviction`` still returned the table's 99
+    and a fresh import with the path var set still loaded the floor-99
+    file — post-fix both yield the shipped default 1 / empty table.
+    """
+
+    def test_gate_off_lookup_returns_shipped_default_despite_mutations(self, monkeypatch):
+        """The call-time check: even if the table/global were already
+        mutated to 99 (as a non-isolated caller might have loaded them),
+        a gate-off lookup must return the shipped default 1, never 99."""
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_GATE", "off")
+        with _snapshot(), _patched("strategy-trend-follow", ("hl:GATEOFF", "1d"), 99):
+            ct.GLOBAL_MIN_CONVICTION_TO_EMIT = 99
+            assert ct.lookup_min_conviction("strategy-trend-follow", "hl:GATEOFF", "1d") == 1
+            assert ct.lookup_min_conviction("strategy-trend-follow", "hl:OTHER", "4h") == 1
+
+    def test_gate_off_ignores_explicit_overrides_path(self, monkeypatch, tmp_path):
+        """Import-time check: with the gate off, ``_load_overrides`` returns
+        without touching the table even when the explicit path var is set
+        and the file exists."""
+        cfg = _write_cfg(
+            tmp_path,
+            {
+                "GLOBAL_MIN_CONVICTION_TO_EMIT": 99,
+                "MIN_CONVICTION_TO_EMIT_BY_STRATEGY": {
+                    "strategy-trend-follow": {"kraken:BTCUSD": {"1d": 99, "4h": 99}}
+                },
+            },
+        )
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH", str(cfg))
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_GATE", "off")
+        with _snapshot():
+            ct._load_overrides()
+            assert ct.MIN_CONVICTION_TO_EMIT_BY_STRATEGY == {}
+            assert ct.GLOBAL_MIN_CONVICTION_TO_EMIT == 1
+
+    def test_fresh_import_gate_off_with_floor99_file_yields_shipped_table(self, monkeypatch, tmp_path):
+        """Full child-process shape: fresh module execution (engine child
+        starts a new interpreter state) with the gate marker set and the
+        path var pointing at a floor-99 file must yield the shipped
+        empty table and default 1."""
+        cfg = _write_cfg(
+            tmp_path,
+            {
+                "GLOBAL_MIN_CONVICTION_TO_EMIT": 99,
+                "MIN_CONVICTION_TO_EMIT_BY_STRATEGY": {"strategy-trend-follow": {"kraken:BTCUSD": {"1d": 99}}},
+            },
+        )
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH", str(cfg))
+        monkeypatch.setenv("MARKET_SKILLS_CONVICTION_GATE", "off")
+        with _snapshot():
+            importlib.reload(ct)
+            assert ct.MIN_CONVICTION_TO_EMIT_BY_STRATEGY == {}
+            assert ct.GLOBAL_MIN_CONVICTION_TO_EMIT == 1
+
+    def test_gate_off_value_variants(self, monkeypatch):
+        for value in ("off", "0", "false", "no", "OFF", " False ", "\tNO\n"):
+            monkeypatch.setenv("MARKET_SKILLS_CONVICTION_GATE", value)
+            assert ct._gate_disabled() is True, f"{value!r} should disable the gate"
+        for value in ("on", "1", "true", "yes", "", "maybe"):
+            monkeypatch.setenv("MARKET_SKILLS_CONVICTION_GATE", value)
+            assert ct._gate_disabled() is False, f"{value!r} should leave the gate enabled"
+
+    def test_gate_unset_lookup_behaviour_unchanged(self, monkeypatch):
+        """With the gate var unset the lookup contract is exactly as before:
+        the live table wins over the global default."""
+        monkeypatch.delenv("MARKET_SKILLS_CONVICTION_GATE", raising=False)
+        with _patched("strategy-trend-follow", ("hl:GATEON", "1d"), 99):
+            assert ct.lookup_min_conviction("strategy-trend-follow", "hl:GATEON", "1d") == 99
 
 
 class TestLookupBehaviour:
