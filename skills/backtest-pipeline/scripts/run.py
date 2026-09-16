@@ -245,6 +245,7 @@ def _run_pair(
                 "windows": windows,
                 "provider": provider,
                 "insufficient_data": True,
+                "bankrupted": bool(m["strategy"].get("bankrupted", False)),
             }
 
         return {
@@ -263,6 +264,9 @@ def _run_pair(
             "windows": windows,
             "provider": provider,
             "insufficient_data": False,
+            # Engine flags a curve that went non-positive: its Sharpe is None
+            # (never convert a destroyed-curve ratio into a conviction floor).
+            "bankrupted": bool(m["strategy"].get("bankrupted", False)),
         }
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
@@ -348,18 +352,31 @@ def _write_conviction_thresholds(current: dict, state: dict, out_dir: Path) -> N
         if not isinstance(info, dict):
             continue
         if info.get("insufficient_data"):
+            # Genuinely unmeasured — an absent key means "no opinion" and
+            # falls through to GLOBAL_MIN_CONVICTION_TO_EMIT. Keep skipping.
             continue
         strat = info.get("strategy")
         ticker = info.get("ticker")
-        sharpe = info.get("strategy_sharpe")
-        if not strat or not ticker or sharpe is None or not isinstance(sharpe, (int, float)):
-            continue
-        if sharpe >= 0.5:
-            floor = 1
-        elif sharpe > 0:
-            floor = 4
-        else:
+        # A flagged (bankrupted) combo's Sharpe is null (curve went
+        # non-positive — arithmetic artifact, not edge). Write an explicit
+        # non-tradeable floor of 99: an absent key would fall through to
+        # GLOBAL_MIN_CONVICTION_TO_EMIT=1 ("trade this"), the exact
+        # downstream harm a destroyed curve must never cause. Sharpe <= 0
+        # already maps to 99; a destroyed curve is strictly worse.
+        if info.get("bankrupted"):
             floor = 99
+        else:
+            sharpe = info.get("strategy_sharpe")
+            if not strat or not ticker or sharpe is None or not isinstance(sharpe, (int, float)):
+                continue
+            if sharpe >= 0.5:
+                floor = 1
+            elif sharpe > 0:
+                floor = 4
+            else:
+                floor = 99
+        if not strat or not ticker:
+            continue
         strat_dict = thresholds["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"].setdefault(strat, {})
         interval = key.split("\u00d7")[0] if "\u00d7" in key else "1d"
         ticker_entry = strat_dict.setdefault(ticker, {})

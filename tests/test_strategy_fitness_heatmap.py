@@ -36,6 +36,11 @@ Plus the nightly-default-path cases:
   13. --help prints the skill's own flags (not the generic AXI usage)
   14. human mode surfaces the fallback note + errors on stderr
 
+And the fresh-grid bankrupted-curve case (bead market-skills-ww0 review):
+
+  15. a bankrupted combo (curve below zero) emits a null Sharpe matrix cell
+      and a null detail sharpe — never a TypeError, never a fake 0.0
+
 All tests are deterministic and network-free.
 """
 
@@ -107,6 +112,37 @@ class _RaisingStrategy:
 
     def analyze(self, candles, *, ticker, interval="1d", period="1y", asset_class=None):
         raise RuntimeError("boom")
+
+
+class _BankruptStrategy:
+    """Always-long strategy over a downtrend -> stop-outs -> bankrupted curve.
+
+    Fires one idea per analyze call (long, stop 10% below the signal close,
+    target 2x above — unreachable in a downtrend, so every trade exits at the
+    stop). The FillSimulator realizes a loss per closed trade; monkeypatching
+    ``_QTY`` scales the position so cumulative realized losses exceed the
+    100_000 ``_BASE_CAPITAL`` anchor and the curve goes non-positive, which
+    makes ``bt.compute`` report ``bankrupted=True`` and ``sharpe=None``.
+    """
+
+    def analyze(self, candles, *, ticker, interval="1d", period="1y", asset_class=None):
+        price = float(candles[-1][4])
+        return {
+            "ideas": [
+                {
+                    "pair": ticker,
+                    "direction": "long",
+                    "conviction": 3,
+                    "entry_type": "market",
+                    "entry_price": price,
+                    "stop_loss": price * 0.9,
+                    "take_profit": [price * 2.0],
+                    "reasoning": "test",
+                    "source_skills": ["test"],
+                }
+            ],
+            "narrative": "always long into a downtrend",
+        }
 
 
 def _install_load_skill(mod, monkeypatch, *, bt_lib, strategies_map) -> None:
@@ -389,6 +425,49 @@ def test_strategy_exception_becomes_per_combo_error(capsys, monkeypatch):
         assert data["intervals"][iv]["matrix"]["values"] == [[0.0]]
     assert len(env["errors"]) == 1
     assert env["errors"][0].startswith("RuntimeError: ")
+
+
+# --- Fresh path: bankrupted curve -> null Sharpe cell (Finding: float(None)) ---
+
+
+def test_fresh_bankrupt_combo_emits_null_sharpe_cell(capsys, monkeypatch):
+    """A combo whose equity curve goes non-positive must not crash the fresh grid.
+
+    ``bt.compute`` reports ``sharpe=None`` (JSON null) for a bankrupted curve;
+    the pre-fix ``float(smetrics.get("sharpe", 0.0))`` raised TypeError — the
+    key exists with a null value, so the default never applied — and took
+    down the whole fresh grid (and the automatic fallback). The cell must
+    instead mirror the pipeline's fitness_matrix null-cell convention: matrix
+    cell null, detail ``sharpe`` null, ``metrics["bankrupted"]`` true.
+    """
+    _install_load_skill(_RUN, monkeypatch, bt_lib=_BT, strategies_map={"bankrupt": _BankruptStrategy()})
+    # Steady downtrend: every long idea gets stopped out ~10% below its entry.
+    _install_fetch_ohlc(_RUN, monkeypatch, _make_candles(n=600, seed=9, base=100.0, drift=-0.005, noise=0.002))
+    # Scale the position so cumulative stop-out losses exceed the 100_000
+    # base on both intervals (1d entry ~36.7, 4h entry ~8.2).
+    monkeypatch.setattr(_RUN, "_QTY", 100_000.0)
+
+    rc = _run_main(_RUN, monkeypatch, "--json", "--tickers", "BTCUSD", "--strategies", "bankrupt")
+    assert rc == 0
+    env = _envelope(capsys)
+    assert env["errors"] == []
+    assert env["count"] == 2  # 1 strategy * 1 ticker * 2 intervals
+    data = env["data"]
+    for iv in ("1d", "4h"):
+        matrix = data["intervals"][iv]["matrix"]
+        assert matrix["values"] == [[None]]  # null cell, not 0.0, not a crash
+        d = data["intervals"][iv]["details"][0]
+        assert d["sharpe"] is None  # mirror field agrees with the cell
+        assert d["error"] is None
+        assert d["metrics"]["bankrupted"] is True
+        assert d["metrics"]["sharpe"] is None
+        assert d["metrics"]["sortino"] is None
+        assert d["metrics"]["annualized_return"] is None
+        # Realized losses are still reported as numbers.
+        assert d["metrics"]["trade_count"] > 0
+        assert d["metrics"]["total_return"] < 0.0
+    # The envelope round-trips strict JSON (nulls, never complex/NaN strings).
+    json.dumps(env, allow_nan=False)
 
 
 # --- Bonus: FetchOnce semantics — candles fetched once per (ticker, interval) --

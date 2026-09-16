@@ -515,7 +515,7 @@ def compute(
 
     Returns a dict with keys in canonical insertion order: ``trade_count``,
     ``total_return``, ``annualized_return``, ``sharpe``, ``sortino``,
-    ``max_drawdown``, ``profit_factor``, ``average_trade``.
+    ``max_drawdown``, ``profit_factor``, ``average_trade``, ``bankrupted``.
 
     Empty-input contract: when ``equity_curve`` is empty the curve carries no
     information, so the function returns the all-zero shape below (no ``inf``,
@@ -523,7 +523,7 @@ def compute(
 
         {"trade_count": 0, "total_return": 0.0, "annualized_return": 0.0,
          "sharpe": 0.0, "sortino": 0.0, "max_drawdown": 0.0,
-         "profit_factor": 0.0, "average_trade": 0.0}
+         "profit_factor": 0.0, "average_trade": 0.0, "bankrupted": False}
 
     A strategy that fired no trades (``trades=[]``) but has a non-empty equity
     curve (e.g. the buy-and-hold benchmark) still gets the curve-derived
@@ -546,9 +546,10 @@ def compute(
       * ``sharpe`` — ``mean(daily_returns) / stdev(daily_returns) * sqrt(p)``.
         Daily returns are ``equity_curve[i] / equity_curve[i-1] - 1``. A series
         with fewer than two daily returns, or zero variance, returns ``0.0``
-        (a single-trade series has no variance -> Sharpe = 0). A zero base
-        (``equity_curve[i-1] == 0``) yields a ``0.0`` return to avoid
-        division-by-zero on P&L curves that start at 0.0.
+        (a single-trade series has no variance -> Sharpe = 0). A non-positive
+        base (``equity_curve[i-1] <= 0``) yields a ``0.0`` return: a ratio
+        against a negative base flips the sign of the change, recording
+        deepening losses as gains.
       * ``sortino`` — same numerator, downside deviation (stdev of the
         negative returns only) as the denominator. Returns ``0.0`` when there
         are fewer than two daily returns, no negative returns, or zero
@@ -571,6 +572,20 @@ def compute(
     scaling (treated as a per-period rate; default ``0.0`` leaves the formula
     as ``mean / stdev * sqrt(p)``). ``periods_per_year`` defaults to 365 (daily
     bars / 24-7 crypto convention).
+
+    Bankruptcy contract: ``bankrupted`` is ``True`` when the curve actually
+    goes non-positive — any value ``<= 0.0`` at index >= 1 (a P&L curve whose
+    only non-positive point is the flat ``0.0`` start at index 0 does not
+    flag). A curve that has destroyed its base carries no information in its
+    signed ratio metrics, so when ``bankrupted`` is ``True`` they are reported
+    as ``None`` (JSON ``null``) instead of numbers: ``annualized_return`` (a
+    negative base raised to a fractional power is complex — never emitted),
+    ``sharpe``, and ``sortino``. ``trade_count``, ``total_return``,
+    ``max_drawdown``, ``profit_factor``, and ``average_trade`` stay as
+    computed floats. Independently of the flag, ``annualized_return`` is
+    ``None`` whenever the geometric compounding would be complex (a curve
+    starting negative can produce ``1 + total_return < 0``) — ``compute``
+    never emits a ``complex`` value.
     """
     if not equity_curve:
         return {
@@ -582,10 +597,18 @@ def compute(
             "max_drawdown": 0.0,
             "profit_factor": 0.0,
             "average_trade": 0.0,
+            "bankrupted": False,
         }
 
     n = len(equity_curve)
     trade_count = len(trades)
+
+    # Bankruptcy flag: the curve actually went non-positive when any value
+    # <= 0.0 occurs at index >= 1 (the flat 0.0 start at index 0 alone is the
+    # normal no-trades-yet P&L shape, not a bankruptcy). A curve past that
+    # point has destroyed its base, so its signed ratio metrics carry no
+    # information and are reported as None below.
+    bankrupted = any(v <= 0.0 for v in equity_curve[1:])
 
     # total_return: guard the zero base (a P&L curve starting at 0.0 has no
     # defined return-on-base; dividing would raise / produce inf).
@@ -594,18 +617,26 @@ def compute(
     else:
         total_return = 0.0
 
-    # annualized_return: geometric compounding from total_return.
-    if n < 2 or total_return == 0.0:
+    # annualized_return: geometric compounding from total_return. A
+    # bankrupted curve gets None (1 + total_return < 0 raised to a fractional
+    # power is complex — never emitted); the isinstance guard below catches
+    # the remaining complex shape (a curve starting negative can produce
+    # 1 + total_return < 0 without the flag firing).
+    if bankrupted:
+        annualized_return = None
+    elif n < 2 or total_return == 0.0:
         annualized_return = 0.0
     else:
         annualized_return = (1 + total_return) ** (periods_per_year / (n - 1)) - 1
+    if isinstance(annualized_return, complex):
+        annualized_return = None
 
-    # Daily returns; a zero base yields 0.0 to avoid division-by-zero on P&L
-    # curves that start flat at 0.0.
+    # Daily returns; a non-positive base yields 0.0 — against a negative
+    # prev the ratio flips sign, recording deepening losses as gains.
     daily_returns: list[float] = []
     for i in range(1, n):
         prev = equity_curve[i - 1]
-        daily_returns.append(equity_curve[i] / prev - 1 if prev != 0 else 0.0)
+        daily_returns.append(equity_curve[i] / prev - 1 if prev > 0 else 0.0)
 
     # sharpe: mean / stdev * sqrt(p); 0.0 when variance is absent.
     if len(daily_returns) < 2:
@@ -634,6 +665,14 @@ def compute(
             else:
                 mean_r = sum(daily_returns) / len(daily_returns)
                 sortino = (mean_r - risk_free_rate) / dd * math.sqrt(periods_per_year)
+
+    # A destroyed curve carries no information in a signed ratio: the
+    # per-period return sign flips once prev < 0, so a deeply loss-making
+    # strategy can report a large positive Sharpe. Report None (JSON null)
+    # instead — the pipeline's numeric guard skips None.
+    if bankrupted:
+        sharpe = None
+        sortino = None
 
     # max_drawdown: largest (peak - v) / peak; 0.0 for a monotonic rise.
     max_drawdown = 0.0
@@ -667,6 +706,7 @@ def compute(
         "max_drawdown": max_drawdown,
         "profit_factor": profit_factor,
         "average_trade": average_trade,
+        "bankrupted": bankrupted,
     }
 
 

@@ -40,7 +40,11 @@ Output (AXI envelope, ``--json``):
     data.intervals.1d.details = [per-combo metrics, ...]
     data.intervals.4h.details = [per-combo metrics, ...]
 
-``values`` is ``rows=tickers, cols=strategies, cells=Sharpe``.
+``values`` is ``rows=tickers, cols=strategies, cells=Sharpe``. A cell is
+JSON ``null`` when the combo's equity curve went bankrupted (``compute``
+reports ``sharpe=None``) — same convention as the pipeline's
+``fitness_matrix.json`` — and the matching ``details[i]["sharpe"]`` mirror
+stays ``null`` too.
 
 Usage:
     uv run skills/strategy-fitness-heatmap/scripts/run.py --json
@@ -81,7 +85,8 @@ _FEE_BPS: int = 26
 _SLIPPAGE_BPS: int = 2
 _QTY: float = 1.0
 
-# Matches bt.compute's empty-input contract (no inf, no nan).
+# Matches bt.compute's empty-input contract (no inf, no nan), including the
+# always-present ``bankrupted`` boolean.
 _ZERO_METRICS: dict[str, Any] = {
     "trade_count": 0,
     "total_return": 0.0,
@@ -91,6 +96,7 @@ _ZERO_METRICS: dict[str, Any] = {
     "max_drawdown": 0.0,
     "profit_factor": 0.0,
     "average_trade": 0.0,
+    "bankrupted": False,
 }
 
 # ── Nightly artifacts (same contract as backtest-trend-miner) ──────
@@ -428,6 +434,18 @@ def _run_strategy(
         return dict(_ZERO_METRICS), f"{type(e).__name__}: {e}"
 
 
+def _sharpe_cell(metrics: dict[str, Any]) -> float | None:
+    """Extract the matrix-cell Sharpe from a ``bt.compute`` metrics dict.
+
+    A bankrupted curve (``bankrupted=True``) reports ``sharpe=None`` (JSON
+    ``null``) — a destroyed base carries no information in a signed ratio, so
+    the cell stays ``null`` like the pipeline's ``fitness_matrix.json`` does
+    for excluded combos, instead of a fabricated ``0.0``.
+    """
+    raw = metrics.get("sharpe")
+    return None if raw is None else float(raw)
+
+
 def _benchmark_for(
     bt_lib,
     candles: list[list],
@@ -457,11 +475,14 @@ def _run_interval(
     """Run all (ticker, strategy) combos for one interval.
 
     Fetches candles once per ticker and reuses them across all strategies.
-    The matrix is ``rows=tickers, cols=strategies, cells=Sharpe``. Details
-    carry the full per-combo metrics dict + benchmark for deeper inspection.
+    The matrix is ``rows=tickers, cols=strategies, cells=Sharpe``; a cell is
+    ``None`` when the combo's ``compute`` reports ``sharpe=None`` (bankrupted
+    curve) — never coerced to ``0.0``. Details carry the full per-combo
+    metrics dict + benchmark for deeper inspection, with ``sharpe`` mirroring
+    the matrix cell (``None`` stays ``None``).
     """
     period, warmup, ppy = _INTERVAL_CONFIG[interval]
-    values: list[list[float]] = [[0.0] * len(strategies) for _ in tickers]
+    values: list[list[float | None]] = [[0.0] * len(strategies) for _ in tickers]
     details: list[dict[str, Any]] = []
 
     for ti, ticker in enumerate(tickers):
@@ -516,7 +537,7 @@ def _run_interval(
                 period=period,
                 periods_per_year=ppy,
             )
-            sharpe = float(smetrics.get("sharpe", 0.0))
+            sharpe = _sharpe_cell(smetrics)
             values[ti][si] = sharpe
             details.append(
                 {

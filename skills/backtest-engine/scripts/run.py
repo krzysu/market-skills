@@ -514,6 +514,11 @@ def _run_metrics(bt_lib, records: list[dict], candles: list[list], args: argpars
     so it enters on the same bar the strategy's earliest possible fill occurs
     and its ``total_return`` carries the entry cost — like-for-like with the
     strategy curve.
+
+    When cumulative losses push the strategy curve non-positive, ``compute``
+    reports ``bankrupted=True`` and ``annualized_return``/``sharpe``/
+    ``sortino`` as ``None`` (a destroyed base carries no information in a
+    signed ratio) instead of garbage numbers.
     """
     n_bars = len(candles)
     base_capital: float = 100_000.0  # $100K account — PnL in USD maps to sensible % returns

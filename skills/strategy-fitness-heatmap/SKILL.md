@@ -119,9 +119,11 @@ The AXI envelope `data` payload (same shape both modes):
 ```
 
 - `matrix.values` is `rows=tickers, cols=strategies, cells=Sharpe` -
-  `values[i][j]` is the Sharpe of `tickers[i]` under `strategies[j]`. In the
-  default (nightly) mode cells can be JSON `null` — they are emitted exactly
-  as stored in `fitness_matrix.json` and are NOT coerced to `0.0`.
+  `values[i][j]` is the Sharpe of `tickers[i]` under `strategies[j]`. Cells
+  can be JSON `null` in both modes — the nightly mode emits them exactly as
+  stored in `fitness_matrix.json`, and the `--fresh` path emits `null` for a
+  bankrupted combo (equity curve went non-positive → its Sharpe is `null`).
+  In neither mode are they coerced to `0.0`.
 - `details` has one entry per (ticker, strategy) combo per interval, carrying
   `ticker` / `strategy` / `interval` / `sharpe` / `trade_count` / `bars` and
   an `error` field that is `null` on success. The rest depends on the mode:

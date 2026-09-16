@@ -359,6 +359,52 @@ class TestRunPairTickerFormat:
         assert strat_table["kraken:BTCUSD"]["1d"] == 1
         assert strat_table["kraken:ETHUSD"]["1d"] == 4
 
+    def test_bankrupted_combo_gets_floor_99_and_insufficient_data_skipped(self, tmp_path):
+        """Bead market-skills-ww0: a combo whose equity curve went non-positive
+        must not have its Sharpe converted into a conviction floor, and must
+        not be skipped either — an absent key falls through to
+        GLOBAL_MIN_CONVICTION_TO_EMIT=1 ("trade this"), grading a destroyed
+        curve (profit factor 0.31, average trade -$3,180) as tradeable. The
+        flagged combo gets an explicit non-tradeable floor of 99 instead.
+        An `insufficient_data` combo stays skipped (no entry): absent means
+        "no opinion" only for the genuinely-unmeasured case. A healthy combo
+        in the same run still gets its floor."""
+        run_mod = _load_run_mod("bp_conv_thresh_bankrupt")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        current = {
+            "1d\u00d7strategy-trend-follow\u00d7BTCUSD": {
+                "strategy": "strategy-trend-follow",
+                "ticker": "kraken:BTCUSD",
+                "strategy_sharpe": None,  # engine reports sharpe null for a bankrupt curve
+                "bankrupted": True,
+                "insufficient_data": False,
+            },
+            "1d\u00d7strategy-trend-follow\u00d7SOLUSD": {
+                "strategy": "strategy-trend-follow",
+                "ticker": "kraken:SOLUSD",
+                "strategy_sharpe": 0.0,
+                "bankrupted": False,
+                "insufficient_data": True,
+            },
+            "1d\u00d7strategy-trend-follow\u00d7ETHUSD": {
+                "strategy": "strategy-trend-follow",
+                "ticker": "kraken:ETHUSD",
+                "strategy_sharpe": 0.8,
+                "bankrupted": False,
+                "insufficient_data": False,
+            },
+        }
+        state = {"baseline": {}}
+        run_mod._write_conviction_thresholds(current, state, out_dir)
+
+        data = json.loads((out_dir / "conviction_thresholds_private.json").read_text())
+        strat_table = data["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"]["strategy-trend-follow"]
+        assert strat_table["kraken:BTCUSD"]["1d"] == 99
+        assert "kraken:SOLUSD" not in strat_table
+        assert strat_table["kraken:ETHUSD"]["1d"] == 1
+
 
 # ── shell quoting in _run_pair ────────────────────────────────────
 

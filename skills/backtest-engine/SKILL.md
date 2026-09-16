@@ -325,7 +325,7 @@ bt = load_skill("backtest-engine")
 
 metrics = bt.compute(records, equity_curve, risk_free_rate=0.0, periods_per_year=365)
 # -> {"trade_count", "total_return", "annualized_return", "sharpe",
-#     "sortino", "max_drawdown", "profit_factor", "average_trade"}
+#     "sortino", "max_drawdown", "profit_factor", "average_trade", "bankrupted"}
 
 bench = bt.buy_and_hold_benchmark(candles, warmup, *, fee_bps=26, slippage_bps=2)
 # -> list[float], cost basis + one close per bar from warmup to the end
@@ -336,7 +336,7 @@ bench_metrics = bt.compute([], bench)
 — `risk_free_rate` is positional-or-keyword; `periods_per_year` is
 keyword-only. Returns a dict with keys in canonical insertion order:
 `trade_count`, `total_return`, `annualized_return`, `sharpe`, `sortino`,
-`max_drawdown`, `profit_factor`, `average_trade`.
+`max_drawdown`, `profit_factor`, `average_trade`, `bankrupted`.
 
 `buy_and_hold_benchmark(candles, warmup, *, fee_bps=26, slippage_bps=2) -> list[float]`
 — keyword-only after `warmup`. Returns `[]` when `len(candles) <= warmup`,
@@ -351,18 +351,46 @@ onward. The `total_return` derived from this curve is
 |-----|------------|
 | `trade_count` | `len(trades)` |
 | `total_return` | `(equity_curve[-1] - equity_curve[0]) / equity_curve[0]` when the curve has ≥ 2 points and a non-zero base; else `0.0` |
-| `annualized_return` | `(1 + total_return) ** (periods_per_year / (n - 1)) - 1` (geometric); `0.0` when `n < 2` or `total_return == 0.0` |
-| `sharpe` | `mean(daily_returns) / stdev(daily_returns) * sqrt(p)`; `0.0` when `< 2` daily returns or zero variance (a single-trade series → Sharpe = 0) |
-| `sortino` | same numerator over downside deviation (stdev of negative returns only) `* sqrt(p)`; `0.0` when no negative returns or zero downside variance |
-| `max_drawdown` | largest `(peak - equity) / peak` over the curve; `0.0` for a monotonically non-decreasing curve |
+| `annualized_return` | `(1 + total_return) ** (periods_per_year / (n - 1)) - 1` (geometric); `0.0` when `n < 2` or `total_return == 0.0`; `null` (never complex, never a string) when the curve went non-positive (`bankrupted`) or the geometric power would be complex |
+| `sharpe` | `mean(daily_returns) / stdev(daily_returns) * sqrt(p)`; `0.0` when `< 2` daily returns or zero variance (a single-trade series → Sharpe = 0); `null` when `bankrupted` |
+| `sortino` | same numerator over downside deviation (stdev of negative returns only) `* sqrt(p)`; `0.0` when no negative returns or zero downside variance; `null` when `bankrupted` |
+| `max_drawdown` | largest `(peak - equity) / peak` over the curve; `0.0` for a monotonically non-decreasing curve; stays a computed float on a bankrupted curve (magnitude — see Bankruptcy contract) |
 | `profit_factor` | `sum(pos pnl) / abs(sum(neg pnl))`; `float("inf")` sentinel when there are no losers but ≥ 1 positive pnl; `0.0` when no numeric pnls |
 | `average_trade` | mean of non-`None` `pnl_quote` values; `0.0` when no trade has a numeric pnl |
+| `bankrupted` | `True` when any curve value `<= 0.0` occurs at index ≥ 1 — the account went bankrupt and the three signed ratio metrics above are `null`; `False` for the empty curve and for a curve whose only non-positive point is the flat `0.0` start at index 0 |
 
-Daily returns are `equity_curve[i] / equity_curve[i-1] - 1`; a zero base
-(`equity_curve[i-1] == 0`) yields `0.0` to avoid division-by-zero on P&L
-curves that start flat at 0.0. `risk_free_rate` is subtracted from the mean
+Daily returns are `equity_curve[i] / equity_curve[i-1] - 1`; a non-positive
+base (`equity_curve[i-1] <= 0`) yields `0.0` — a zero base avoids
+division-by-zero on P&L curves that start flat at 0.0, and a negative base
+would flip the sign of the change, recording deepening losses as gains.
+`risk_free_rate` is subtracted from the mean
 per-period return before scaling (treated as a per-period rate; default
 `0.0`). `periods_per_year` defaults to `365` (daily bars / 24-7 crypto).
+
+### Bankruptcy contract
+
+An equity curve that goes non-positive has destroyed its base, so its signed
+ratio metrics carry no information: `annualized_return` would be a negative
+base raised to a fractional power (complex), and `sharpe`/`sortino` flip sign
+once `equity[i-1] < 0`, recording deepening losses as gains (a −709% curve
+once reported Sharpe +1.12). `compute()` therefore flags such a curve with
+`bankrupted=True` and reports those three metrics as `null` (JSON `null`) —
+never complex, never a string — while `trade_count`, `total_return`,
+`max_drawdown`, `profit_factor`, and `average_trade` stay as computed floats.
+
+`max_drawdown` is deliberately retained as a float on a bankrupted curve: it
+is a magnitude, not a signed ratio. Its denominator is the running peak —
+always ≥ the positive starting capital — so a negative equity value makes the
+drawdown grow past 100% (the −709% curve reported a 709% drawdown from peak)
+without ever flipping sign. The number truthfully answers "how far did this
+strategy sink below its high-water mark", which is exactly the question the
+bankruptcy flag exists to raise, so nulling it would discard real
+information; only the sign-flipping ratios are nulled.
+
+The null Sharpe keeps the nightly pipeline from converting the artifact into
+a conviction floor: `_write_conviction_thresholds()` writes bankrupted
+combos an explicit non-tradeable floor of 99 and still skips
+`insufficient_data` combos (see `backtest-pipeline`).
 
 ### Empty-input contract
 
@@ -372,7 +400,7 @@ returns the all-zero shape (no `inf`, no `nan`):
 ```python
 {"trade_count": 0, "total_return": 0.0, "annualized_return": 0.0,
  "sharpe": 0.0, "sortino": 0.0, "max_drawdown": 0.0,
- "profit_factor": 0.0, "average_trade": 0.0}
+ "profit_factor": 0.0, "average_trade": 0.0, "bankrupted": False}
 ```
 
 A strategy that fired no trades (`trades=[]`) but has a non-empty equity curve
@@ -451,9 +479,10 @@ just no next bar to fill).
 
 ## Pitfalls
 
-The five failure modes a backtest engine can hit — look-ahead bias, intrabar
-ambiguity, recompute cost, TTL cache leakage, and small-sample Sharpe — are
-documented with the guard that addresses each in
+The six failure modes a backtest engine can hit — look-ahead bias, intrabar
+ambiguity, recompute cost, TTL cache leakage, small-sample Sharpe, and a
+negative equity curve (bankruptcy) — are documented with the guard that
+addresses each in
 [references/pitfalls.md](./references/pitfalls.md).
 
 ## Roadmap

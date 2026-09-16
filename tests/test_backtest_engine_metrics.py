@@ -96,6 +96,7 @@ _EMPTY_SHAPE = {
     "max_drawdown": 0.0,
     "profit_factor": 0.0,
     "average_trade": 0.0,
+    "bankrupted": False,
 }
 
 
@@ -324,3 +325,123 @@ class TestRunMetricsCapitalBase:
         ]
         payload = _run_metrics(_BT, records, self._candles(), self._args(fee_bps=0, slippage_bps=0))
         assert payload["strategy"]["max_drawdown"] == pytest.approx(2.0)
+
+
+class TestBankruptedFlag:
+    """Per-fix fixtures for the negative-equity-curve corruption (bead market-skills-ww0).
+
+    A cumulative-loss sequence that exceeds the starting capital pushes the
+    equity curve below zero. Pre-fix that single fact corrupted three metrics:
+    ``annualized_return`` went complex (a negative base raised to a fractional
+    power) and serialized as a nonsense string; ``sharpe``/``sortino`` turned
+    POSITIVE because ``equity[i] / equity[i-1] - 1`` flips sign once
+    ``equity[i-1] < 0`` (deepening losses recorded as gains). ``compute`` now
+    flags such a curve with ``bankrupted=True`` and reports ``None`` for the
+    three destroyed ratio metrics instead of numbers.
+    """
+
+    BASE = 100_000.0
+
+    @staticmethod
+    def _record(pnl: float, exit_bar_index: int) -> dict:
+        """A filled TradeRecord carrying one realized loss at exit_bar_index."""
+        return {
+            "entry": {"side": "buy", "fill_price": 100.0, "filled_volume": 1.0, "fee": 0.0},
+            "exit": {"side": "sell", "fill_price": 90.0, "status": "filled"},
+            "status": "filled",
+            "exit_reason": "stop",
+            "exit_bar_index": exit_bar_index,
+            "pnl_quote": pnl,
+        }
+
+    def test_bankrupt_sequence_no_complex_annualized_no_positive_sharpe(self):
+        # Trade sequence: -20_000, +15_000 (dip + partial recovery while still
+        # positive), then the account blows through zero (-100_000) and keeps
+        # losing -20_000 per bar. Curve: 100_000 -> 80_000 -> 95_000 ->
+        # -5_000 -> ... -> -185_000. 12 records, cumulative pnl -285_000.
+        deltas = [-20_000.0, 15_000.0, -100_000.0] + [-20_000.0] * 9
+        records = [self._record(d, i + 1) for i, d in enumerate(deltas)]
+        curve = [self.BASE]
+        cum = 0.0
+        for d in deltas:
+            cum += d
+            curve.append(self.BASE + cum)
+
+        metrics = compute(records, curve)
+
+        # The curve actually went non-positive -> flagged.
+        assert metrics["bankrupted"] is True
+        # annualized_return: never complex, never a str; None or a float.
+        ar = metrics["annualized_return"]
+        assert not isinstance(ar, complex)
+        assert not isinstance(ar, str)
+        assert ar is None or isinstance(ar, float)
+        # No positive Sharpe/Sortino from a sign-flipped per-period return:
+        # None (information destroyed) or <= 0.
+        assert metrics["sharpe"] is None or metrics["sharpe"] <= 0
+        assert metrics["sortino"] is None or metrics["sortino"] <= 0
+        # Trade/curve metrics stay as computed floats.
+        assert metrics["trade_count"] == len(deltas)
+        assert metrics["total_return"] == pytest.approx((curve[-1] - self.BASE) / self.BASE)
+        assert metrics["average_trade"] == pytest.approx(sum(deltas) / len(deltas))
+        assert metrics["profit_factor"] == pytest.approx(15_000.0 / 300_000.0)
+        assert isinstance(metrics["max_drawdown"], float)
+
+    def test_run_metrics_bankrupt_curve_flags_and_nones(self):
+        # The CLI path: _run_metrics anchors at base_capital 100_000; two
+        # stop-outs of -150_000 and -60_000 cross the curve below zero. The
+        # per-fix shape must survive json.dumps strictly (None, not complex).
+        records = [self._record(-150_000.0, 1), self._record(-60_000.0, 2)]
+        candles = [_candle(i * 86400, 100.0, 105.0, 95.0, 100.0 - i) for i in range(5)]
+        args = argparse.Namespace(warmup=0, fee_bps=0, slippage_bps=0)
+        payload = _run_metrics(_BT, records, candles, args)
+        strat = payload["strategy"]
+        assert strat["bankrupted"] is True
+        assert strat["annualized_return"] is None or isinstance(strat["annualized_return"], float)
+        assert not isinstance(strat["annualized_return"], complex)
+        assert strat["sharpe"] is None or strat["sharpe"] <= 0
+        assert strat["sortino"] is None or strat["sortino"] <= 0
+        json.dumps(payload, allow_nan=False)  # strict: no NaN/Infinity/complex
+
+    def test_healthy_positive_curve_not_flagged(self):
+        # Regression guard: the flag is not always-on. A healthy rising curve
+        # keeps every float metric and reports bankrupted=False.
+        records = [self._record(-5_000.0, 1), self._record(25_000.0, 2)]
+        curve = [self.BASE, 95_000.0, 120_000.0]
+        metrics = compute(records, curve)
+        assert metrics["bankrupted"] is False
+        assert isinstance(metrics["annualized_return"], float)
+        assert isinstance(metrics["sharpe"], float)
+        assert isinstance(metrics["sortino"], float)
+        assert metrics["total_return"] == pytest.approx(0.20)
+
+    def test_curve_only_nonpositive_at_index_zero_not_flagged(self):
+        # The documented P&L curve starting flat at 0.0 (index 0 only) is the
+        # normal no-trades-yet shape — not a bankruptcy.
+        curve = [0.0, 5.0, 12.0]
+        metrics = compute([], curve)
+        assert metrics["bankrupted"] is False
+        assert isinstance(metrics["annualized_return"], float)
+        assert isinstance(metrics["sharpe"], float)
+
+    def test_negative_base_never_emits_complex_annualized(self):
+        # Defensive guard independent of the flag: a curve STARTING negative
+        # can produce 1 + total_return < 0 without any index >= 1 going
+        # non-positive. The annualization exponent is
+        # periods_per_year / (n - 1), so a curve of length >= 3 makes the
+        # exponent fractional and the negative base raised to it complex:
+        # [-100, 50, 60] -> total_return -1.6, exponent 365/2 = 182.5.
+        # compute must emit None for such a curve (bankrupted stays False,
+        # since all points from index 1 on are positive).
+        metrics = compute([], [-100.0, 50.0, 60.0])
+        assert metrics["bankrupted"] is False
+        assert metrics["annualized_return"] is None
+
+    def test_metrics_without_fill_sim_is_rejected_by_cli(self, monkeypatch, capsys):
+        # --metrics requires --fill-sim today; the CLI guard must stay.
+        argv = ["run.py", "--strategy", "strategy-trend-follow", "--ticker", "DEMO", "--interval", "1d", "--metrics"]
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit) as exc:
+            _RUN.main()
+        assert exc.value.code == 2
+        assert "--metrics requires --fill-sim" in capsys.readouterr().err

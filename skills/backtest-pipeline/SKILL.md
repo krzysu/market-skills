@@ -72,6 +72,23 @@ loaded and lookups return the shipped default floor 1.
 
 Consumer-side env vars are **overrides** — unset them to use the default `<OUT_DIR>/<filename>`. The typical cron config sets only ``OUT_DIR`` and the two existing consumer-side overrides for backward compat.
 
+## Bankruptcy handling in `conviction_thresholds_private.json`
+
+The engine reports `sharpe: null` for a combo whose equity curve went
+non-positive (`bankrupted: true` — a destroyed base makes the signed ratio
+metrics meaningless). `_write_conviction_thresholds()` does not skip such a
+combo: an absent key would fall through to `GLOBAL_MIN_CONVICTION_TO_EMIT = 1`
+("trade this"), grading a destroyed curve as tradeable. Instead it writes an
+explicit **non-tradeable floor of 99** for the flagged combo — the same floor
+a numeric `Sharpe <= 0` maps to, since a destroyed curve is strictly worse.
+
+`insufficient_data` combos (too few forward bars) are still skipped and get
+no entry: an absent key keeps meaning "no opinion" for the
+genuinely-unmeasured case. The consumer side
+(`analysis/signals/conviction_thresholds.py::lookup_min_conviction`) resolves
+a floor of 99 to never-emit, so downstream DTP runs drop every idea for that
+combo.
+
 ## Contracts
 
 All output file contracts are defined in `lib.py` as TypedDicts with validation functions:

@@ -1,6 +1,6 @@
 # backtest-engine — pitfalls
 
-The five failure modes a backtest engine can hit, with the guard that
+The six failure modes a backtest engine can hit, with the guard that
 addresses each. These are the failure modes called out in the engine's design
 rationale; each guard is structural (it cannot be forgotten by a caller)
 rather than conventional (a comment that says "remember to...").
@@ -94,3 +94,43 @@ single-trade series reports `sharpe = 0.0` (not `inf`), and an empty curve
 reports the all-zero shape — no `inf`, no `nan`. The benchmark (which always
 has a non-empty curve) still gets a meaningful Sharpe; an empty-trade strategy
 is reported as `trade_count = 0` rather than producing a misleading ratio.
+
+## 6. Negative equity curve (bankruptcy)
+
+**Failure shape.** Nothing stopped the equity curve from going non-positive,
+and the metric functions then computed garbage from it. Three visible
+corruptions:
+
+- `annualized_return` went **complex** — `(1 + total_return) ** frac` with
+  `1 + total_return < 0` is a negative base raised to a fractional power —
+  and the JSON envelope serialized it as the string
+  `"(-6.03…+1.38…j)"`. A consumer parsing floats blows up; one tolerating
+  strings silently carries a nonsense value.
+- `sharpe`/`sortino` turned **positive** for a deeply loss-making strategy:
+  `equity[i] / equity[i-1] - 1` flips sign once `equity[i-1] < 0`, so a
+  deepening loss is recorded as a large gain. A −709% curve with profit
+  factor 0.31 reported Sharpe +1.12.
+- `max_drawdown` measured against a base the strategy had already
+  destroyed (a 709% "drawdown"), and the nightly pipeline converted the
+  corrupted Sharpe into conviction floor 1 — "trade this" — for a strategy
+  whose true grade is 99.
+
+**Guard.** `compute()` flags the curve: `bankrupted=True` when any curve
+value `<= 0.0` occurs at index ≥ 1 (a curve whose only non-positive point is
+the flat `0.0` start at index 0 — the normal no-trades-yet P&L shape — is not
+flagged). The three signed ratio metrics then report `None` (JSON `null`)
+instead of numbers — `annualized_return`, `sharpe`, `sortino` — while
+`trade_count`, `total_return`, `max_drawdown`, `profit_factor`, and
+`average_trade` stay as computed floats. Independently of the flag,
+`annualized_return` is `None` whenever the geometric compounding would be
+complex (a curve starting negative can produce `1 + total_return < 0`
+without the flag firing) — `compute()` never emits `complex`. The
+per-period return guard is `prev > 0` (not `prev != 0`), so a negative base
+can no longer flip a return's sign on any shape. Downstream, the
+backtest pipeline carries `bankrupted` into the per-combo result dict and
+`_write_conviction_thresholds()` writes flagged combos an explicit
+non-tradeable floor of 99 (an absent key would fall through to
+`GLOBAL_MIN_CONVICTION_TO_EMIT=1`, i.e. "trade this"), while still skipping
+`insufficient_data` combos, for which an absent key legitimately means "no
+opinion" — a flagged Sharpe is never converted into a conviction floor and a
+destroyed curve can never resolve to the permissive fall-through.
