@@ -87,7 +87,12 @@ no entry: an absent key keeps meaning "no opinion" for the
 genuinely-unmeasured case. The consumer side
 (`analysis/signals/conviction_thresholds.py::lookup_min_conviction`) resolves
 a floor of 99 to never-emit, so downstream DTP runs drop every idea for that
-combo.
+combo. The lookup is notation-robust on the read side: keys are written in
+`provider:ticker` notation, but a floor binds even when the emit path hands
+the strategy a bare symbol (`PENDLEUSD`) or a separator form
+(`PENDLE-USD`) — the query's canonical symbol is matched against the stored
+keys, with provider-prefix preference and no guessing when same-symbol
+candidates disagree.
 
 ## Contracts
 

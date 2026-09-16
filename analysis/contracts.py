@@ -512,7 +512,12 @@ def finalize_ideas(
       5. ``enforce_min_stop_distance`` — reject sub-2% stops (noise risk).
 
     After per-idea validation, the conviction gate drops ideas below
-    ``lookup_min_conviction(strategy_name, ticker, interval)``.
+    ``lookup_min_conviction(strategy_name, ticker, interval)``. The
+    lookup is notation-robust: a bare symbol (``BTCUSD``), a qualified
+    ``provider:symbol`` (``kraken:BTCUSD``), and a separator form
+    (``BTC-USD`` / ``BTC/USD``) all resolve to the same floor, so
+    runners may hand the strategy whichever notation their provider
+    uses without breaking a ``provider:ticker``-keyed table entry.
 
     Returns ``(validated_ideas, first_rejection)`` where
     ``first_rejection`` is the first validation error message (for

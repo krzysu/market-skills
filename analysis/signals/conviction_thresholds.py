@@ -20,16 +20,36 @@ integer is the floor:
   legacy emit-all behaviour.
 - ``>= 2``: drops ideas with conviction strictly below the floor.
 
-The lookup fall-through is:
+The lookup resolution order is:
 
 1. Strategy-specific ``MIN_CONVICTION_TO_EMIT_BY_STRATEGY[strategy_name]``
-   keyed on ``(ticker, interval)`` exact match.
-2. ``GLOBAL_MIN_CONVICTION_TO_EMIT``.
+   keyed on ``(ticker, interval)`` exact match — the stored key is
+   whatever notation the overrides JSON carried (the backtest pipeline
+   writes ``provider:ticker``, e.g. ``kraken:BTCUSD``).
+2. Provider-agnostic canonical match: same interval, and a stored ticker
+   whose :func:`canonical_ticker` symbol equals the query's symbol. A
+   query carrying a known provider prefix prefers same-prefix
+   candidates; same-symbol candidates whose values disagree are
+   ambiguous and are never guessed. This is what makes the pipeline's
+   ``provider:ticker`` keys bind even when the emit path hands the
+   strategy a bare symbol (``BTCUSD``) or a separator form (``BTC-USD``
+   / ``BTC/USD``).
+3. ``GLOBAL_MIN_CONVICTION_TO_EMIT``.
 
 The trailing default is intentionally ``1`` (= no-op) so the legacy
 emit-all behaviour is preserved for any (ticker, interval) without an
 explicit entry. Raise the global default or add a more-specific entry
 to tighten the gate.
+
+Step 3 is not silent: every fall-through bumps a module-level counter
+(a total plus one per ``(strategy, ticker, interval)``), exposed via
+:func:`fallthrough_stats` and resettable with
+:func:`reset_fallthrough_stats`. Each fall-through also emits a
+``logging`` debug record naming the strategy, ticker, interval, the
+reason (``unmatched`` or ``ambiguous``) and the global floor used. This
+is deliberately a debug log, never a stdout/stderr print — a print
+would corrupt the AXI JSON envelope — and never a warning, because a
+miss is normal for most tickers and must stay cheap.
 
 ## Loading private overrides
 
@@ -67,10 +87,15 @@ should do the same.
       "GLOBAL_MIN_CONVICTION_TO_EMIT": 1,
       "MIN_CONVICTION_TO_EMIT_BY_STRATEGY": {
         "strategy-name": {
-          "provider:ticker": {"interval": N}
+          "provider:SYMBOL": {"interval": N}
         }
       }
     }
+
+Keys are written in ``provider:ticker`` notation (the backtest pipeline
+does the writing); the lookup accepts the bare symbol, ``BASE-QUOTE`` /
+``BASE/QUOTE``, or the qualified form equivalently — see
+:func:`canonical_ticker`.
 
 Nested dicts (``{ticker: {interval: N}}``) instead of tuple keys because
 JSON object keys must be strings. The loader flattens to the in-memory
@@ -92,6 +117,7 @@ this module.
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 ENV_OVERRIDES_PATH = "MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH"
@@ -119,7 +145,128 @@ GLOBAL_MIN_CONVICTION_TO_EMIT = _DEFAULT_GLOBAL_MIN_CONVICTION_TO_EMIT
 # env var is set and points at a readable JSON file. ``ticker`` matches
 # the ``provider:ticker`` notation used by ``analysis.data``; ``interval``
 # is one of the canonical intervals (``1d``, ``4h``, ``1h``, ``15m`` ...).
+# Keys are matched as stored; notation equivalence is resolved at lookup
+# time via :func:`canonical_ticker` (the table is never re-keyed).
 MIN_CONVICTION_TO_EMIT_BY_STRATEGY: dict[str, dict[tuple[str, str], int]] = {}
+
+logger = logging.getLogger(__name__)
+
+# Provider prefixes recognised by :func:`canonical_ticker`. Mirrors
+# ``analysis/data.py::_PREFIX_MAP`` (``hl``, ``kraken``, ``yf``,
+# ``yfinance``); redeclared here so this module stays a light leaf with
+# no asset references and no import cycle.
+_KNOWN_PREFIXES = frozenset({"hl", "kraken", "yf", "yfinance"})
+
+# Symbol separators removed by :func:`canonical_ticker` (mirrors the
+# Kraken provider's pair normalisation: ``BTC-USD`` == ``BTC/USD`` ==
+# ``BTCUSD``).
+_SYMBOL_SEPARATORS = ("-", "/", "_")
+
+# Step-3 fall-through accounting (see "Reading the table" above).
+_FALLTHROUGH_TOTAL = 0
+_FALLTHROUGH_COUNTS: dict[tuple[str, str, str], int] = {}
+
+
+def canonical_ticker(ticker: str) -> tuple[str | None, str]:
+    """Return ``(provider_or_None, canonical_symbol)`` for ``ticker``.
+
+    Splits an optional ``prefix:`` when the prefix is one of
+    ``_KNOWN_PREFIXES`` (case-insensitive), then uppercases the symbol
+    and removes ``-``, ``/`` and ``_`` separators. An unknown prefix is
+    not a prefix — the whole string is treated as the symbol.
+
+    Examples:
+        >>> canonical_ticker("kraken:BTCUSD")
+        ('kraken', 'BTCUSD')
+        >>> canonical_ticker("BTC-USD")
+        (None, 'BTCUSD')
+        >>> canonical_ticker("hl:LIT")
+        ('hl', 'LIT')
+        >>> canonical_ticker("venue:XYZ")
+        (None, 'VENUE:XYZ')
+    """
+    prefix: str | None = None
+    symbol = ticker
+    if ":" in symbol:
+        head, tail = symbol.split(":", 1)
+        if head.lower() in _KNOWN_PREFIXES:
+            prefix = head.lower()
+            symbol = tail
+    for sep in _SYMBOL_SEPARATORS:
+        symbol = symbol.replace(sep, "")
+    return prefix, symbol.upper()
+
+
+def fallthrough_stats() -> dict:
+    """Snapshot of the step-3 fall-through accounting.
+
+    Returns a dict with a ``total`` count of every lookup that fell
+    through to :data:`GLOBAL_MIN_CONVICTION_TO_EMIT` (since import or the
+    last :func:`reset_fallthrough_stats` call) and a ``by_key`` mapping
+    keyed by ``(strategy_name, ticker, interval)``.
+    """
+    return {"total": _FALLTHROUGH_TOTAL, "by_key": dict(sorted(_FALLTHROUGH_COUNTS.items()))}
+
+
+def reset_fallthrough_stats() -> None:
+    """Zero the fall-through counters (tests and long-running callers)."""
+    global _FALLTHROUGH_TOTAL
+    _FALLTHROUGH_TOTAL = 0
+    _FALLTHROUGH_COUNTS.clear()
+
+
+def _record_fallthrough(strategy_name: str, ticker: str, interval: str, reason: str) -> None:
+    """Count and debug-log a step-3 fall-through to the global floor."""
+    global _FALLTHROUGH_TOTAL
+    key = (strategy_name, ticker, interval)
+    _FALLTHROUGH_COUNTS[key] = _FALLTHROUGH_COUNTS.get(key, 0) + 1
+    _FALLTHROUGH_TOTAL += 1
+    logger.debug(
+        "conviction-gate fall-through (%s): strategy=%s ticker=%s interval=%s -> global floor %d",
+        reason,
+        strategy_name,
+        ticker,
+        interval,
+        GLOBAL_MIN_CONVICTION_TO_EMIT,
+    )
+
+
+def _canonical_lookup(
+    table: dict[tuple[str, str], int],
+    ticker: str,
+    interval: str,
+) -> tuple[int | None, str | None]:
+    """Resolve a floor via provider-agnostic canonical matching.
+
+    Returns ``(floor, None)`` when exactly one distinct threshold binds,
+    ``(None, "ambiguous")`` when same-symbol candidates disagree and no
+    prefix preference resolves them, or ``(None, None)`` when no stored
+    key matches the query's canonical symbol on this interval.
+
+    The stored table is never mutated or re-keyed; matching is read-side
+    only. See the module docstring's "Reading the table" section for the
+    full resolution order.
+    """
+    query_prefix, query_symbol = canonical_ticker(ticker)
+    if not query_symbol:
+        return None, None
+    candidates: list[tuple[str | None, int]] = []
+    for (key_ticker, key_interval), value in table.items():
+        if key_interval != interval:
+            continue
+        key_prefix, key_symbol = canonical_ticker(key_ticker)
+        if key_symbol == query_symbol:
+            candidates.append((key_prefix, value))
+    if not candidates:
+        return None, None
+    if query_prefix is not None:
+        preferred = [value for key_prefix, value in candidates if key_prefix == query_prefix]
+        if preferred:
+            candidates = [(query_prefix, value) for value in preferred]
+    distinct = {value for _, value in candidates}
+    if len(distinct) == 1:
+        return distinct.pop(), None
+    return None, "ambiguous"
 
 
 def _coerce_threshold(value, *, context: str) -> int:
@@ -231,13 +378,31 @@ def lookup_min_conviction(strategy_name: str, ticker: str, interval: str) -> int
     call. Tests may mutate the table directly; production callers
     should treat it as read-only.
 
+    Resolution order (see the module docstring for details):
+
+    1. Exact ``(ticker, interval)`` match on the stored table key —
+       fully backward compatible; the stored key is whatever notation
+       the overrides JSON carried.
+    2. Provider-agnostic canonical match (:func:`canonical_ticker`):
+       same interval and an equivalent symbol, so ``kraken:BTCUSD``,
+       ``BTCUSD`` and ``BTC-USD`` all bind to a stored
+       ``kraken:BTCUSD`` key. A query prefix prefers same-prefix
+       candidates; same-symbol candidates with disagreeing values are
+       ambiguous and never guessed.
+    3. Fall through to :data:`GLOBAL_MIN_CONVICTION_TO_EMIT`. Every
+       fall-through is counted (see :func:`fallthrough_stats`) and
+       debug-logged with the strategy, ticker, interval, reason
+       (``unmatched`` or ``ambiguous``) and the global floor used.
+
     Args:
         strategy_name: The L3 strategy name (matches the entry in
             ``MIN_CONVICTION_TO_EMIT_BY_STRATEGY``; e.g.
             ``"strategy-trend-follow"``,
             ``"strategy-liquidity-sweep"``).
-        ticker: The ticker in ``provider:ticker`` notation (e.g.
-            ``"provider:symbol"``).
+        ticker: The ticker as the emit path holds it — bare symbol,
+            ``provider:symbol``, or a separator form such as
+            ``BASE-QUOTE`` / ``BASE/QUOTE``. All three resolve to the
+            same floor for a given stored key.
         interval: The canonical candle interval string (e.g.
             ``"1d"``, ``"4h"``).
 
@@ -259,4 +424,11 @@ def lookup_min_conviction(strategy_name: str, ticker: str, interval: str) -> int
         entry = table.get((ticker, interval))
         if entry is not None:
             return entry
+        floor, reason = _canonical_lookup(table, ticker, interval)
+        if floor is not None:
+            return floor
+        if reason == "ambiguous":
+            _record_fallthrough(strategy_name, ticker, interval, "ambiguous")
+            return GLOBAL_MIN_CONVICTION_TO_EMIT
+    _record_fallthrough(strategy_name, ticker, interval, "unmatched")
     return GLOBAL_MIN_CONVICTION_TO_EMIT
