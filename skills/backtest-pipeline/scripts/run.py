@@ -57,11 +57,23 @@ def _resolve_state_file(out_dir: Path) -> Path:
 
 # ── Pipeline constants ─────────────────────────────────────────────
 
-PRIMARY_STRATEGIES = [
-    "strategy-trend-follow",
-    "strategy-mean-reversion",
-    "strategy-accumulation-swing",
-]
+UNMEASURABLE_STRATEGIES: dict[str, str] = {
+    "strategy-funding-carry": (
+        "requires a live perp funding rate (fetch_funding_rate); the backtest "
+        "engine feeds spot price bars only, so every funding-carry pair errors"
+    ),
+}
+
+
+def measured_strategies() -> list[str]:
+    """Every registry strategy that this pipeline can actually measure.
+
+    The measured set is the whole L3 registry minus the explicitly declared
+    UNMEASURABLE_STRATEGIES — never a positional slice, so adding a strategy
+    to the registry cannot silently displace a measured one.
+    """
+    return [s for s in l3_strategies() if s not in UNMEASURABLE_STRATEGIES]
+
 
 SHARPE_DROP_DELTA = 0.5
 BENCHMARK_BEAT_DELTA = 1.0
@@ -82,11 +94,6 @@ _SOURCE_TO_PREFIX = {
 _BACKTEST_PROVIDER_OVERRIDE: dict[str, str] = {
     "HYPEUSD": "hl:HYPEUSD",
 }
-
-
-def _secondary_strategies() -> list[str]:
-    all_strats = l3_strategies()
-    return [s for s in all_strats if s not in PRIMARY_STRATEGIES][:3]
 
 
 # ── Ticker discovery ───────────────────────────────────────────────
@@ -677,8 +684,16 @@ def main() -> int:
     is_first_run = state.get("first_run", True)
     ticker_pairs = _read_active_tickers(baskets=args.baskets)
 
-    strategies = PRIMARY_STRATEGIES + _secondary_strategies()
+    strategies = measured_strategies()
     intervals = BACKTEST_INTERVALS
+
+    if UNMEASURABLE_STRATEGIES:
+        n = len(UNMEASURABLE_STRATEGIES)
+        excluded = ", ".join(f"{name} ({reason})" for name, reason in UNMEASURABLE_STRATEGIES.items())
+        print(
+            f"\u26a0 excluding {n} unmeasurable strateg{'y' if n == 1 else 'ies'}: {excluded}",
+            flush=True,
+        )
 
     total_possible = len(strategies) * len(ticker_pairs) * len(intervals)
     print(
@@ -734,6 +749,9 @@ def main() -> int:
     run_record = {
         "ts": datetime.now(UTC).isoformat(timespec="seconds"),
         "strategies": strategies,
+        "excluded_strategies": [
+            {"strategy": name, "reason": reason} for name, reason in UNMEASURABLE_STRATEGIES.items()
+        ],
         "tickers": [tk for tk, _ in ticker_pairs],
         "results": current,
         "errors": errors,

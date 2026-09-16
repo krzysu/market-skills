@@ -483,7 +483,11 @@ class TestErrorReporting:
         monkeypatch.setattr(run_mod, "_write_watchdog_regime", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_swing_scan_skip", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_regime_health_brief", lambda *a: None)
-        monkeypatch.setattr(run_mod, "PRIMARY_STRATEGIES", ["strategy-trend-follow"])
+        monkeypatch.setattr(
+            run_mod,
+            "measured_strategies",
+            lambda: ["strategy-trend-follow"],
+        )
         monkeypatch.setattr(run_mod, "BACKTEST_INTERVALS", [("1d", "1y", 100, 500)])
         monkeypatch.setattr(
             run_mod,
@@ -525,6 +529,112 @@ class TestErrorReporting:
         run_mod.main()
         captured = capsys.readouterr()
         assert "pair(s) errored" in captured.out
+
+
+# ── measured-strategy selection (bead market-skills-gqi) ──────────
+
+
+class TestMeasuredStrategy:
+    """The nightly backtest must measure the whole L3 registry minus the
+    explicitly declared UNMEASURABLE_STRATEGIES — never a positional slice.
+
+    Pre-fix, a ``[:3]`` cap on secondary strategies silently dropped
+    ``strategy-liquidity-sweep`` (last in registry order), leaving it with
+    no fitness data, no conviction floor, and no regime-brief coverage,
+    while ``strategy-funding-carry`` burned a secondary slot erroring on
+    every combo (no funding data in the backtest)."""
+
+    def test_measured_set_is_registry_minus_declared_unmeasurable(self):
+        run_mod = _load_run_mod("bp_measured_real_registry")
+
+        measured = run_mod.measured_strategies()
+
+        from analysis.registry import l3_strategies
+
+        assert measured == [s for s in l3_strategies() if s not in run_mod.UNMEASURABLE_STRATEGIES]
+        assert "strategy-liquidity-sweep" in measured
+        assert "strategy-funding-carry" not in measured
+
+    def test_added_registry_entry_is_measured_not_displaced(self, monkeypatch):
+        """A new registry entry must be measured, not displace an existing
+        one. Pre-fix the ``[:3]`` secondary slice dropped the last two
+        registry names when an eighth entry was inserted."""
+        run_mod = _load_run_mod("bp_measured_new_entry")
+        from analysis.registry import l3_strategies
+
+        real = l3_strategies()
+        patched = real[:3] + ["strategy-new-thing"] + real[3:]
+        monkeypatch.setattr(run_mod, "l3_strategies", lambda: patched)
+
+        measured = run_mod.measured_strategies()
+
+        assert measured == [s for s in patched if s not in run_mod.UNMEASURABLE_STRATEGIES]
+        assert "strategy-new-thing" in measured
+        assert "strategy-liquidity-sweep" in measured
+        assert "strategy-funding-carry" not in measured
+
+    def test_run_record_lists_measured_strategies_and_exclusions(self, monkeypatch, tmp_path, capsys):
+        """End-to-end through main(): the run record's ``strategies`` key
+        holds the measured set (including liquidity-sweep) and
+        ``excluded_strategies`` names funding-carry with a non-empty reason."""
+        run_mod = _load_run_mod("bp_measured_run_record")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        state_file = out_dir / "backtest-pipeline-state.json"
+        state_file.write_text(json.dumps({"first_run": False, "baseline": {}, "last_run_ts": None}))
+
+        from analysis.registry import l3_strategies
+
+        real = l3_strategies()
+        patched = real[:3] + ["strategy-new-thing"] + real[3:]
+        monkeypatch.setattr(run_mod, "l3_strategies", lambda: patched)
+
+        monkeypatch.setattr(run_mod, "_resolve_out_dir", lambda: out_dir)
+        monkeypatch.setattr(run_mod, "_resolve_state_file", lambda _d: state_file)
+        monkeypatch.setattr(run_mod, "_parse_args", lambda: argparse.Namespace(baskets=None))
+        monkeypatch.setattr(run_mod, "_save_state", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_update_baseline", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_summarize_strategy_decay", lambda *a, **kw: [])
+        monkeypatch.setattr(run_mod, "_write_conviction_thresholds", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_fitness_matrix", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_watchdog_regime", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_swing_scan_skip", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_regime_health_brief", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_read_active_tickers", lambda baskets=None: [("BTCUSD", "kraken:BTCUSD")])
+        monkeypatch.setattr(run_mod, "_run_pair", lambda *a, **kw: None)
+
+        captured_record = {}
+
+        def fake_append(record, _out_dir):
+            captured_record.update(record)
+
+        monkeypatch.setattr(run_mod, "_append_run_log", fake_append)
+
+        capsys.readouterr()
+        run_mod.main()
+        captured = capsys.readouterr()
+
+        run_record = captured_record
+        assert "strategy-liquidity-sweep" in run_record["strategies"]
+        assert "strategy-new-thing" in run_record["strategies"]
+        assert "strategy-funding-carry" not in run_record["strategies"]
+        assert len(run_record["strategies"]) == len(patched) - 1
+
+        excluded = run_record["excluded_strategies"]
+        assert [e["strategy"] for e in excluded] == ["strategy-funding-carry"]
+        assert all(isinstance(e["reason"], str) and e["reason"] for e in excluded)
+
+        assert "strategy-funding-carry" in captured.out
+        assert "unmeasurable" in captured.out
+
+    def test_no_stale_unmeasurable_entries(self):
+        run_mod = _load_run_mod("bp_measured_no_stale")
+        from analysis.registry import l3_strategies
+
+        registry = set(l3_strategies())
+        for name, reason in run_mod.UNMEASURABLE_STRATEGIES.items():
+            assert name in registry, f"{name} is not in the registry"
+            assert isinstance(reason, str) and reason.strip(), f"{name} has an empty reason"
 
 
 # ── conviction-gate self-pollution isolation (bead market-skills-0rk) ──

@@ -164,12 +164,15 @@ rolling 7-night baseline. `--fresh` recomputes with the heatmap's own config
 therefore legitimately differ from the nightly matrix cell for the same
 (strategy, ticker, interval) — that is expected, not a bug.
 
-The nightly `strategies` list is also narrower than the registry: the
-pipeline runs six L3 strategies (it does not include
-`strategy-liquidity-sweep`), while `--fresh` uses all seven from
-`analysis.registry.l3_strategies()`. In the default mode the file's own
-ticker/strategy lists are the source of truth — the registry and watchlist
-are not consulted.
+The nightly `strategies` list can also differ from the registry: the
+pipeline runs the whole L3 registry minus the declared
+`UNMEASURABLE_STRATEGIES` map — six strategies today, all seven registry
+entries except `strategy-funding-carry`, which the backtest cannot measure
+(no perp funding data) — while `--fresh` uses all seven from
+`analysis.registry.l3_strategies()`. See
+[ADR 0005](../../docs/adr/0005-measure-the-whole-l3-registry.md). In the
+default mode the file's own ticker/strategy lists are the source of truth —
+the registry and watchlist are not consulted.
 
 ## Missing-artifact fallback
 

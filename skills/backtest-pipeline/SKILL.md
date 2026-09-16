@@ -58,6 +58,17 @@ negative Sharpe), `no_trade_tickers` (zero-signal / blind pairs — no trade sig
 any strategy/interval), and `keep_tickers`. Blind pairs are surfaced, not silently
 excluded. The `reason` names each bucket it covers.
 
+## Measured strategy set
+
+The pipeline measures the **whole L3 registry minus a declared
+`UNMEASURABLE_STRATEGIES` map** (`scripts/run.py`) — never a positional
+slice. Each excluded entry carries its reason; the run record logs it under
+`excluded_strategies`. Today only `strategy-funding-carry` is excluded: the
+engine feeds spot price bars and there is no perp funding data, so every
+funding-carry pair errors. `strategy-liquidity-sweep` **is** measured — it
+gets fitness data and a conviction floor like every other strategy.
+See [ADR 0005](../../docs/adr/0005-measure-the-whole-l3-registry.md).
+
 ## Engine child isolation
 
 Each per-pair backtest runs the engine as a child process with a sanitised environment
@@ -115,8 +126,8 @@ All output file contracts are defined in `lib.py` as TypedDicts with validation 
 ## Architecture
 
 - **Ticker discovery**: `analysis.watchlist.categories()` — iterates all baskets in the watchlist. Use `--baskets` to target specific ones.
-- **Strategy discovery**: `analysis.registry.l3_strategies()` — top 3 are "primary" (full coverage), remainder limited to 3 secondary
+- **Strategy discovery**: `analysis.registry.l3_strategies()` filtered through `measured_strategies()` — the whole registry minus declared `UNMEASURABLE_STRATEGIES` ([ADR 0005](../../docs/adr/0005-measure-the-whole-l3-registry.md))
 - **Per-pair execution**: shells out to `uv run skills/backtest-engine/scripts/run.py` with `--fill-sim --metrics --json`
 - **Baseline**: rolling 7-night average Sharpe per `{interval}×{strategy}×{ticker}`
 - **Decay detection**: Sharpe zero-crossing (improvement or decay), ≥0.5 absolute delta, benchmark vs strategy comparison
-- **Runtime**: ~180 pairs max, 120s timeout per pair
+- **Runtime**: 6 strategies × tickers × 2 intervals, 120s timeout per pair
