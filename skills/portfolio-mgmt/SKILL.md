@@ -34,7 +34,26 @@ uv run skills/portfolio-mgmt/scripts/run.py positions
 
 ## AUTO-LOG directive
 
-**Every trade — manual or scripted — MUST be logged to portfolio-mgmt.** This is the system of record; on-chain CEX history matters more than mark-to-market.
+**Every deliberate trade — manual or scripted — MUST be logged to portfolio-mgmt.** This is the system of record; on-chain CEX history matters more than mark-to-market.
+
+### Scope: book INVESTMENTS, never mirror a venue balance
+
+This ledger records **decisions**, not the venue's balance sheet. Logging is triggered by *a trade you chose to make* — never by *something appearing in a `kraken balance` output*.
+
+**Never do this:**
+
+- Run a balance→ledger "sync" that adds a row for every non-zero key. No such job exists and none should — drift is diagnosed with `reconcile`, never repaired by bulk-inserting rows.
+- Book **dust and residue** (leftover fractions from a partial sell, sub-cent remainders). These are artifacts, not positions.
+- Book a balance **that arrived unbidden** — staking or reward drips that simply showed up. A position with no cost basis is not an investment.
+- Book **cash** (`ZEUR`/`ZUSD`). Proceeds from a sell are not a new position; the cash side is intentionally absent.
+
+**Test before adding a row:** did the user decide to acquire this asset at a known price? If no — it arrived unbidden, the price is unknown, or it is too small to trade — it does not belong here. Leave it out rather than inserting a row priced at `0`.
+
+A row priced at `0` is a red flag, not a neutral placeholder: it claims the asset was free and inflates unrealized P&L by its full market value. Omit it instead; if a holding genuinely must be present for FIFO to balance (e.g. an over-sell against a real position), price it `0` **and** set `notes.reason='staking_reward'` so the zero is self-documenting.
+
+Legitimate exception: rewards **accruing on a position the user already owns**. Those balance the FIFO chain and follow the staking-reward convention above.
+
+When in doubt, ask — do not insert rows the user did not ask for.
 
 After any order confirms (returns fill confirmation), run `add` before confirming completion. Two failure cases if you skip the log: (1) the trade shows up in balance but not in positions, breaking FIFO cost-basis from that point on; (2) the FIFO chain silently corrupts downstream — every later position that consumes the missing lot produces wrong realized P&L.
 
