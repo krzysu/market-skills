@@ -105,6 +105,28 @@ the strategy a bare symbol (`PENDLEUSD`) or a separator form
 keys, with provider-prefix preference and no guessing when same-symbol
 candidates disagree.
 
+## Minimum-trades guard in `conviction_thresholds_private.json`
+
+A combo's Sharpe is only meaningful on a statistically meaningful sample. A
+handful of trades can score a large Sharpe and get a permissive floor
+(`1 = emit at any conviction`), surfacing live as a trade idea on noise —
+the same failure class as the bankrupted-curve case above, reached with
+real metrics instead of fake ones. `_write_conviction_thresholds()` and
+`_write_regime_health_brief()` both derive "withheld" from a single helper
+(`_withheld_low_trades()`), so the writer and the brief can never disagree.
+A combo whose `trades` count is below the minimum-trades threshold gets the
+bankruptcy remedy — an explicit **non-tradeable floor of 99**, never a
+skip — and is excluded from the regime brief's Top-5 / Bottom-5 rankings
+with a one-line count explaining the absence. A missing `trades` key is
+treated as 0 (withheld). Every withheld combo is recorded in the run
+record under `withheld_low_trades` (combo, strategy, ticker, trades,
+`min_trades`, reason), shaped like `excluded_strategies`. The threshold is
+`MARKET_SKILLS_BACKTEST_PIPELINE_MIN_TRADES` (default 10, `0` disables);
+see [ADR 0006](../../docs/adr/0006-minimum-trades-guard.md). The
+"Strategy Health (avg Sharpe across all tickers)" aggregate table and the
+swing-scan partition are deliberately not combo-level top-N rankings and
+are left untouched.
+
 ## Contracts
 
 All output file contracts are defined in `lib.py` as TypedDicts with validation functions:
@@ -122,6 +144,7 @@ All output file contracts are defined in `lib.py` as TypedDicts with validation 
 | `MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR` | **Yes** | Base directory for all 5 files + rolling state |
 | `MARKET_SKILLS_BACKTEST_PIPELINE_OPEN_POSITIONS_PATH` | No | Source for watchdog regime output |
 | `MARKET_SKILLS_WATCHLIST_PATH` | No | Watchlist JSON (falls back to repo default) |
+| `MARKET_SKILLS_BACKTEST_PIPELINE_MIN_TRADES` | No | Minimum trade count for a combo's Sharpe to be trusted (default 10; `0` disables the guard) |
 
 ## Architecture
 

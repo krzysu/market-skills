@@ -39,6 +39,7 @@ ADRs are append-only. To reverse a decision, write a new ADR with
 | [0003](./0003-no-premature-ranking-module.md) | No premature `analysis/ranking.py` extraction | accepted | 2026-07-06 |
 | [0004](./0004-axi-adoption.md) | Adopt AXI (Agent eXperience Interface) output conventions | accepted | 2026-07-07 |
 | [0005](./0005-measure-the-whole-l3-registry.md) | Measure the whole L3 registry (minus declared unmeasurable strategies) | accepted | 2026-09-16 |
+| [0006](./0006-minimum-trades-guard.md) | Minimum-trades guard for backtest conviction floors | accepted | 2026-09-17 |
 
 ## Template
 

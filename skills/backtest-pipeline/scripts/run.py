@@ -55,6 +55,25 @@ def _resolve_state_file(out_dir: Path) -> Path:
     return out_dir / "backtest-pipeline-state.json"
 
 
+def _resolve_min_trades() -> int:
+    """Resolve the minimum-trades threshold from the env var.
+
+    Falls back to ``_lib.DEFAULT_MIN_TRADES`` when unset or blank. An
+    explicit ``0`` disables the guard. A malformed (non-integer) or
+    negative value raises ``ValueError`` — never silently fall back.
+    """
+    raw = os.environ.get(_lib.ENV_MIN_TRADES)
+    if raw is None or raw.strip() == "":
+        return _lib.DEFAULT_MIN_TRADES
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        raise ValueError(f"{_lib.ENV_MIN_TRADES} must be an integer (0 disables the guard), got {raw!r}") from None
+    if value < 0:
+        raise ValueError(f"{_lib.ENV_MIN_TRADES} must be >= 0 (0 disables the guard), got {raw!r}")
+    return value
+
+
 # ── Pipeline constants ─────────────────────────────────────────────
 
 UNMEASURABLE_STRATEGIES: dict[str, str] = {
@@ -350,7 +369,46 @@ def _update_baseline(state: dict, current: dict) -> None:
 # ═══════════════════════════════════════════════════════════════════
 
 
+def _withheld_low_trades(current: dict, min_trades: int) -> list[dict]:
+    """Single source of truth for combos withheld for insufficient trades.
+
+    Returns one entry per measured combo (not ``insufficient_data``) whose
+    trade count is below ``min_trades``: the run-record key, the strategy,
+    the ticker, the trade count, the threshold in force, and a reason.
+    A missing ``trades`` key counts as 0 (withheld) — every run record this
+    pipeline writes carries ``trades``; a record without one is not
+    evidence of a measured edge.
+    """
+    if min_trades <= 0:
+        return []
+    out = []
+    for key, info in current.items():
+        if not isinstance(info, dict):
+            continue
+        if info.get("insufficient_data"):
+            continue
+        trades = info.get("trades", 0)
+        if not isinstance(trades, int) or isinstance(trades, bool):
+            trades = 0
+        if trades >= min_trades:
+            continue
+        out.append(
+            {
+                "combo": key,
+                "strategy": info.get("strategy"),
+                "ticker": info.get("ticker"),
+                "trades": trades,
+                "min_trades": min_trades,
+                "reason": f"insufficient trades ({trades} < {min_trades}) — Sharpe not trusted",
+            }
+        )
+    return out
+
+
 def _write_conviction_thresholds(current: dict, state: dict, out_dir: Path) -> None:
+    min_trades = _resolve_min_trades()
+    withheld = _withheld_low_trades(current, min_trades)
+    withheld_keys = {entry["combo"] for entry in withheld}
     thresholds: dict = {
         "GLOBAL_MIN_CONVICTION_TO_EMIT": 1,
         "MIN_CONVICTION_TO_EMIT_BY_STRATEGY": {},
@@ -371,6 +429,12 @@ def _write_conviction_thresholds(current: dict, state: dict, out_dir: Path) -> N
         # downstream harm a destroyed curve must never cause. Sharpe <= 0
         # already maps to 99; a destroyed curve is strictly worse.
         if info.get("bankrupted"):
+            floor = 99
+        elif key in withheld_keys:
+            # Real metrics computed on a statistically meaningless sample:
+            # a handful of trades can score a large Sharpe and get a
+            # permissive floor. Same harm, same remedy as bankruptcy — an
+            # explicit non-tradeable floor of 99, never a skip.
             floor = 99
         else:
             sharpe = info.get("strategy_sharpe")
@@ -596,6 +660,10 @@ def _write_regime_health_brief(current: dict, state: dict, out_dir: Path) -> Non
     lines.append(f"*Auto-generated at {ts} \u2014 feeds conviction thresholds, watchdog, and swing scan.*")
     lines.append("")
 
+    min_trades = _resolve_min_trades()
+    withheld = _withheld_low_trades(current, min_trades)
+    withheld_keys = {entry["combo"] for entry in withheld}
+
     strat_agg: dict[str, list[float]] = {}
     for info in current.values():
         if not isinstance(info, dict):
@@ -623,10 +691,21 @@ def _write_regime_health_brief(current: dict, state: dict, out_dir: Path) -> Non
             continue
         if info.get("insufficient_data"):
             continue
+        if key in withheld_keys:
+            # Below the minimum-trades threshold: the Sharpe is a real
+            # number computed on a meaningless sample — keep it out of the
+            # top-N rankings entirely.
+            continue
         s = info.get("strategy_sharpe")
         if isinstance(s, (int, float)):
             pairs.append((key, s, info.get("trades", 0)))
     pairs.sort(key=lambda x: x[1], reverse=True)
+
+    if withheld:
+        lines.append(
+            f"\u26a0\ufe0f  {len(withheld)} combo(s) withheld from rankings: insufficient trades (below {min_trades})"
+        )
+        lines.append("")
 
     lines.append("### \U0001f7e2 Top 5 by Sharpe")
     lines.append("| Pair | Sharpe | Trades |")
@@ -752,12 +831,22 @@ def main() -> int:
         "excluded_strategies": [
             {"strategy": name, "reason": reason} for name, reason in UNMEASURABLE_STRATEGIES.items()
         ],
+        "withheld_low_trades": _withheld_low_trades(current, _resolve_min_trades()),
         "tickers": [tk for tk, _ in ticker_pairs],
         "results": current,
         "errors": errors,
         "insufficient_data": insufficient,
     }
     _append_run_log(run_record, out_dir)
+
+    if run_record["withheld_low_trades"]:
+        n_w = len(run_record["withheld_low_trades"])
+        print(
+            f"\u26a0 {n_w} combo(s) withheld: insufficient trades "
+            f"(below {run_record['withheld_low_trades'][0]['min_trades']}) \u2014 "
+            f"floor 99, excluded from brief rankings",
+            flush=True,
+        )
 
     _write_conviction_thresholds(current, state, out_dir)
     _write_fitness_matrix(current, state, out_dir)
