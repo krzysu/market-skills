@@ -17,3 +17,5 @@ skills/*/data/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+# bd workspace gate locks (flock names, deliberately never deleted)
+*.gate.lock*
