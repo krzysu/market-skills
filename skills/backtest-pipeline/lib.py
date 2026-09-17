@@ -16,6 +16,15 @@ Consumer-side overrides (all optional; default to ``<OUT_DIR>/<filename>``):
   ``MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH`` — conviction overrides
   ``MARKET_SKILLS_REGIME_STATE_PATH`` — watchdog regime state
 
+Producer-side tuning (optional):
+
+  ``MARKET_SKILLS_BACKTEST_PIPELINE_MIN_TRADES`` — minimum trade count for
+  a backtested combo's Sharpe to be trusted when writing conviction floors.
+  Combos below the threshold are withheld: explicit non-tradeable floor 99,
+  excluded from the regime brief's top-N rankings, and listed in the run
+  record's ``withheld_low_trades``. Defaults to ``DEFAULT_MIN_TRADES``;
+  an explicit ``0`` disables the guard.
+
 Only set a consumer-side override when the file lives at a different
 path than ``<OUT_DIR>/<filename>``. The typical config is a single
 ``OUT_DIR`` env var and the four optional overrides stay unset.
@@ -29,6 +38,11 @@ from typing import TypedDict
 
 ENV_OUT_DIR = "MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR"
 ENV_OPEN_POSITIONS_PATH = "MARKET_SKILLS_BACKTEST_PIPELINE_OPEN_POSITIONS_PATH"
+ENV_MIN_TRADES = "MARKET_SKILLS_BACKTEST_PIPELINE_MIN_TRADES"
+
+# Minimum trade count for a combo's Sharpe to be trusted when writing
+# conviction floors (see ENV_MIN_TRADES). 0 disables the guard.
+DEFAULT_MIN_TRADES = 10
 
 ENV_CONVICTION_THRESHOLDS = "MARKET_SKILLS_CONVICTION_THRESHOLDS_PATH"
 ENV_REGIME_STATE = "MARKET_SKILLS_REGIME_STATE_PATH"

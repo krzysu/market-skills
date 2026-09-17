@@ -339,12 +339,14 @@ class TestRunPairTickerFormat:
                 "strategy": "strategy-trend-follow",
                 "ticker": "kraken:BTCUSD",
                 "strategy_sharpe": 1.0,
+                "trades": 25,
                 "insufficient_data": False,
             },
             "1d\u00d7strategy-trend-follow\u00d7ETHUSD": {
                 "strategy": "strategy-trend-follow",
                 "ticker": "kraken:ETHUSD",
                 "strategy_sharpe": 0.3,
+                "trades": 18,
                 "insufficient_data": False,
             },
         }
@@ -379,6 +381,7 @@ class TestRunPairTickerFormat:
                 "ticker": "kraken:BTCUSD",
                 "strategy_sharpe": None,  # engine reports sharpe null for a bankrupt curve
                 "bankrupted": True,
+                "trades": 12,
                 "insufficient_data": False,
             },
             "1d\u00d7strategy-trend-follow\u00d7SOLUSD": {
@@ -386,6 +389,7 @@ class TestRunPairTickerFormat:
                 "ticker": "kraken:SOLUSD",
                 "strategy_sharpe": 0.0,
                 "bankrupted": False,
+                "trades": 8,
                 "insufficient_data": True,
             },
             "1d\u00d7strategy-trend-follow\u00d7ETHUSD": {
@@ -393,6 +397,7 @@ class TestRunPairTickerFormat:
                 "ticker": "kraken:ETHUSD",
                 "strategy_sharpe": 0.8,
                 "bankrupted": False,
+                "trades": 15,
                 "insufficient_data": False,
             },
         }
@@ -404,6 +409,231 @@ class TestRunPairTickerFormat:
         assert strat_table["kraken:BTCUSD"]["1d"] == 99
         assert "kraken:SOLUSD" not in strat_table
         assert strat_table["kraken:ETHUSD"]["1d"] == 1
+
+
+# ── minimum-trades guard (bead market-skills-2fb) ─────────────────
+
+
+class TestMinimumTradesGuard:
+    """A combo whose trade count is below the minimum-trades threshold must
+    not convert its Sharpe into a permissive conviction floor: a handful of
+    trades can score a large Sharpe on a statistically meaningless sample
+    (5 trades, Sharpe +3.03, floor 1 → surfaced live as a trade idea).
+
+    Same failure class as market-skills-ww0 (fake +1.12 Sharpe from a
+    bankrupted curve) reached by a different route: ww0 removed FAKE
+    metrics, this admits REAL metrics computed on noise. The remedy is the
+    bankruptcy remedy — an explicit non-tradeable floor of 99, never a
+    skip (an absent key falls through to GLOBAL_MIN_CONVICTION_TO_EMIT=1),
+    plus exclusion from the regime brief's top-N rankings and a
+    ``withheld_low_trades`` entry in the run record."""
+
+    @staticmethod
+    def _evidence_current():
+        """Exact shape from the 2026-09-17 nightly evidence:
+        4h × strategy-accumulation-swing × PENDLEUSD — 5 trades, Sharpe
+        +3.03, floor 1 — next to a healthy combo above the threshold."""
+        return {
+            "4h\u00d7strategy-accumulation-swing\u00d7PENDLEUSD": {
+                "strategy": "strategy-accumulation-swing",
+                "ticker": "kraken:PENDLEUSD",
+                "strategy_sharpe": 3.03,
+                "trades": 5,
+                "insufficient_data": False,
+                "bankrupted": False,
+            },
+            "4h\u00d7strategy-trend-follow\u00d7BTCUSD": {
+                "strategy": "strategy-trend-follow",
+                "ticker": "kraken:BTCUSD",
+                "strategy_sharpe": 1.0,
+                "trades": 30,
+                "insufficient_data": False,
+                "bankrupted": False,
+            },
+        }
+
+    def test_five_trade_combo_gets_floor_99_healthy_keeps_floor_1(self, monkeypatch, tmp_path):
+        monkeypatch.delenv(_lib.ENV_MIN_TRADES, raising=False)
+        run_mod = _load_run_mod("bp_min_trades_floor")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        run_mod._write_conviction_thresholds(self._evidence_current(), {"baseline": {}}, out_dir)
+
+        data = json.loads((out_dir / "conviction_thresholds_private.json").read_text())
+        table = data["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"]
+        assert table["strategy-accumulation-swing"]["kraken:PENDLEUSD"]["4h"] == 99
+        assert table["strategy-trend-follow"]["kraken:BTCUSD"]["4h"] == 1
+
+    def test_run_record_lists_withheld_low_trades(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.delenv(_lib.ENV_MIN_TRADES, raising=False)
+        run_mod = _load_run_mod("bp_min_trades_record")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        state_file = out_dir / "backtest-pipeline-state.json"
+        state_file.write_text(json.dumps({"first_run": False, "baseline": {}, "last_run_ts": None}))
+
+        monkeypatch.setattr(run_mod, "_resolve_out_dir", lambda: out_dir)
+        monkeypatch.setattr(run_mod, "_resolve_state_file", lambda _d: state_file)
+        monkeypatch.setattr(run_mod, "_parse_args", lambda: argparse.Namespace(baskets=None))
+        monkeypatch.setattr(run_mod, "_save_state", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_update_baseline", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_summarize_strategy_decay", lambda *a, **kw: [])
+        monkeypatch.setattr(run_mod, "_write_conviction_thresholds", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_fitness_matrix", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_watchdog_regime", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_swing_scan_skip", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_regime_health_brief", lambda *a: None)
+        monkeypatch.setattr(run_mod, "measured_strategies", lambda: ["strategy-accumulation-swing"])
+        monkeypatch.setattr(run_mod, "BACKTEST_INTERVALS", [("4h", "3mo", 200, 400)])
+        monkeypatch.setattr(
+            run_mod,
+            "_read_active_tickers",
+            lambda baskets=None: [("PENDLEUSD", "kraken:PENDLEUSD")],
+        )
+        monkeypatch.setattr(
+            run_mod,
+            "_run_pair",
+            lambda *a, **kw: {
+                "strategy": "strategy-accumulation-swing",
+                "ticker": "kraken:PENDLEUSD",
+                "strategy_sharpe": 3.03,
+                "trades": 5,
+                "insufficient_data": False,
+                "bankrupted": False,
+                "asof": "2026-09-17T00:04:00+00:00",
+                "ideas": 2,
+                "bars": 400,
+                "windows": 300,
+                "provider": "kraken",
+            },
+        )
+
+        captured_record = {}
+
+        def fake_append(record, _out_dir):
+            captured_record.update(record)
+
+        monkeypatch.setattr(run_mod, "_append_run_log", fake_append)
+
+        capsys.readouterr()
+        run_mod.main()
+        captured = capsys.readouterr()
+
+        withheld = captured_record["withheld_low_trades"]
+        assert len(withheld) == 1
+        entry = withheld[0]
+        assert entry["combo"] == "4h\u00d7strategy-accumulation-swing\u00d7PENDLEUSD"
+        assert entry["strategy"] == "strategy-accumulation-swing"
+        assert entry["ticker"] == "kraken:PENDLEUSD"
+        assert entry["trades"] == 5
+        assert entry["min_trades"] == _lib.DEFAULT_MIN_TRADES
+        assert isinstance(entry["reason"], str) and entry["reason"]
+        # run record shape mirrors excluded_strategies' reason pattern
+        assert all(isinstance(e["reason"], str) and e["reason"] for e in captured_record["excluded_strategies"])
+        assert "withheld" in captured.out
+
+    def test_brief_excludes_withheld_from_rankings(self, monkeypatch, tmp_path):
+        monkeypatch.delenv(_lib.ENV_MIN_TRADES, raising=False)
+        run_mod = _load_run_mod("bp_min_trades_brief")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        run_mod._write_regime_health_brief(self._evidence_current(), {}, out_dir)
+
+        text = (out_dir / "regime_health_brief.md").read_text()
+        # the withheld combo must not appear in either top-N ranking table…
+        rankings = text.split("### \U0001f7e2 Top 5 by Sharpe")[1]
+        assert "PENDLEUSD" not in rankings.split("###")[0]
+        bottom = text.split("### \U0001f534 Bottom 5 by Sharpe")[1]
+        assert "PENDLEUSD" not in bottom.split("###")[0]
+        # …while the healthy combo is still ranked
+        assert "BTCUSD" in text.split("### \U0001f7e2 Top 5 by Sharpe")[1].split("###")[0]
+        # …and the absence is explained, not silent
+        assert "withheld" in text
+        assert "insufficient trades" in text
+
+    def test_env_var_moves_withhold_boundary(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(_lib.ENV_MIN_TRADES, "20")
+        run_mod = _load_run_mod("bp_min_trades_env")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        current = {
+            "4h\u00d7strategy-trend-follow\u00d7BTCUSD": {
+                "strategy": "strategy-trend-follow",
+                "ticker": "kraken:BTCUSD",
+                "strategy_sharpe": 1.5,
+                "trades": 15,
+                "insufficient_data": False,
+            },
+        }
+        run_mod._write_conviction_thresholds(current, {"baseline": {}}, out_dir)
+
+        data = json.loads((out_dir / "conviction_thresholds_private.json").read_text())
+        # 15 trades clears the default 10 but not the configured 20 → withheld
+        table = data["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"]["strategy-trend-follow"]
+        assert table["kraken:BTCUSD"]["4h"] == 99
+
+        withheld = run_mod._withheld_low_trades(current, run_mod._resolve_min_trades())
+        assert withheld[0]["min_trades"] == 20
+        assert withheld[0]["trades"] == 15
+
+    def test_zero_disables_guard(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(_lib.ENV_MIN_TRADES, "0")
+        run_mod = _load_run_mod("bp_min_trades_zero")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        run_mod._write_conviction_thresholds(self._evidence_current(), {"baseline": {}}, out_dir)
+
+        data = json.loads((out_dir / "conviction_thresholds_private.json").read_text())
+        table = data["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"]
+        # guard disabled: the 5-trade +3.03 Sharpe combo is back to floor 1
+        assert table["strategy-accumulation-swing"]["kraken:PENDLEUSD"]["4h"] == 1
+        assert run_mod._withheld_low_trades(self._evidence_current(), run_mod._resolve_min_trades()) == []
+
+    def test_malformed_value_raises_valueerror(self, monkeypatch):
+        monkeypatch.setenv(_lib.ENV_MIN_TRADES, "ten")
+        run_mod = _load_run_mod("bp_min_trades_malformed")
+
+        try:
+            run_mod._resolve_min_trades()
+        except ValueError as e:
+            assert _lib.ENV_MIN_TRADES in str(e)
+            assert "ten" in str(e)
+        else:
+            raise AssertionError("expected ValueError for non-integer min-trades value")
+
+    def test_negative_value_raises_valueerror(self, monkeypatch):
+        monkeypatch.setenv(_lib.ENV_MIN_TRADES, "-3")
+        run_mod = _load_run_mod("bp_min_trades_negative")
+
+        try:
+            run_mod._resolve_min_trades()
+        except ValueError as e:
+            assert _lib.ENV_MIN_TRADES in str(e)
+            assert "-3" in str(e)
+        else:
+            raise AssertionError("expected ValueError for negative min-trades value")
+
+    def test_missing_trades_key_treated_as_zero(self, monkeypatch, tmp_path):
+        monkeypatch.delenv(_lib.ENV_MIN_TRADES, raising=False)
+        run_mod = _load_run_mod("bp_min_trades_no_key")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        current = {
+            "1d\u00d7strategy-trend-follow\u00d7BTCUSD": {
+                "strategy": "strategy-trend-follow",
+                "ticker": "kraken:BTCUSD",
+                "strategy_sharpe": 2.0,
+                "insufficient_data": False,
+            },
+        }
+        withheld = run_mod._withheld_low_trades(current, run_mod._resolve_min_trades())
+        assert len(withheld) == 1
+        assert withheld[0]["trades"] == 0
 
 
 # ── shell quoting in _run_pair ────────────────────────────────────
