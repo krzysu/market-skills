@@ -96,7 +96,7 @@ to pass to this skill, copy the example below and edit the values.**
 
 | Field | Required | Type | Notes |
 |-------|----------|------|-------|
-| `intent_id` | yes | string | Unique id; forwarded to Kraken as `--cl-ord-id`. Suggested: `<strategy>-<pair>-<timestamp>` or a UUID. |
+| `intent_id` | yes | string | Unique id; forwarded to Kraken as `--cl-ord-id`. **Max 18 characters** — measured venue limit (see [Idempotency](#idempotency)); Kraken's docs claim 36, but the venue rejects longer values with `EGeneral:Invalid arguments:cl_ord_id`. Suggested: `<short-strategy>-<pair>-<nn>`, e.g. `tf-hype-0622a`. A UUID (36 chars) is rejected. Override the limit via `KRAKEN_CL_ORD_ID_MAX_LEN`. |
 | `venue` | yes | string | Must be `"kraken"` for this skill. |
 | `pair` | yes | string | Kraken pair notation, no dash/slash. e.g. `BTCUSD`, `HYPEUSD`, `ETHEUR`. |
 | `side` | yes | `"buy"` \| `"sell"` | |
@@ -118,7 +118,7 @@ to pass to this skill, copy the example below and edit the values.**
 
 ```json
 {
-  "intent_id": "trend-follow-HYPEUSD-2026-06-22-001",
+  "intent_id": "tf-hype-0622a",
   "venue": "kraken",
   "pair": "HYPEUSD",
   "side": "buy",
@@ -144,7 +144,8 @@ uv run skills/execution-kraken/scripts/run.py submit --intent path/to/intent.jso
 ```
 
 **From direct flags** (the CLI builds an Intent; `intent_id` defaults to
-`cli-<uuid>` if not supplied):
+`cli-` + 13 random hex chars — 17 chars, within the measured 18-char
+venue limit — if not supplied):
 
 ```bash
 uv run skills/execution-kraken/scripts/run.py submit \
@@ -185,6 +186,21 @@ retried intent with the same `cl-ord-id` returns the original order
 instead of placing a duplicate. Server-side dedup of "intent already
 executed" is the caller's job. This skill just plumbs the
 field through.
+
+**Measured cl-ord-id length limit: 18 characters.** Despite Kraken's
+public docs claiming 1–36 characters, the venue rejected every measured
+value longer than 18 chars (19/20/22/24/28/34/40 chars) with
+`EGeneral:Invalid arguments:cl_ord_id`, while 17 and 18 chars passed.
+One anomaly: a 32-char uppercase-hex value was accepted — the venue
+appears to special-case some 32-char form — so 18 is the only bound safe
+for every value; do not rely on it. The limit is configurable via the
+`KRAKEN_CL_ORD_ID_MAX_LEN` env var (an override below 6 characters — the
+`cli-` prefix plus 2 hex chars is the smallest id the auto-generator can
+emit under the limit — fails default-path id generation with a clear
+configuration error). A hand-supplied id over the limit
+(`--intent-id` or an `intent_id` in an `--intent` JSON file) is rejected
+at the CLI boundary before any venue call; it is never truncated, since
+truncating an idempotency key could collide with a different order.
 
 ## Portfolio wiring
 
