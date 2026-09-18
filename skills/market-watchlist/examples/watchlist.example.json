@@ -1,37 +1,103 @@
 {
   "baskets": {
     "crypto_majors": {
-      "BTCUSD": {"tier": 2, "source": "kraken", "label": "BTC", "comment": "Macro reference"},
-      "ETHUSD": {"tier": 2, "source": "kraken", "label": "ETH", "comment": "Macro reference"}
+      "BTCUSD": {
+        "tier": 2,
+        "source": "kraken",
+        "label": "BTC",
+        "comment": "Macro reference"
+      },
+      "ETHUSD": {
+        "tier": 2,
+        "source": "kraken",
+        "label": "ETH",
+        "comment": "Macro reference"
+      }
     },
     "crypto_alts": {
-      "<TICKER1>USD": {"tier": 3, "source": "kraken", "label": "<tier3 alts label>"},
-      "<TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<tier3 alts label>"},
-      "<TICKER1>USD": {"tier": 1, "source": "kraken", "label": "<tier1 perp_dex label>", "asset_class": "perp_dex"},
-      "<TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<tier3 alts label>"},
-      "<TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<tier3 alts label>"},
-      "hl:<PERP>":  {"tier": 1, "source": "hyperliquid", "label": "<tier1 hl perp label>", "asset_class": "perp_dex"}
+      "<TICKER1>USD": {
+        "tier": 1,
+        "source": "kraken",
+        "label": "<tier1 alts label>",
+        "asset_class": "perp_dex"
+      },
+      "<TICKER2>USD": {
+        "tier": 3,
+        "source": "kraken",
+        "label": "<tier3 alts label>"
+      },
+      "hl:<PERP>": {
+        "tier": 1,
+        "source": "hyperliquid",
+        "label": "<tier1 hl perp label>",
+        "asset_class": "perp_dex"
+      }
     },
     "crypto_ai": {
-      "<AI_TICKER1>USD": {"tier": 1, "source": "kraken", "label": "<ai infra label>", "asset_class": "ai_infra"},
-      "<AI_TICKER2>USD":  {"tier": 3, "source": "kraken", "label": "<ai infra label>", "asset_class": "ai_infra"},
-      "<AI_TICKER2>USD":  {"tier": 3, "source": "kraken", "label": "<ai infra label>", "asset_class": "ai_infra"},
-      "<AI_TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<ai infra label>", "asset_class": "ai_infra"}
+      "<AI_TICKER1>USD": {
+        "tier": 1,
+        "source": "kraken",
+        "label": "<ai infra label>",
+        "asset_class": "ai_infra"
+      },
+      "<AI_TICKER2>USD": {
+        "tier": 3,
+        "source": "kraken",
+        "label": "<ai infra label>",
+        "asset_class": "ai_infra"
+      }
     },
     "defi": {
-      "<DEFI_TICKER1>USD": {"tier": 3, "source": "kraken", "label": "<defi label>"},
-      "<DEFI_TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<defi label>"},
-      "<DEFI_TICKER2>USD": {"tier": 3, "source": "kraken", "label": "<defi label>"}
+      "<DEFI_TICKER1>USD": {
+        "tier": 3,
+        "source": "kraken",
+        "label": "<defi label>"
+      },
+      "<DEFI_TICKER2>USD": {
+        "tier": 3,
+        "source": "kraken",
+        "label": "<defi label>"
+      }
     },
     "precious_metals": {
-      "<METAL_TICKER>USD": {"tier": 2, "source": "kraken", "label": "<metal label>"}
+      "<METAL_TICKER>USD": {
+        "tier": 2,
+        "source": "kraken",
+        "label": "<metal label>"
+      }
     },
     "macro_refs": {
-      "SPYUSD": {"source": "yfinance", "yfinance_ticker": "SPY", "tracking_only": true, "sector": "stocks", "label": "S&P 500"},
-      "QQQUSD": {"source": "yfinance", "yfinance_ticker": "QQQ", "tracking_only": true, "sector": "stocks", "label": "Nasdaq 100"},
-      "TLTUSD": {"source": "yfinance", "yfinance_ticker": "TLT", "tracking_only": true, "sector": "stocks", "label": "20yr Treasuries"},
-      "GLDUSD": {"source": "yfinance", "yfinance_ticker": "GLD", "tracking_only": true, "sector": "commodities", "label": "Gold ETF (PAXG proxy)"},
-      "IWMUSD": {"source": "yfinance", "yfinance_ticker": "IWM", "tracking_only": true, "sector": "stocks", "label": "Russell 2000", "hl_proxy": "km:SMALL2000", "hl_proxy_weight": 1.0, "hl_proxy_note": "Russell 2000 perp on Kinetiq HIP-3 — direct proxy"}
+      "SPYUSD": {
+        "source": "yfinance",
+        "yfinance_ticker": "SPY",
+        "tracking_only": true,
+        "sector": "stocks",
+        "label": "S&P 500"
+      },
+      "QQQUSD": {
+        "source": "yfinance",
+        "yfinance_ticker": "QQQ",
+        "tracking_only": true,
+        "sector": "stocks",
+        "label": "Nasdaq 100"
+      },
+      "TLTUSD": {
+        "source": "yfinance",
+        "yfinance_ticker": "TLT",
+        "tracking_only": true,
+        "sector": "stocks",
+        "label": "20yr Treasuries"
+      },
+      "IWMUSD": {
+        "source": "yfinance",
+        "yfinance_ticker": "IWM",
+        "tracking_only": true,
+        "sector": "stocks",
+        "label": "Russell 2000",
+        "hl_proxy": "<venue>:<PROXY>",
+        "hl_proxy_weight": 1.0,
+        "hl_proxy_note": "direct proxy via an HIP-3 deployer market"
+      }
     }
   }
 }

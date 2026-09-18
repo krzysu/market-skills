@@ -1,7 +1,7 @@
 {
-  "intent_id": "trend-follow-SOLUSD-2026-06-22-001",
+  "intent_id": "trend-follow-<TICKER>USD-2026-06-22-001",
   "venue": "kraken-perps",
-  "pair": "<TICKER1>USD",
+  "pair": "<TICKER>USD",
   "side": "sell",
   "order_type": "market",
   "volume": 11.5,

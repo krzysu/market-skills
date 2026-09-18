@@ -1,7 +1,7 @@
 {
   "intent_id": "example-0622-001",
   "venue": "kraken",
-  "pair": "<TICKER1>USD",
+  "pair": "<TICKER>USD",
   "side": "buy",
   "order_type": "limit",
   "volume": 1.5,

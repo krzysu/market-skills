@@ -15,7 +15,7 @@
       "tags": []
     }
   ],
-  "<AI_TICKER1>USD": [
+  "<TICKER_A>USD": [
     {
       "note": "OPEN: shakeout-reclaim pattern. Broke out at $2.51, surged to $3.15, fully retraced to $2.21, then reclaimed. 4h trigger fired on re-break. Stop $2.54, target $3.12 (R:R 2.0).",
       "added": "2026-06-03T04:15:04+00:00",
@@ -39,7 +39,7 @@
       "tags": []
     }
   ],
-  "<TICKER1>USD": [
+  "<TICKER_B>USD": [
     {
       "note": "Coiled range structure intact ($484-$502). L3 long v1 idea alive. Price-trigger invalidated (close < $490) but structure not.",
       "added": "2026-06-20T12:00:00+00:00",

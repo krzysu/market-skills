@@ -323,4 +323,4 @@ Status legend: `=` exact match, `!=` quantity mismatch, `+` asset in snapshot bu
 
     export MARKET_SKILLS_PORTFOLIO_DB=/absolute/path/to/portfolio.db
 
-or source the profile shell-init file that defines it (e.g. your agent runtime's profile env file). Pass `--db=PATH` to override the env var for a single invocation. The contract is documented in `skills/portfolio-mgmt/lib.py::default_db_path()`.
+or source the shell-init file that defines it (e.g. your agent runtime's profile env file). Pass `--db=PATH` to override the env var for a single invocation. The contract is documented in `skills/portfolio-mgmt/lib.py::default_db_path()`.
