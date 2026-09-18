@@ -20,7 +20,6 @@ import argparse
 import json
 import os
 import sys
-import uuid
 
 from analysis.providers.execution import (
     kraken_spot as _execution_kraken,  # noqa: F401 — side-effect: registers provider
@@ -74,7 +73,11 @@ def _resolve_intent(args: argparse.Namespace) -> Intent:
     if args.intent:
         intent = _lib.load_intent_file(args.intent)
     else:
-        intent_id = args.intent_id or f"cli-{uuid.uuid4()}"
+        # Kraken rejects cl_ord_id values longer than the measured venue
+        # limit (see lib.KRAKEN_CL_ORD_ID_MAX_LEN), so the default id is
+        # generated within that bound — a dashed uuid4 (40 chars) is
+        # rejected by the venue.
+        intent_id = args.intent_id or _lib.generate_intent_id()
         direct = {
             "pair": args.pair,
             "side": args.side,
@@ -95,6 +98,12 @@ def _resolve_intent(args: argparse.Namespace) -> Intent:
     decoration = _parse_decoration(args.decision_decoration, args.override_from_suggestion)
     if decoration:
         intent["decision_decoration"] = decoration
+
+    # Fail fast on an oversized hand-supplied id (from --intent-id or an
+    # --intent JSON file) BEFORE any venue call: it flows straight to
+    # --cl-ord-id and the venue rejects anything over the measured
+    # limit. Never silently truncate — the id is an idempotency key.
+    _lib.validate_intent_id(intent["intent_id"])
     return intent
 
 
@@ -203,7 +212,25 @@ def cmd_submit(args: argparse.Namespace) -> int:
                 except json.JSONDecodeError:
                     validate_resp = {"_parse_error": True, "_raw": proc.stdout[:500]}
             else:
-                validate_resp = {"error": (proc.stderr or "kraken --validate failed").strip()}
+                # The kraken CLI reports venue rejections as JSON on
+                # STDOUT with a non-zero exit code; stderr is usually
+                # empty. Surface the raw venue response (message, stdout,
+                # stderr, rc) instead of collapsing to a generic string —
+                # e.g. a rejected cl_ord_id must be diagnosable here.
+                venue_msg: str | None = None
+                if proc.stdout.strip():
+                    try:
+                        parsed = json.loads(proc.stdout)
+                    except json.JSONDecodeError:
+                        parsed = None
+                    if isinstance(parsed, dict) and isinstance(parsed.get("message"), str):
+                        venue_msg = parsed["message"]
+                validate_resp = {
+                    "error": venue_msg or (proc.stderr.strip() or "kraken --validate failed"),
+                    "rc": proc.returncode,
+                    "stdout": proc.stdout.strip()[:500] or None,
+                    "stderr": proc.stderr.strip() or None,
+                }
         except FileNotFoundError:
             print("error: kraken CLI not found in PATH", file=sys.stderr)
             return 1
@@ -371,7 +398,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sub_submit.add_argument("--deadline", help="RFC3339 deadline for matching-engine arrival")
     sub_submit.add_argument(
         "--intent-id",
-        help="Idempotency key. Default: cli-<uuid>. Passed as --cl-ord-id to Kraken.",
+        help=(
+            "Idempotency key, forwarded as --cl-ord-id to Kraken. Max "
+            f"{_lib.KRAKEN_CL_ORD_ID_MAX_LEN} chars (measured venue limit; override via "
+            "KRAKEN_CL_ORD_ID_MAX_LEN). Default: cli-<13 hex chars>."
+        ),
     )
     sub_submit.add_argument("--thesis", help="Free-text thesis (persisted in portfolio-mgmt notes)")
     sub_submit.add_argument("--strategy", help="Strategy name (persisted in portfolio-mgmt notes)")

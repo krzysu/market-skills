@@ -885,6 +885,11 @@ class TestCLIArgparse:
 
     def _run_cli(self, *argv, monkeypatch):
         monkeypatch.setenv("MARKET_SKILLS_PORTFOLIO_DB", "/tmp/test-execution-kraken-spot-portfolio.db")
+        # Collapse the AFK sleep window to an empty window (start == end
+        # skips the gate) so submit tests are deterministic and don't
+        # depend on the wall-clock UTC hour they happen to run in.
+        monkeypatch.setenv("AFK_SLEEP_WINDOW_START_HOUR_UTC", "0")
+        monkeypatch.setenv("AFK_SLEEP_WINDOW_END_HOUR_UTC", "0")
         skills_dir = os.path.join(os.path.dirname(__file__), "..", "skills")
         if skills_dir not in sys.path:
             sys.path.insert(0, skills_dir)
@@ -1064,3 +1069,242 @@ class TestCLIArgparse:
         spec.loader.exec_module(mod)
         with pytest.raises(ValueError, match="JSON object"):
             mod._parse_decoration("[1, 2, 3]", False)
+
+
+# ───────────────────────────────────────────────────────────── cl_ord_id length limit
+#
+# Per-fix fixtures for the Kraken cl_ord_id rejection bug: the auto-
+# generated cli-<uuid4> id was 40 chars and the venue rejects anything
+# over 18 chars with EGeneral:Invalid arguments:cl_ord_id, breaking every
+# dry-run and every live submit; the dry-run path also collapsed the
+# venue's error message into the generic "kraken --validate failed".
+
+
+class TestGeneratedIntentIdLimit:
+    def test_generated_id_within_measured_limit(self):
+        """The default id must be <= the module limit (the real constant,
+        not a literal 18), keep the cli- prefix, and fit in one call."""
+        lib = _load_lib()
+        limit = lib.KRAKEN_CL_ORD_ID_MAX_LEN
+        intent_id = lib.generate_intent_id()
+        assert intent_id.startswith("cli-")
+        assert len(intent_id) <= limit
+
+    def test_generated_id_unique_across_calls(self):
+        lib = _load_lib()
+        ids = {lib.generate_intent_id() for _ in range(50)}
+        assert len(ids) == 50
+
+    def test_limit_default_is_measured_18(self):
+        # The env var is unset in the test environment; the module default
+        # must be the empirically measured bound (18 OK / 19 FAIL), not
+        # the documented 36.
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KRAKEN_CL_ORD_ID_MAX_LEN", None)
+            lib = _load_lib()
+            assert lib.KRAKEN_CL_ORD_ID_MAX_LEN == 18
+
+    def test_limit_env_var_override(self):
+        lib = _load_lib()
+        with patch.dict(os.environ, {"KRAKEN_CL_ORD_ID_MAX_LEN": "10"}):
+            fresh = _load_lib()
+            assert fresh.KRAKEN_CL_ORD_ID_MAX_LEN == 10
+            generated = fresh.generate_intent_id()
+            assert len(generated) <= 10
+        # The pristine module still holds the default.
+        assert lib.KRAKEN_CL_ORD_ID_MAX_LEN == 18
+
+    def test_cli_default_path_generates_bounded_id(self, monkeypatch):
+        """The CLI default path (no --intent-id) must forward a
+        --cl-ord-id within the measured limit and keep the cli- prefix.
+        Guards run.py's default-id fix: reverting to the bare
+        cli-<dashed uuid4> generator (40 chars) fails the length assert."""
+        lib = _load_lib()
+        limit = lib.KRAKEN_CL_ORD_ID_MAX_LEN
+        captured: list[list[str]] = []
+
+        def runner(cmd, *args, **kwargs):
+            captured.append(cmd)
+            return _make_completed(stdout=json.dumps({"descr": {"order": "buy 0.01 BTCUSD @ market"}}))
+
+        with patch("subprocess.run", side_effect=runner):
+            rc = TestCLIArgparse()._run_cli(
+                "submit",
+                "--pair",
+                "BTCUSD",
+                "--side",
+                "buy",
+                "--order-type",
+                "market",
+                "--volume",
+                "0.01",
+                "--dry-run",
+                monkeypatch=monkeypatch,
+            )
+
+        assert rc == 0
+        validate_calls = [c for c in captured if "--validate" in c]
+        assert validate_calls, f"no --validate call captured: {captured}"
+        cl_idx = validate_calls[0].index("--cl-ord-id")
+        cl_ord_id = validate_calls[0][cl_idx + 1]
+        assert cl_ord_id.startswith("cli-")
+        assert len(cl_ord_id) <= limit
+
+    def test_too_small_env_override_raises_from_generator(self):
+        """An override below the generation floor (cli- prefix + >=2 hex
+        chars) must raise a clear configuration error naming the env var
+        and the floor, instead of silently emitting an id that the CLI's
+        own validation would then reject."""
+        with patch.dict(os.environ, {"KRAKEN_CL_ORD_ID_MAX_LEN": "4"}):
+            fresh = _load_lib()
+            assert fresh.KRAKEN_CL_ORD_ID_MAX_LEN == 4
+            floor = len(fresh.INTENT_ID_PREFIX) + 2
+            with pytest.raises(ValueError, match="KRAKEN_CL_ORD_ID_MAX_LEN") as excinfo:
+                fresh.generate_intent_id()
+            assert str(floor) in str(excinfo.value)
+
+    def test_non_numeric_env_override_raises_clear_error(self):
+        """A non-numeric override must abort with a clear configuration
+        error naming the env var, not a raw ``invalid literal for int()``
+        traceback from module import."""
+        with patch.dict(os.environ, {"KRAKEN_CL_ORD_ID_MAX_LEN": "banana"}):
+            with pytest.raises(ValueError, match="KRAKEN_CL_ORD_ID_MAX_LEN"):
+                _load_lib()
+
+
+class TestHandSuppliedIntentIdLimit:
+    """A hand-supplied id (over the venue limit) must fail at the CLI
+    boundary, before any venue call, naming the limit and offending
+    length; a compliant id must flow through unchanged (no truncation)."""
+
+    def _submit_argv(self, *extra):
+        return (
+            "submit",
+            "--pair",
+            "BTCUSD",
+            "--side",
+            "buy",
+            "--order-type",
+            "market",
+            "--volume",
+            "0.01",
+            *extra,
+        )
+
+    def test_oversized_flag_id_rejected_before_venue_call(self, monkeypatch, capsys):
+        lib = _load_lib()
+        limit = lib.KRAKEN_CL_ORD_ID_MAX_LEN
+        oversized = "x" * (limit + 22)  # 40 chars, the old cli-<uuid4> shape
+        with patch("subprocess.run", side_effect=AssertionError("venue must not be called")) as mock_run:
+            rc = TestCLIArgparse()._run_cli(*self._submit_argv("--intent-id", oversized), monkeypatch=monkeypatch)
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert str(len(oversized)) in err, f"offending length not named in error: {err}"
+        assert str(limit) in err, f"limit not named in error: {err}"
+        mock_run.assert_not_called()
+
+    def test_oversized_intent_file_id_rejected(self, tmp_path, monkeypatch, capsys):
+        lib = _load_lib()
+        limit = lib.KRAKEN_CL_ORD_ID_MAX_LEN
+        p = tmp_path / "intent.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "intent_id": "y" * (limit + 1),
+                    "venue": "kraken",
+                    "pair": "BTCUSD",
+                    "side": "buy",
+                    "order_type": "market",
+                    "volume": 0.01,
+                }
+            )
+        )
+        with patch("subprocess.run", side_effect=AssertionError("venue must not be called")) as mock_run:
+            rc = TestCLIArgparse()._run_cli(*self._submit_argv("--intent", str(p)), monkeypatch=monkeypatch)
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert str(limit) in err, f"limit not named in error: {err}"
+        mock_run.assert_not_called()
+
+    def test_compliant_flag_id_passed_unchanged(self, monkeypatch):
+        captured: list[list[str]] = []
+        compliant = "tf-hype-0622a"  # 13 chars
+
+        def runner(cmd, *args, **kwargs):
+            captured.append(cmd)
+            return _make_completed(stdout=json.dumps({"descr": {"order": "buy 0.01 BTCUSD @ market"}}))
+
+        with patch("subprocess.run", side_effect=runner):
+            rc = TestCLIArgparse()._run_cli(
+                *self._submit_argv("--intent-id", compliant, "--dry-run"), monkeypatch=monkeypatch
+            )
+        assert rc == 0
+        validate_calls = [c for c in captured if "--validate" in c]
+        assert validate_calls, f"no --validate call captured: {captured}"
+        cl_idx = validate_calls[0].index("--cl-ord-id")
+        assert validate_calls[0][cl_idx + 1] == compliant  # unchanged, not truncated
+
+
+class TestDryRunVenueErrorSurfacing:
+    """The dry-run path must surface the venue error that arrives as JSON
+    on STDOUT with a non-zero rc, instead of the generic
+    "kraken --validate failed" string."""
+
+    def _dry_run_argv(self, *extra):
+        return (
+            "submit",
+            "--pair",
+            "NEAREUR",
+            "--side",
+            "sell",
+            "--order-type",
+            "stop-loss",
+            "--volume",
+            "42.875",
+            "--limit-price",
+            "2.28",
+            "--dry-run",
+            *extra,
+        )
+
+    def test_venue_error_on_stdout_is_surfaced(self, monkeypatch, capsys):
+        venue_stdout = json.dumps({"error": "api", "message": "EGeneral:Invalid arguments:cl_ord_id"})
+        with patch(
+            "subprocess.run",
+            return_value=_make_completed(stdout=venue_stdout, stderr="", returncode=1),
+        ):
+            rc = TestCLIArgparse()._run_cli(*self._dry_run_argv("--json"), monkeypatch=monkeypatch)
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        kv = payload["kraken_validate"]
+        assert kv["error"] == "EGeneral:Invalid arguments:cl_ord_id"
+        assert "kraken --validate failed" not in json.dumps(payload)
+        assert kv["rc"] == 1
+        assert "EGeneral:Invalid arguments:cl_ord_id" in kv["stdout"]
+
+    def test_stderr_fallback_still_works(self, monkeypatch, capsys):
+        with patch(
+            "subprocess.run",
+            return_value=_make_completed(stdout="", stderr="kraken: boom", returncode=2),
+        ):
+            TestCLIArgparse()._run_cli(*self._dry_run_argv("--json"), monkeypatch=monkeypatch)
+        payload = json.loads(capsys.readouterr().out)
+        kv = payload["kraken_validate"]
+        # No stdout JSON to parse: the CLI's stderr text becomes the error
+        # (the pre-fix fallback behaviour), plus the raw rc/stderr keys.
+        assert kv["error"] == "kraken: boom"
+        assert kv["rc"] == 2
+        assert kv["stderr"] == "kraken: boom"
+
+    def test_human_rendering_names_venue_message(self, monkeypatch, capsys):
+        venue_stdout = json.dumps({"error": "api", "message": "EGeneral:Invalid arguments:cl_ord_id"})
+        with patch(
+            "subprocess.run",
+            return_value=_make_completed(stdout=venue_stdout, stderr="", returncode=1),
+        ):
+            rc = TestCLIArgparse()._run_cli(*self._dry_run_argv(), monkeypatch=monkeypatch)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "EGeneral:Invalid arguments:cl_ord_id" in out
+        assert "kraken --validate failed" not in out
+        assert "kraken rc" in out

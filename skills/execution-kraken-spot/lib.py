@@ -15,6 +15,7 @@ mocked stdin or a populated ``sys.argv``.
 
 import json
 import os
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,6 +24,99 @@ from analysis.providers.execution.base import (
     Intent,
     validate_intent,
 )
+
+# ───────────────────────────────────────────────────────────────────── cl_ord_id limit
+
+# Kraken's API docs claim `cl_ord_id` accepts 1-36 characters, but the
+# venue (kraken CLI 0.3.2) empirically rejects values longer than 18
+# characters with ``EGeneral:Invalid arguments:cl_ord_id`` — measured by
+# bisection with read-only ``--validate`` calls (no order placed):
+# len 17 OK, len 18 OK, len 19 FAIL. The failure is NOT strictly
+# monotonic in length: one 32-char uppercase-hex value was accepted while
+# 19/20/22/24/28/34/40-char values all failed (the venue appears to
+# special-case some 32-char form), but 18 is the only bound that held for
+# EVERY measured value. Clamp to this empirically safe bound; do NOT
+# raise it based on the documented 36 or the accepted 32-char anomaly.
+#
+# Override via the ``KRAKEN_CL_ORD_ID_MAX_LEN`` environment variable
+# (integer, 1-64). Unset means the measured default applies.
+_KRAKEN_CL_ORD_ID_MEASURED_DEFAULT = 18
+_KRAKEN_CL_ORD_ID_LIMIT_CEILING = 64
+
+
+def _resolve_cl_ord_id_limit() -> int:
+    """Read ``KRAKEN_CL_ORD_ID_MAX_LEN`` defensively at module import.
+
+    A non-integer value raises a clear configuration error naming the
+    env var, instead of leaking a raw ``ValueError: invalid literal for
+    int()`` traceback out of the module-level ``int(...)`` call. Unset
+    or blank means the measured default applies.
+    """
+    raw = os.environ.get("KRAKEN_CL_ORD_ID_MAX_LEN")
+    if raw is None or not raw.strip():
+        return _KRAKEN_CL_ORD_ID_MEASURED_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError as e:
+        raise ValueError(
+            f"KRAKEN_CL_ORD_ID_MAX_LEN must be an integer (measured default "
+            f"{_KRAKEN_CL_ORD_ID_MEASURED_DEFAULT}), got {raw!r}"
+        ) from e
+    return max(1, min(_KRAKEN_CL_ORD_ID_LIMIT_CEILING, value))
+
+
+KRAKEN_CL_ORD_ID_MAX_LEN: int = _resolve_cl_ord_id_limit()
+
+# ``cli-`` prefix + random hex suffix, sized to the active limit so the
+# total stays one char of headroom below it (limit 18 -> 13 hex chars ->
+# 17 chars total). The prefix identifies agent-generated ids in
+# portfolio/decisions records.
+INTENT_ID_PREFIX = "cli-"
+
+
+def generate_intent_id() -> str:
+    """Generate a default intent_id within the measured Kraken limit.
+
+    Kept in lib.py (not run.py) so both the CLI and tests can use the
+    same generator/limit. ``cli-`` + 13 hex chars of a uuid4 = 17 chars
+    (<= ``KRAKEN_CL_ORD_ID_MAX_LEN``); the hex suffix keeps collision
+    odds negligible for the volume of orders this skill places.
+
+    Raises ``ValueError`` for an override below the generation floor
+    (``len(INTENT_ID_PREFIX) + 2``): the generator cannot fit the prefix
+    plus >=2 hex chars with one char of headroom under such a limit, and
+    silently emitting an id that the CLI's own validation would then
+    reject must never happen.
+    """
+    limit = KRAKEN_CL_ORD_ID_MAX_LEN
+    floor = len(INTENT_ID_PREFIX) + 2
+    if limit < floor:
+        raise ValueError(
+            f"KRAKEN_CL_ORD_ID_MAX_LEN={limit} is below the generation floor {floor} "
+            f"(the '{INTENT_ID_PREFIX}' prefix plus >=2 hex chars cannot fit under the limit); "
+            f"cannot generate a compliant intent_id"
+        )
+    n = min(len(uuid.uuid4().hex), limit - len(INTENT_ID_PREFIX) - 1)
+    return INTENT_ID_PREFIX + uuid.uuid4().hex[:n]
+
+
+def validate_intent_id(intent_id: str) -> str:
+    """Fail fast on a caller-supplied intent_id that the venue will reject.
+
+    Raises ``ValueError`` naming the limit and the offending length.
+    Never truncates: the id is an idempotency key, and truncating a
+    caller-supplied value could collide with a different order.
+    """
+    if not isinstance(intent_id, str) or not intent_id:
+        raise ValueError("Intent.intent_id must be a non-empty string")
+    if len(intent_id) > KRAKEN_CL_ORD_ID_MAX_LEN:
+        raise ValueError(
+            f"Intent.intent_id exceeds Kraken's cl_ord_id limit: {len(intent_id)} chars "
+            f"(max {KRAKEN_CL_ORD_ID_MAX_LEN}, measured empirically; docs say 36 but the venue "
+            f"rejects longer ids with EGeneral:Invalid arguments:cl_ord_id). Shorten the id."
+        )
+    return intent_id
+
 
 # ───────────────────────────────────────────────────────────────────── Intent loading
 
@@ -41,7 +135,11 @@ def load_intent_file(path: str) -> Intent:
         raise ValueError(f"intent file {path} is not valid JSON: {e}") from e
     if not isinstance(raw, dict):
         raise ValueError(f"intent file {path} must contain a JSON object, got {type(raw).__name__}")
-    return validate_intent(raw)
+    intent = validate_intent(raw)
+    # An intent_id from a hand-authored file flows straight to
+    # --cl-ord-id; enforce the measured venue limit here too.
+    validate_intent_id(intent["intent_id"])
+    return intent
 
 
 def intent_from_direct_args(args: dict[str, Any], *, intent_id: str) -> Intent:
@@ -57,6 +155,8 @@ def intent_from_direct_args(args: dict[str, Any], *, intent_id: str) -> Intent:
     missing = [k for k in required if k not in args or args[k] is None]
     if missing:
         raise ValueError(f"missing required args for direct intent: {missing}")
+
+    validate_intent_id(intent_id)
 
     intent: dict[str, Any] = {
         "intent_id": intent_id,
@@ -156,6 +256,14 @@ def render_dry_run_result(intent: Intent, validate_resp: dict | None) -> str:
         return "\n".join(parts)
     if "error" in validate_resp:
         parts.append(f"  Kraken validation error: {validate_resp['error']}")
+        # The dry-run path attaches the raw CLI output on failure so a
+        # rejected order is diagnosable from the rendering alone.
+        if validate_resp.get("rc") is not None:
+            parts.append(f"  kraken rc          : {validate_resp['rc']}")
+        if validate_resp.get("stderr"):
+            parts.append(f"  kraken stderr      : {validate_resp['stderr']}")
+        if validate_resp.get("stdout"):
+            parts.append(f"  kraken stdout      : {validate_resp['stdout']}")
         return "\n".join(parts)
     descr = validate_resp.get("descr") or {}
     if isinstance(descr, dict):
@@ -347,11 +455,14 @@ def write_fill_to_portfolio(
 
 
 __all__ = [
+    "KRAKEN_CL_ORD_ID_MAX_LEN",
+    "generate_intent_id",
     "intent_from_direct_args",
     "load_intent_file",
     "portfolio_asset_symbol",
     "render_confirmation",
     "render_dry_run_result",
     "render_intent_summary",
+    "validate_intent_id",
     "write_fill_to_portfolio",
 ]
