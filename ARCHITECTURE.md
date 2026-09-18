@@ -143,7 +143,7 @@ The bullets below are descriptive of how the system is built, not
   DB schema, migrations, and query functions (`portfolio.db`). The
   `skills/portfolio-mgmt/` skill is the CLI wrapper that exposes those
   functions to the LLM agent. The package is separate so that
-  `execution-kraken-spot` can import `portfolio.db.add_transaction`
+  `execution-kraken-spot` can import `portfolio.db.add_transaction_with_decision`
   directly (fill → portfolio wiring) without depending on the skill.
 - **Providers are protocol-based.** `DataProvider` and
   `ExecutionProvider` Protocols in `analysis/providers/` — add a venue

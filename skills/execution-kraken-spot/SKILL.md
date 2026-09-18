@@ -205,8 +205,10 @@ truncating an idempotency key could collide with a different order.
 ## Portfolio wiring
 
 Successful fills (`status="filled"` or `status="partial"`) auto-write a
-row to the portfolio-mgmt SQLite DB (`portfolio.db.add_transaction`)
-when `--portfolio <name|id>` is supplied. The asset notation is
+row to the portfolio-mgmt SQLite DB (`portfolio.db.add_transaction_with_decision`)
+when `--portfolio <name|id>` is supplied. The transaction row and its
+decision trace are written in a single SQLite transaction, so a partial
+write (one row without the other) is impossible. The asset notation is
 `kraken:<PAIR>` (e.g. `kraken:HYPEUSD`) — same convention the data
 provider uses, so `prices refresh` works without a registry update.
 
@@ -286,7 +288,7 @@ uv run skills/execution-kraken/scripts/run.py submit \
 ## Exit codes
 
 - `0` — success (live submit returned, dry-run validated, read-only op succeeded)
-- `1` — venue error / CLI failure / cancel failed
+- `1` — venue error / CLI failure / cancel failed / **portfolio write failed after a venue fill** (venue and ledger disagree — record the fill manually before trusting cost basis; do not re-submit)
 - `2` — input validation failure (bad intent, missing args, REJECT status)
 
 ## Safety checklist before running live
