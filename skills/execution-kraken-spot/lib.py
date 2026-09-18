@@ -5,7 +5,8 @@ This module is the testable layer. It contains:
   - Intent loading from JSON files and from a direct-args namespace
   - Human-readable order summary (confirm + dry-run table)
   - Wire-fill-into-portfolio helpers (no network or CLI; calls
-    ``portfolio.db.add_transaction`` directly)
+    ``portfolio.db.add_transaction_with_decision`` directly, writing the
+    transaction and decision rows in one transaction)
 
 The CLI wrapper ``scripts/run.py`` is responsible for argparse, the
 interactive confirm prompt, and dispatching to the provider. Keeping that
@@ -385,7 +386,11 @@ def write_fill_to_portfolio(
             if v is not None:
                 notes_blob[k] = v
 
-    # Record the decision trace in the decisions table.
+    # Build the decision trace (if an intent was supplied) and write the
+    # transaction + decision rows atomically: one connection, one
+    # transaction, and a missing `decisions` table is created on demand
+    # instead of losing the ledger row to sqlite3.OperationalError.
+    decision: dict | None = None
     if intent:
         from analysis.signals.decision import build_decision_context_from_idea, direction_from_side
 
@@ -423,21 +428,18 @@ def write_fill_to_portfolio(
             override_reason=decoration.get("override_reason"),
         )
         notes_blob["decision_context"] = dc
-        from portfolio.db import add_decision as _add_decision
-
-        _add_decision(
-            db_path,
-            intent_id=intent.get("intent_id", ""),
-            pair=pair,
-            decision_context_json=json.dumps(dc),
-            portfolio_id=portfolio_id,
-            captured_at=dc["captured_at"],
-        )
+        decision = {
+            "intent_id": intent.get("intent_id", ""),
+            "pair": pair,
+            "decision_context_json": json.dumps(dc),
+            "portfolio_id": portfolio_id,
+            "captured_at": dc["captured_at"],
+        }
 
     # Late import to keep this module import-cheap for unit tests.
-    from portfolio.db import add_transaction
+    from portfolio.db import add_transaction_with_decision
 
-    return add_transaction(
+    return add_transaction_with_decision(
         db_path,
         portfolio_id,
         ts=datetime.now(UTC).isoformat(),
@@ -451,6 +453,7 @@ def write_fill_to_portfolio(
         source="execution-kraken-spot",
         ref=intent.get("intent_id") if intent else None,
         notes=json.dumps(notes_blob),
+        decision=decision,
     )
 
 

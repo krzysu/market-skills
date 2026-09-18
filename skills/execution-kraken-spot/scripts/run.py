@@ -280,7 +280,32 @@ def cmd_submit(args: argparse.Namespace) -> int:
         try:
             tx_id = _lib.write_fill_to_portfolio(confirmation, portfolio_id=pid, db_path=args.db, intent=intent)
         except Exception as e:
+            # A venue fill that fails to reach the ledger is a hard error,
+            # not a warning: the venue and the ledger now disagree and
+            # silent continuation silently corrupts the FIFO cost basis.
+            # The stderr warning is kept in addition to the failure.
             print(f"warning: order placed but portfolio write failed: {e}", file=sys.stderr)
+            print(
+                f"ERROR: LEDGER WRITE FAILED — the venue fill was placed but its portfolio-mgmt "
+                f"row was NOT written; venue and ledger now DISAGREE. Record the fill manually "
+                f"(portfolio-mgmt add-transaction, order_id={confirmation.get('order_id')}) before "
+                f"trusting cost basis. Do not re-submit the order (it already filled).",
+                file=sys.stderr,
+            )
+            if args.json:
+                _emit_json(
+                    {
+                        "mode": "live",
+                        "intent": intent,
+                        "confirmation": confirmation,
+                        "errors": [f"portfolio write failed after venue fill: {e}"],
+                    }
+                )
+            else:
+                # The fill still happened — show the confirmation so the
+                # order doesn't look abandoned, then the ledger failure.
+                print(_lib.render_confirmation(confirmation))
+            return 1
 
     if args.json:
         payload: dict = {

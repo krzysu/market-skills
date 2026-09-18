@@ -10,6 +10,7 @@ Covers:
     render_intent_summary, render_confirmation, portfolio wiring
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -875,6 +876,317 @@ class TestLibPortfolioWiring:
         }
         with pytest.raises(ValueError, match="side must be"):
             write_fill_to_portfolio(conf, portfolio_id=pid, db_path=db_path, intent=intent)
+
+
+class TestLedgerWriteFailureContract:
+    """Per-fix fixtures for market-skills-hxe: a venue fill whose ledger
+    write fails must never silently succeed with no transaction row, and
+    the CLI must surface it as a hard failure (non-zero exit) instead of
+    a stderr-only warning.
+
+    Shapes pinned:
+      - DB without the `decisions` table -> transaction row still lands
+        (migrate-on-demand), the decision row is written, no exception.
+      - add_decision-style failure mid-write -> no partial transaction
+        row (atomic rollback) and the error propagates.
+      - CLI: write_fill_to_portfolio raising -> exit 1 with a loud
+        venue/ledger disagreement message, the confirmation still printed,
+        the stderr warning kept, and `errors` populated in the --json
+        payload.
+    """
+
+    def _conf(self, order_id="OHXE-1"):
+        return {
+            "intent_id": "hxe-1",
+            "order_id": order_id,
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "requested_volume": 0.01,
+            "filled_volume": 0.01,
+            "fill_price": 65000.0,
+            "cost_quote": 650.0,
+            "fee": 1.3,
+            "fee_currency": "USD",
+            "status": "filled",
+            "timestamp": "2026-09-18T00:00:00+00:00",
+            "venue": "kraken",
+        }
+
+    def _intent(self):
+        return {
+            "intent_id": "hxe-1",
+            "venue": "kraken",
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 0.01,
+            "strategy": "trend-follow",
+            "thesis": "Breakout retest",
+        }
+
+    def _db_without_decisions_table(self, tmp_path):
+        """Pre-decisions-feature DB: portfolios + transactions only."""
+        import sqlite3
+
+        db_path = str(tmp_path / "legacy.db")
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE portfolios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                base_ccy TEXT NOT NULL DEFAULT 'EUR',
+                notes TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
+                ts TEXT NOT NULL,
+                side TEXT NOT NULL,
+                asset TEXT NOT NULL,
+                qty REAL NOT NULL,
+                price REAL,
+                cost_quote REAL,
+                fee REAL DEFAULT 0,
+                tx_hash TEXT,
+                source TEXT NOT NULL DEFAULT 'manual',
+                ref TEXT,
+                notes TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(portfolio_id, ts, tx_hash, side, asset)
+            );
+            """
+        )
+        conn.execute("INSERT INTO portfolios (name, base_ccy) VALUES ('spot', 'USD')")
+        conn.commit()
+        conn.close()
+        return db_path, 1
+
+    def test_missing_decisions_table_still_lands_transaction_row(self, tmp_path):
+        """THE fixture: a DB without the `decisions` table must not lose
+        the transaction row. Pre-fix this raised
+        sqlite3.OperationalError('no such table: decisions') from
+        add_decision BEFORE the transaction insert, so no row landed and
+        run.py only printed a stderr warning with exit 0."""
+        from portfolio.db import get_decision, list_transactions
+
+        db_path, pid = self._db_without_decisions_table(tmp_path)
+        write_fill_to_portfolio = _load_lib().write_fill_to_portfolio
+
+        tx_id = write_fill_to_portfolio(self._conf(), portfolio_id=pid, db_path=db_path, intent=self._intent())
+        assert tx_id > 0
+
+        rows = list_transactions(db_path, portfolio_id=pid)
+        assert len(rows) == 1, "transaction row lost on a DB without the decisions table"
+        assert rows[0]["tx_hash"] == "OHXE-1"
+        assert rows[0]["ref"] == "hxe-1"
+        # The decision trace was migrated on demand and written too.
+        decision = get_decision(db_path, "hxe-1")
+        assert decision is not None
+        dc = json.loads(decision["decision_context_json"])
+        assert dc["l3_idea"]["direction"] == "long"
+
+    def test_atomic_rollback_when_decision_insert_fails(self, tmp_path):
+        """A failure during the decision insert must leave NO transaction
+        row (single-transaction rollback) and must propagate — the caller
+        (run.py) turns it into a hard error rather than a silent skip.
+        The `decisions` table keeps its real shape; a BEFORE INSERT
+        trigger makes the decision INSERT itself fail, so the insert is
+        genuinely attempted and any half-written state must be rolled
+        back."""
+        import sqlite3
+
+        from portfolio.db import add_transaction_with_decision, list_transactions
+
+        db_path, pid = self._write_fill(tmp_path)
+        # Make the decision INSERT itself fail while the table has its
+        # real shape (migrate-on-demand is a no-op, the indexes build
+        # fine, the trigger aborts the INSERT).
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TRIGGER decisions_block BEFORE INSERT ON decisions BEGIN SELECT RAISE(ABORT, 'boom'); END;"
+        )
+        conn.commit()
+        conn.close()
+
+        decision = {
+            "intent_id": "boom-1",
+            "pair": "BTCUSD",
+            "decision_context_json": "{}",
+            "portfolio_id": pid,
+            "captured_at": "2026-09-18T00:00:00+00:00",
+        }
+        with pytest.raises(sqlite3.IntegrityError, match="boom"):
+            add_transaction_with_decision(
+                db_path,
+                pid,
+                ts="2026-09-18T00:00:01+00:00",
+                side="BUY",
+                asset="kraken:BTCUSD",
+                qty=0.01,
+                price=65000.0,
+                cost_quote=650.0,
+                tx_hash="OBOOM-1",
+                source="execution-kraken-spot",
+                ref="boom-1",
+                notes="{}",
+                decision=decision,
+            )
+
+        # Rolled back atomically: no transaction row for the failed write.
+        rows = [r for r in list_transactions(db_path, portfolio_id=pid) if r["tx_hash"] == "OBOOM-1"]
+        assert rows == [], "failed decision insert must not leave a transaction row behind"
+        # And no half-written decision row either.
+        conn = sqlite3.connect(db_path)
+        leftover = conn.execute("SELECT * FROM decisions").fetchall()
+        conn.close()
+        assert leftover == []
+
+    def test_atomic_rollback_when_transaction_insert_fails_after_decision(self, tmp_path):
+        """The mirror direction: the decision row IS written, then the
+        `transactions` INSERT fails — the single transaction must roll
+        the decision row back too, leaving no decision trace behind for
+        a fill that never landed in the ledger."""
+        import sqlite3
+
+        from portfolio.db import add_transaction_with_decision, get_decision, list_transactions
+
+        db_path, pid = self._write_fill(tmp_path)
+        # Healthy decisions table (via _write_fill/init_db); make the
+        # transactions INSERT itself fail with a BEFORE INSERT trigger.
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TRIGGER transactions_block BEFORE INSERT ON transactions BEGIN SELECT RAISE(ABORT, 'tx-boom'); END;"
+        )
+        conn.commit()
+        conn.close()
+
+        decision = {
+            "intent_id": "tx-boom-1",
+            "pair": "BTCUSD",
+            "decision_context_json": "{}",
+            "portfolio_id": pid,
+            "captured_at": "2026-09-18T00:00:00+00:00",
+        }
+        with pytest.raises(sqlite3.IntegrityError, match="tx-boom"):
+            add_transaction_with_decision(
+                db_path,
+                pid,
+                ts="2026-09-18T00:00:02+00:00",
+                side="SELL",
+                asset="kraken:BTCUSD",
+                qty=0.01,
+                price=66000.0,
+                cost_quote=660.0,
+                tx_hash="OBOOM-2",
+                source="execution-kraken-spot",
+                ref="tx-boom-1",
+                notes="{}",
+                decision=decision,
+            )
+
+        # Rolled back atomically: no transaction row AND the decision
+        # row that was already written is gone.
+        rows = [r for r in list_transactions(db_path, portfolio_id=pid) if r["tx_hash"] == "OBOOM-2"]
+        assert rows == [], "failed transactions insert must not leave a transaction row behind"
+        assert get_decision(db_path, "tx-boom-1") is None, (
+            "decision row written before the failed transactions insert must be rolled back"
+        )
+
+    def _run_cli(self, *argv, monkeypatch, tmp_path):
+        from portfolio.db import add_portfolio, init_db
+
+        db_path = str(tmp_path / "cli.db")
+        init_db(db_path)
+        add_portfolio(db_path, "spot", base_ccy="USD")
+        monkeypatch.setenv("MARKET_SKILLS_PORTFOLIO_DB", db_path)
+        monkeypatch.setenv("AFK_SLEEP_WINDOW_START_HOUR_UTC", "0")
+        monkeypatch.setenv("AFK_SLEEP_WINDOW_END_HOUR_UTC", "0")
+        skills_dir = os.path.join(os.path.dirname(__file__), "..", "skills")
+        if skills_dir not in sys.path:
+            sys.path.insert(0, skills_dir)
+        run_path = os.path.join(os.path.dirname(__file__), "..", "skills", "execution-kraken-spot", "scripts", "run.py")
+        spec = __import__("importlib").util.spec_from_file_location("execution_kraken_spot_hxe_run", run_path)
+        mod = __import__("importlib").util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Fresh argparse namespace mirroring a live --portfolio submit.
+        args = argparse.Namespace(
+            command="submit",
+            db=str(tmp_path / "cli.db"),
+            intent=None,
+            pair="BTCUSD",
+            side="buy",
+            order_type="market",
+            volume=0.01,
+            limit_price=None,
+            stop_price=None,
+            time_in_force=None,
+            deadline=None,
+            intent_id="hxe-cli-1",
+            thesis=None,
+            strategy=None,
+            conviction=None,
+            source_skills=None,
+            decision_decoration=None,
+            override_from_suggestion=False,
+            portfolio="spot",
+            dry_run=False,
+            yes=True,
+            no_wait=False,
+            wait_timeout=5.0,
+            json="--json" in argv,
+        )
+
+        provider = get_execution_provider("kraken")
+        confirmation = self._conf(order_id="OHXE-CLI")
+        write_err = ValueError("no such table: decisions")
+
+        with (
+            patch.object(provider, "place_order", return_value=confirmation) as mock_place,
+            patch.object(mod._lib, "write_fill_to_portfolio", side_effect=write_err) as mock_write,
+        ):
+            rc = mod.cmd_submit(args)
+
+        assert mock_place.called
+        assert mock_write.called
+        return rc, args.json
+
+    def test_cli_ledger_write_failure_is_hard_error(self, tmp_path, monkeypatch, capsys):
+        """A venue fill whose portfolio write fails must exit non-zero,
+        keep the stderr warning AND add a loud venue/ledger-disagreement
+        error — not silently exit 0."""
+        rc, _ = self._run_cli(monkeypatch=monkeypatch, tmp_path=tmp_path)
+        assert rc == 1, "ledger write failure after a venue fill must exit non-zero"
+        captured = capsys.readouterr()
+        # The confirmation is still printed — the order was NOT abandoned.
+        assert "OHXE-CLI" in captured.out
+        # The original warning is kept in addition to the hard failure.
+        assert "warning: order placed but portfolio write failed" in captured.err
+        assert "DISAGREE" in captured.err
+
+    def test_cli_ledger_write_failure_json_carries_errors(self, tmp_path, monkeypatch, capsys):
+        """--json path: non-zero exit and `errors` populated so an
+        automated caller cannot miss the venue/ledger disagreement."""
+        rc, as_json = self._run_cli("--json", monkeypatch=monkeypatch, tmp_path=tmp_path)
+        assert as_json
+        assert rc == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["confirmation"]["order_id"] == "OHXE-CLI"
+        assert payload["errors"], "errors must be populated in the --json payload"
+        assert "portfolio write failed" in payload["errors"][0]
+        assert "portfolio_tx_id" not in payload
+
+    # Reuse TestLibPortfolioWiring's helper via inheritance-free delegation.
+    def _write_fill(self, tmp_path):
+        from portfolio.db import add_portfolio, init_db
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+        pid = add_portfolio(db_path, "spot", base_ccy="USD")
+        return db_path, pid
 
 
 # ───────────────────────────────────────────────────────────── CLI surface

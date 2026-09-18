@@ -96,6 +96,93 @@ def add_transaction(  # noqa: PLR0913
     return row_id
 
 
+def add_transaction_with_decision(  # noqa: PLR0913
+    db_path: str,
+    portfolio_id: int,
+    ts: str,
+    side: str,
+    asset: str,
+    qty: float,
+    price: float | None = None,
+    cost_quote: float | None = None,
+    fee: float = 0,
+    tx_hash: str | None = None,
+    source: str = "manual",
+    ref: str | None = None,
+    notes: str | None = None,
+    decision: dict | None = None,
+) -> int:
+    """Insert a transaction row and optionally its decision row atomically.
+
+    One connection, one transaction: if the decision insert fails the
+    transaction insert is rolled back too, so a venue fill never lands in
+    the ledger with its decision trace missing (or vice versa). A DB that
+    predates the ``decisions`` table is migrated on demand via
+    ``CREATE TABLE IF NOT EXISTS`` (same DDL as :func:`portfolio.db.schema.init_db`).
+
+    ``decision`` carries the ``add_decision`` kwargs (``intent_id``,
+    ``pair``, ``decision_context_json``, ``portfolio_id``, ``captured_at``).
+    Returns the new transaction's row id.
+    """
+    side = side.upper()
+    if side not in VALID_SIDES:
+        raise ValueError(f"side must be one of {VALID_SIDES}, got '{side}'")
+
+    if qty <= 0:
+        raise ValueError("qty must be positive")
+
+    if cost_quote is None and price is not None:
+        cost_quote = round(qty * price, 8)
+    elif cost_quote is None:
+        cost_quote = 0
+
+    from datetime import UTC, datetime
+
+    conn = get_db(db_path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if decision is not None:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS decisions (
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       intent_id TEXT UNIQUE NOT NULL,
+                       portfolio_id INTEGER REFERENCES portfolios(id),
+                       pair TEXT NOT NULL,
+                       decision_context_json TEXT NOT NULL,
+                       captured_at TEXT NOT NULL,
+                       created_at TEXT DEFAULT (datetime('now'))
+                   )""",
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_intent ON decisions(intent_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_pair ON decisions(pair)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_portfolio ON decisions(portfolio_id)")
+            conn.execute(
+                """INSERT OR IGNORE INTO decisions
+                   (intent_id, portfolio_id, pair, decision_context_json, captured_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    decision["intent_id"],
+                    decision.get("portfolio_id"),
+                    decision["pair"],
+                    decision["decision_context_json"],
+                    decision.get("captured_at") or datetime.now(UTC).isoformat(),
+                ),
+            )
+        cur = conn.execute(
+            """INSERT INTO transactions
+               (portfolio_id, ts, side, asset, qty, price, cost_quote, fee, tx_hash, source, ref, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (portfolio_id, ts, side, asset, qty, price, cost_quote, fee, tx_hash, source, ref, notes),
+        )
+        conn.commit()
+        return cur.lastrowid
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def edit_transaction(db_path: str, tx_id: int, field: str, value) -> bool:
     if field not in ("notes", "ref"):
         raise ValueError(f"can only edit 'notes' or 'ref', not '{field}'. Remove + re-add to change other fields.")
