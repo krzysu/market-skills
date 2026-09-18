@@ -84,3 +84,72 @@ def test_scan_aggregates_errors():
     out, errs = run.scan(["BBB", "ZZZ"])
     assert [r["ticker"] for r in out] == ["BBB"]
     assert errs == [{"ticker": "ZZZ", "error": "no data"}]
+
+
+FIXED_NOW = 1_760_000_000
+FOUR_H = 14400
+
+
+def _series_with_forming_bar(n_closed=240):
+    """Steady uptrend of ``n_closed`` closed 4h bars plus a trailing forming bar.
+
+    The forming bar's close (999.99) and volume (5,000,000) are wildly different
+    from the last closed bar's (339.0 / 1,000,000), so any leak of the partial
+    bar into the indicator series is detectable while ``price`` must follow it.
+    """
+    last_closed_ts = FIXED_NOW - 3600 - FOUR_H  # closes 1h ago
+    candles = []
+    for i in range(n_closed):
+        close = 100.0 + i
+        ts = last_closed_ts - (n_closed - 1 - i) * FOUR_H
+        candles.append([ts, close - 0.5, close + 1.0, close - 1.0, close, 1_000_000])
+    candles.append([FIXED_NOW - 3600, 338.5, 340.0, 338.0, 999.99, 5_000_000])  # ~1h elapsed: forming
+    return candles
+
+
+def test_analyze_one_price_is_forming_bar_close_and_indicators_are_closed_bar(monkeypatch):
+    """``price`` reports the current (forming-bar) close; indicator inputs do not.
+
+    Discriminating: on the pre-repair code ``price`` was ``closes[-1]`` of the
+    closed-bar series (339.0), and a variant that fed the raw series to the
+    indicators would leak the 999.99 close / 5,000,000 volume into them.
+    """
+    import analysis.bars as bars_mod
+
+    run = _load_run()
+    raw = _series_with_forming_bar()
+    fetch_calls = []
+
+    def fake_fetch_ohlc(ticker, **kwargs):
+        fetch_calls.append(kwargs)
+        return [row[:] for row in raw]
+
+    monkeypatch.setattr(run, "fetch_ohlc", fake_fetch_ohlc)
+    monkeypatch.setattr(bars_mod, "now_epoch", lambda: FIXED_NOW)  # clock seam: trailing bar is forming
+
+    seen = {}
+    real_obv_trend = run.compute_obv_trend
+
+    def spy_obv_trend(closes, volumes, *args, **kwargs):
+        seen["closes"] = closes
+        seen["volumes"] = volumes
+        return real_obv_trend(closes, volumes, *args, **kwargs)
+
+    monkeypatch.setattr(run, "compute_obv_trend", spy_obv_trend)
+
+    result = run._analyze_one("TEST")
+
+    # The forming bar was requested explicitly (raw series, trim done in-script).
+    assert fetch_calls[0].get("include_partial") is True
+
+    # (a) reported price is the forming bar's close — the current price.
+    assert raw[-2][4] == 339.0  # sanity: the gap is real (last closed close)
+    assert result["price"] == 999.99
+
+    # (b) indicator series is the closed-bar one: the partial bar's wild
+    # close/volume never entered the OBV (volume/RSI/EMA) inputs.
+    assert len(seen["closes"]) == 240
+    assert seen["closes"][-1] == 339.0
+    assert seen["volumes"][-1] == 1_000_000
+    assert 999.99 not in seen["closes"]
+    assert 5_000_000 not in seen["volumes"]

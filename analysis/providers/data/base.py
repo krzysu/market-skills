@@ -13,6 +13,14 @@ class Provider(Protocol):
 
         Returns a list of candles: [[timestamp, open, high, low, close, volume], ...]
         Timestamps are Unix seconds (int). Returns [] on failure.
+
+        Raw-venue contract: providers return whatever the venue returns,
+        INCLUDING the current, partially-elapsed bar — Kraken's ``ohlc``
+        endpoint includes the current period; ccxt and Hyperliquid
+        ``fetch_ohlcv`` include the forming candle; yfinance includes the
+        current session/day row. ``analysis.data.fetch_ohlc`` is the single
+        place that drops it (via ``analysis.bars.closed_bars``) unless the
+        caller passes ``include_partial=True``.
         """
         ...
 
