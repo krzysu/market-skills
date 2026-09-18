@@ -119,6 +119,24 @@ uv run skills/position-watchdog/scripts/run.py --formatter verbose
 # { ..., "format_style": "verbose", ... }
 ```
 
+### Held-vs-watch file split (MUST-FOLLOW)
+
+**`open-positions.json` must contain ONLY entries carrying a real, non-null
+`position_size`.** It is the *held* file; the *watch* file is the watchlist
+config (`watches.json`).
+
+- **Held** (`open-positions.json`): open positions with a real `position_size` —
+  these feed the TP `exit_pct` math (`size × exit_pct / 100`).
+- **Watch** (`watches.json`): entry candidates and zone-only watches (no
+  `position_size`, no TP-exit sizing needed).
+
+An entry with `position_size: null` (or the field absent) in the held file is
+**misfiled**, not a valid holder — it cannot compute `size × exit_pct / 100`
+TP sizes. Move it to the watchlist config; do not silence or tolerate it.
+Live cleanup 2026-09-18: `LINK`, `BNB`, `HYPE`, and `BTC` were sitting in the
+held file with `position_size: null` (entry candidates misfiled as positions).
+`LINK` was returned to the watchlist; the other three were already watched.
+
 ## Config schema
 
 ```json
