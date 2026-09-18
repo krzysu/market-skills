@@ -45,13 +45,23 @@ This ledger records **decisions**, not the venue's balance sheet. Logging is tri
 - Run a balance→ledger "sync" that adds a row for every non-zero key. No such job exists and none should — drift is diagnosed with `reconcile`, never repaired by bulk-inserting rows.
 - Book **dust and residue** (leftover fractions from a partial sell, sub-cent remainders). These are artifacts, not positions.
 - Book a balance **that arrived unbidden** — staking or reward drips that simply showed up. A position with no cost basis is not an investment.
-- Book **cash** (`ZEUR`/`ZUSD`). Proceeds from a sell are not a new position; the cash side is intentionally absent.
+- Mirror venue **cash** (`ZEUR`/`ZUSD`) into the ledger. Sell proceeds are not a new position; the cash side of a trade is intentionally absent. The **single** sanctioned exception is the fixed working-capital bucket below — everything else cash-shaped stays out.
+
+**The one sanctioned exception — a deliberate, fixed working-capital bucket.** Book it **once** as a stated allocation and leave it alone. Live example: `BUY kraken:EUR 1000 @ 1.0` (transactions.id=78) is a **notional** EUR 1,000 working-capital bucket, **not a venue mirror** — Kraken's actual cash at the time was EUR 1,167.62, and that difference is expected; the ledger records **decisions** while the venue records **reality**, and the two must **never** be reconciled to each other. Never tune the bucket to match `kraken balance`, never top it up, and never insert a cash row because a key appeared in a balance output.
+
+**The asset key must be `kraken:EUR`, not `ZEUR`.** `risk-engine` populates `cash_available` by comparing `_strip_prefix(asset).upper()` against the portfolio's `base_ccy`, so only the prefixed form matches; a bare `ZEUR` key leaves `cash_available` at 0 and the bucket is silently ignored.
+
+Why the bucket exists at all: without a cash key the ledger has no liquidity figure, and any `insufficient_funds` check has nothing to read. With `kraken:EUR` present the policy is live — verified: a EUR 399.82 intent resolves `APPROVED`, while a EUR 2,023.20 intent resolves `REJECT — insufficient cash: need 2023.20 EUR, have 1000.00`.
+
+> **Caveat — the policy only runs when `limit_price` is set.** `analysis/risk/spot.py::insufficient_funds_policy` returns an empty fragment immediately for an intent with no `limit_price`, so a **market** order never reaches the funds check. Do not read an `APPROVED` on a market order as evidence the bucket works.
 
 **Test before adding a row:** did the user decide to acquire this asset at a known price? If no — it arrived unbidden, the price is unknown, or it is too small to trade — it does not belong here. Leave it out rather than inserting a row priced at `0`.
 
-A row priced at `0` is a red flag, not a neutral placeholder: it claims the asset was free and inflates unrealized P&L by its full market value. Omit it instead; if a holding genuinely must be present for FIFO to balance (e.g. an over-sell against a real position), price it `0` **and** set `notes.reason='staking_reward'` so the zero is self-documenting.
+A row priced at `0` is a red flag, not a neutral placeholder: it claims the asset was free and inflates unrealized P&L by its full market value. Omit it instead.
 
-Legitimate exception: rewards **accruing on a position the user already owns**. Those balance the FIFO chain and follow the staking-reward convention above.
+> **Superseded — staking-reward `@ 0` convention retired (2026-09-18).** The old rule ("log `BUY @ price 0` with `notes.reason='staking_reward'` so an over-sell balances under FIFO", precedent PENDLE 2026-07-21, VVV 2026-09-09) is **superseded**. It only existed to let an over-sell balance — and over-sells no longer occur because we **sell exactly the amounts we bought**, not what the venue shows. Micro staking rewards and residue are therefore simply **ignored** — never logged, never given a zero-price row.
+
+The rule now: **sell the amounts we bought, not what the venue shows.** There is no FIFO-balancing exception left, and no "legitimate exception" for rewards accruing on a position the user already owns — the old convention is retired, not endorsed.
 
 When in doubt, ask — do not insert rows the user did not ask for.
 
