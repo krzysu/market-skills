@@ -10,6 +10,7 @@ Examples:
 
 import sys
 
+from analysis.bars import closed_bars
 from analysis.data import fetch_ohlc
 from analysis.formatting import print_header, safe_parse_args
 from analysis.output import (
@@ -27,12 +28,15 @@ DEFAULT_FIELDS = ["ticker", "interval", "current_price", "ma_alignment", "agrees
 
 
 def analyze(ticker, *, source=None, interval="4h", period="6mo"):
-    candles = fetch_ohlc(ticker, interval=interval, period=period, source=source)
-    if not candles:
+    raw = fetch_ohlc(ticker, interval=interval, period=period, source=source, include_partial=True)
+    if not raw:
         return {"ticker": ticker, "interval": interval, "error": "no data"}
 
+    # current_price = forming bar's latest close (entry reference); the lib's
+    # indicator inputs below are the closed-bar series only.
+    candles = closed_bars(raw, interval)
     lib = load_lib_for_script(__file__)
-    return lib.analyze(candles, ticker=ticker, interval=interval, period=period)
+    return lib.analyze(candles, ticker=ticker, interval=interval, period=period, current_price=raw[-1][4])
 
 
 def _format_consensus(consensus):

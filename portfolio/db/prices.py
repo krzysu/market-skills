@@ -35,7 +35,9 @@ def refresh_prices(db_path: str) -> dict[str, float]:
             sources[asset] = spot.get("source", "spot")
             continue
 
-        candles = fetch_ohlc(asset)
+        # Price-only fallback: the forming bar's latest close is the current price;
+        # the stale-only warning below still applies.
+        candles = fetch_ohlc(asset, include_partial=True)
         if candles:
             prices[asset] = candles[-1][4]
             sources[asset] = "ohlc:close"

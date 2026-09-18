@@ -558,14 +558,26 @@ def test_refresh_prices_uses_live_spot_not_ohlc_close(db_path, capsys):
     assert "stale" not in capsys.readouterr().err.lower()
 
 
-def test_refresh_prices_falls_back_to_ohlc_when_spot_unavailable(db_path, capsys):
-    """When ``kraken ticker`` fails, fall back to the latest candle close and warn."""
+def test_refresh_prices_falls_back_to_ohlc_when_spot_unavailable(db_path, capsys, monkeypatch):
+    """When ``kraken ticker`` fails, fall back to OHLC — requesting the forming
+    bar so the cached price is the current (forming-bar) close — and warn.
+
+    Discriminating: with the clock frozen at FIXED_NOW the trailing bar is still
+    forming, so pre-repair code (default closed-bar fetch) would cache the last
+    closed close (62.46) and never pass ``include_partial``.
+    """
     pid = add_portfolio(db_path, "spot", "EUR")
     add_transaction(db_path, pid, T0, "BUY", "kraken:<PRIVATE_PERP>EUR", qty=1, price=60)
 
+    fixed_now = 1_760_000_000
+    closed_ts = fixed_now - 2 * 86400  # closed a day ago
+    forming_ts = fixed_now - 3600  # 1h into the daily bar: still forming
     ohlc_payload = _kraken_ohlc_json(
         "<PRIVATE_PERP>EUR",
-        [[1769904000, "62.00", "63.00", "61.00", 62.46, "62.20", "100", 5]],
+        [
+            [closed_ts, "62.00", "63.00", "61.00", 62.46, "62.20", "100", 5],
+            [forming_ts, "62.46", "62.90", "62.30", 62.75, "62.60", "40", 3],
+        ],
     )
 
     def fake_run(cmd, *args, **kwargs):
@@ -577,10 +589,28 @@ def test_refresh_prices_falls_back_to_ohlc_when_spot_unavailable(db_path, capsys
             return CompletedProcess(cmd, 0, stdout=ohlc_payload, stderr="")
         return CompletedProcess(cmd, 1, stdout="", stderr="unsupported")
 
+    import analysis.data as adata
+
+    real_fetch_ohlc = adata.fetch_ohlc
+    fetch_calls: list[dict] = []
+
+    def recording_fetch_ohlc(ticker, **kwargs):
+        fetch_calls.append(kwargs)
+        return real_fetch_ohlc(ticker, **kwargs)
+
+    monkeypatch.setattr(adata, "fetch_ohlc", recording_fetch_ohlc)
+    monkeypatch.setattr("analysis.bars.now_epoch", lambda: fixed_now)
+
     with patch("analysis.providers.data.kraken.subprocess.run", side_effect=fake_run):
         prices = refresh_prices(db_path)
 
-    assert prices["kraken:<PRIVATE_PERP>EUR"] == 62.46
+    assert len(fetch_calls) == 1
+    assert fetch_calls[0].get("include_partial") is True
+    assert prices["kraken:<PRIVATE_PERP>EUR"] == 62.75  # forming bar's close, NOT the closed 62.46
+
+    cached = get_cached_prices(db_path)
+    assert cached["kraken:<PRIVATE_PERP>EUR"] == 62.75
+
     err = capsys.readouterr().err
     assert "stale" in err.lower() or "fell back" in err.lower()
     assert "kraken:<PRIVATE_PERP>EUR" in err

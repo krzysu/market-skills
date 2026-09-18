@@ -40,6 +40,7 @@ ADRs are append-only. To reverse a decision, write a new ADR with
 | [0004](./0004-axi-adoption.md) | Adopt AXI (Agent eXperience Interface) output conventions | accepted | 2026-07-07 |
 | [0005](./0005-measure-the-whole-l3-registry.md) | Measure the whole L3 registry (minus declared unmeasurable strategies) | accepted | 2026-09-16 |
 | [0006](./0006-minimum-trades-guard.md) | Minimum-trades guard for backtest conviction floors | accepted | 2026-09-17 |
+| [0007](./0007-as-of-last-closed-bar.md) | As-of-last-closed-bar for OHLC consumers | accepted | 2026-09-18 |
 
 ## Template
 

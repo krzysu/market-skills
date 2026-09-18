@@ -229,3 +229,104 @@ class TestAnalyze:
         result = mod.analyze(candles, ticker="TEST", interval="4h", period="6mo")
         assert result["supertrend"]["direction"] == "down"
         assert result["agrees_with_idea"] is False
+
+
+def _canned_skills(monkeypatch, rsi_response=None, trend_response=None):
+    """Patch skill loading before the lib module binds it (mirror TestAnalyze)."""
+    import analysis.skill_loader as sl
+
+    rsi = rsi_response or {"rsi_14": 50, "signal": "NEUTRAL"}
+    trend = trend_response or {"alignment": "FULL_BULL"}
+    canned = {
+        "market-rsi": type("R", (), {"analyze": staticmethod(lambda c, **_kw: rsi)})(),
+        "market-trend": type("T", (), {"analyze": staticmethod(lambda c, **_kw: trend)})(),
+    }
+    monkeypatch.setattr(sl, "load_skill", lambda name: canned.get(name))
+
+
+class TestAnalyzeCurrentPrice:
+    """``current_price`` is the caller-supplied current price, not a signal input."""
+
+    def test_reports_caller_supplied_current_price(self, monkeypatch):
+        _canned_skills(monkeypatch)
+        mod = _load_snapshot_lib()
+        candles = _make_candles(n=120, drift=0.005, seed=3)
+        last_close = candles[-1][4]
+        result = mod.analyze(candles, ticker="TEST", interval="4h", period="6mo", current_price=999.99)
+        # Discriminating: the series' own last close is not 999.99, so a lib that
+        # ignored the kwarg would report ~last_close instead.
+        assert last_close != 999.99
+        assert result["current_price"] == 999.99
+
+    def test_omitted_current_price_falls_back_to_series_last_close(self, monkeypatch):
+        _canned_skills(monkeypatch)
+        mod = _load_snapshot_lib()
+        candles = _make_candles(n=120, drift=0.005, seed=3)
+        result = mod.analyze(candles, ticker="TEST", interval="4h", period="6mo")
+        assert result["current_price"] == round(candles[-1][4], 2)
+
+
+def _load_snapshot_run():
+    run_path = os.path.join(os.path.dirname(__file__), "..", "skills", "market-snapshot", "scripts", "run.py")
+    spec = importlib.util.spec_from_file_location("market_snapshot_run", run_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestRunPassesFormingBarClose:
+    """Script level: the caller fetches the raw series, trims it for the lib's
+    indicator inputs, and passes the forming bar's close as ``current_price``."""
+
+    def _raw_with_forming_bar(self, fixed_now, four_h):
+        n_closed = 60
+        closed = []
+        for i in range(n_closed):
+            price = 100.0 + i * 0.5
+            ts = fixed_now - 3600 - (n_closed - i) * four_h
+            closed.append([ts, price - 0.5, price + 1.0, price - 1.0, price, 200_000])
+        forming = [fixed_now - 3600, 129.0, 130.0, 128.5, 999.99, 5_000_000]
+        return closed, forming
+
+    def test_caller_passes_forming_bar_close_and_closed_bar_series(self, monkeypatch):
+        import analysis.bars as bars_mod
+
+        fixed_now = 1_760_000_000
+        four_h = 14400
+        closed, forming = self._raw_with_forming_bar(fixed_now, four_h)
+        raw = closed + [forming]
+
+        run = _load_snapshot_run()
+        monkeypatch.setattr(bars_mod, "now_epoch", lambda: fixed_now)  # trailing bar is forming
+
+        fetch_calls = []
+
+        def fake_fetch_ohlc(ticker, **kwargs):
+            fetch_calls.append(kwargs)
+            return [row[:] for row in raw]
+
+        monkeypatch.setattr(run, "fetch_ohlc", fake_fetch_ohlc)
+
+        real_lib = _load_snapshot_lib()
+        seen = {}
+        real_analyze = real_lib.analyze
+
+        def spy_analyze(candles, **kwargs):
+            seen["candles"] = candles
+            seen["kwargs"] = kwargs
+            return real_analyze(candles, **kwargs)
+
+        spy_lib = type("SpyLib", (), {"analyze": staticmethod(spy_analyze)})
+        monkeypatch.setattr(run, "load_lib_for_script", lambda path: spy_lib)
+
+        result = run.analyze("TEST")
+
+        # The raw series (forming bar included) was requested explicitly...
+        assert fetch_calls[0].get("include_partial") is True
+        # ...the lib's indicator inputs are the closed-bar series only...
+        assert seen["candles"] == closed
+        assert len(seen["candles"]) == 60
+        assert seen["candles"][-1][4] == 129.5  # last closed close, not the 999.99 forming close
+        # ...and the entry reference is the forming bar's close.
+        assert seen["kwargs"]["current_price"] == 999.99
+        assert result["current_price"] == 999.99

@@ -349,9 +349,14 @@ def _current_price(provider_ticker: str, *, interval: str = "4h", period: str = 
     Both ``interval`` and ``period`` come from the watch config (defaults
     ``4h`` / ``6mo``). The caller is responsible for validating them via
     ``validate_timeframe`` before this is reached.
+
+    Passes ``include_partial=True``: this reads the forming bar explicitly —
+    the last traded close — because a watchdog needs a current price, not
+    the last closed-bar close. ``_run_strategies()`` in this file keeps the
+    default (closed bars only).
     """
     try:
-        candles = fetch_ohlc(provider_ticker, interval=interval, period=period)
+        candles = fetch_ohlc(provider_ticker, interval=interval, period=period, include_partial=True)
     except Exception as e:
         print(f"[WARN] fetch_ohlc({provider_ticker}) failed: {type(e).__name__}: {e}", file=sys.stderr)
         return None

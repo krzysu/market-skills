@@ -9,10 +9,23 @@ Provider prefixes:
   - `kraken:` — Kraken spot (strip prefix, pass pair name)
   - `yf:` — YFinance (strip prefix, pass ticker symbol)
   - `yfinance:` — same as `yf:`
+
+Bar-closure contract:
+  - Providers return whatever the venue returns, including the current,
+    partially-elapsed bar (see `analysis.providers.data.base`).
+  - :func:`fetch_ohlc` returns closed bars only, as of the last completed
+    bar: the in-progress bar is dropped via :func:`analysis.bars.closed_bars`
+    so volume-based signals do not read a partial bar. The disk cache stores
+    the raw provider payload and the trim is applied on read, so a bar that
+    closes while an entry is cached is correctly admitted on the next read.
+  - Pass ``include_partial=True`` when a caller genuinely needs the forming
+    bar (e.g. a live price check) and judge it with
+    ``analysis.bars.last_bar_is_closed``.
 """
 
 import logging
 
+from analysis.bars import closed_bars
 from analysis.intervals import validate_timeframe, warn_unsupported_combo
 from analysis.providers.data.base import Provider
 from analysis.providers.data.cache import cache_ttl_seconds, get_cached, make_key, put_cached
@@ -198,14 +211,31 @@ def fetch_spot_price(ticker: str, source: str | None = None) -> dict | None:
     return None
 
 
-def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y", source: str | None = None) -> list[list]:
+def fetch_ohlc(
+    ticker: str,
+    interval: str = "1d",
+    period: str = "1y",
+    source: str | None = None,
+    *,
+    include_partial: bool = False,
+) -> list[list]:
     """Fetch OHLC candles for a ticker.
+
+    Returns closed bars only, as of the last completed bar: the
+    in-progress bar is dropped so volume-based signals do not read a
+    partial bar. Pass ``include_partial=True`` when a caller genuinely
+    needs the forming bar (e.g. a live price check) and judge it with
+    ``analysis.bars.last_bar_is_closed``. The trim is applied on read of
+    both the cache and the live fetch; the cache itself always stores the
+    raw provider payload.
 
     Args:
         ticker: Ticker symbol. Supports `provider:ticker` format (e.g. `hl:LIT`).
         interval: Candle interval — "1d", "1wk", "1h", etc.
         period: How far back — "1y", "6mo", "2y", "max".
         source: Provider name override, or None for auto-detect.
+        include_partial: When True, return the raw provider series including
+            the current, partially-elapsed bar (venue contract unchanged).
 
     Returns:
         List of candles: [[timestamp, open, high, low, close, volume], ...]
@@ -228,18 +258,18 @@ def fetch_ohlc(ticker: str, interval: str = "1d", period: str = "1y", source: st
     explicit = _resolve_ticker_prefix(ticker)
     if explicit is not None:
         raw_ticker, provider_name = explicit
-        return _fetch_cached_or_live(provider_name, raw_ticker, interval, period, ttl)
+        return _fetch_cached_or_live(provider_name, raw_ticker, interval, period, ttl, include_partial)
 
     # Legacy `source` argument — single provider, no fallback.
     if source:
-        return _fetch_cached_or_live(source, ticker, interval, period, ttl)
+        return _fetch_cached_or_live(source, ticker, interval, period, ttl, include_partial)
 
     # Auto-detect: try each supporting provider in registry order (the first
     # successful fetch wins, preserving the pre-cache fallback behavior).
     for p in _REGISTRY:
         if p.supports(ticker):
             try:
-                return _fetch_cached_or_live(p.name, ticker, interval, period, ttl)
+                return _fetch_cached_or_live(p.name, ticker, interval, period, ttl, include_partial)
             except Exception as e:
                 logger.debug("fetch_ohlc(auto, %s=%s): %s", p.name, ticker, e)
                 continue
@@ -253,21 +283,35 @@ def _fetch_cached_or_live(
     interval: str,
     period: str,
     ttl: int,
+    include_partial: bool,
 ) -> list[list]:
-    """Check the opt-in disk cache, else fetch live and store the result."""
+    """Check the opt-in disk cache, else fetch live and store the result.
+
+    The cache stores the raw provider payload (never a trimmed list); the
+    closed-bar trim is applied on read so a bar that closes while an entry
+    is cached is correctly admitted on the next read. Cached lists are not
+    mutated in place.
+    """
     if ttl > 0:
         key = make_key(provider_name, raw_ticker, interval, period)
         cached = get_cached(key, ttl)
         if cached is not None:
             logger.debug("fetch_ohlc(cache hit): %s", key)
-            return cached
+            return _trim_partial(cached, interval, include_partial)
 
     candles = _fetch_from_provider(provider_name, raw_ticker, interval, period)
 
     if ttl > 0 and candles:
         put_cached(make_key(provider_name, raw_ticker, interval, period), candles, ttl)
 
-    return candles
+    return _trim_partial(candles, interval, include_partial)
+
+
+def _trim_partial(candles: list[list], interval: str, include_partial: bool) -> list[list]:
+    """Drop the non-closed trailing bar unless the caller opted in."""
+    if include_partial:
+        return candles
+    return closed_bars(candles, interval)
 
 
 def _fetch_from_provider(provider_name: str, raw_ticker: str, interval: str, period: str) -> list[list]:

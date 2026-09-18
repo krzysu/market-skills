@@ -4,6 +4,7 @@
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from analysis.bars import closed_bars
 from analysis.data import fetch_ohlc
 from analysis.formatting import print_header, safe_round
 from analysis.indicators import (
@@ -33,14 +34,16 @@ DEFAULT_WATCHLIST = ["SPY", "QQQ", "AAPL", "GOOGL", "BTC-USD", "GLD"]
 def _analyze_one(ticker, source=None, interval=DEFAULT_INTERVAL, period=DEFAULT_PERIOD):
     """Run composite trend analysis on a single ticker, return dict or error."""
     try:
-        candles = fetch_ohlc(ticker, interval=interval, period=period, source=source)
-        if not candles:
+        raw = fetch_ohlc(ticker, interval=interval, period=period, source=source, include_partial=True)
+        if not raw:
             return {"ticker": ticker, "error": "no data"}
+        candles = closed_bars(raw, interval)  # indicators read closed bars only
         if len(candles) < 220:
             return {"ticker": ticker, "error": f"insufficient data ({len(candles)} candles on {interval})"}
 
         opens, highs, lows, closes, volumes = extract_ohlcv(candles)
-        price = closes[-1]
+        # Current price for display/trend classification; indicator inputs above are closed-bar.
+        price = raw[-1][4]
 
         # EMA
         ema_21, ema_21_series = compute_ema(closes, 21)

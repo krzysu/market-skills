@@ -110,13 +110,19 @@ def _consensus_bullish(supertrend_dir, rsi_signal, alignment):
     return None
 
 
-def analyze(candles, *, ticker, interval="4h", period="6mo"):
+def analyze(candles, *, ticker, interval="4h", period="6mo", current_price: float | None = None):
+    """Compute the snapshot read (supertrend + RSI + MA alignment) for ``candles``.
+
+    ``current_price`` is the caller-supplied current price (e.g. the forming
+    bar's close); when omitted, the last bar of the supplied series is used —
+    callers should pass it whenever the series is closed-bar trimmed.
+    """
     if not candles or len(candles) < 50:
         cc = len(candles) if candles else 0
         return {"error": f"insufficient data (need 50+ candles, got {cc})", "ticker": ticker, "interval": interval}
 
     _, highs, lows, closes, _ = extract_ohlcv(candles)
-    current_price = closes[-1]
+    price = current_price if current_price is not None else closes[-1]
 
     st_value, st_dir = _compute_supertrend(highs, lows, closes, period=10, multiplier=3.0)
 
@@ -136,7 +142,7 @@ def analyze(candles, *, ticker, interval="4h", period="6mo"):
     return {
         "ticker": ticker,
         "interval": interval,
-        "current_price": safe_round(current_price, 2),
+        "current_price": safe_round(price, 2),
         "supertrend": {
             "value": st_value,
             "direction": st_dir,
