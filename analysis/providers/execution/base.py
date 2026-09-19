@@ -164,9 +164,12 @@ class FillConfirmation(TypedDict):
       cost_quote         — ``filled_volume * fill_price`` when fully filled;
                            ``None`` otherwise.
       fee, fee_currency  — venue-reported fees.
-      status             — terminal status: ``"filled"`` / ``"partial"`` /
+      status             — ``"filled"`` / ``"partial"`` / ``"submitted"`` /
                            ``"open"`` / ``"rejected"`` / ``"cancelled"`` /
-                           ``"expired"`` / ``"error"``.
+                           ``"expired"`` / ``"error"`` / ``"unknown"``.
+                           The raw venue string never leaks into this
+                           field: a venue label outside the provider's
+                           mapping table normalises to ``"unknown"``.
       reason             — human-readable status detail; populated for rejected
                            and error.
       timestamp          — ISO 8601 UTC.

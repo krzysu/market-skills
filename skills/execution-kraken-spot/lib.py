@@ -334,6 +334,17 @@ def _quote_currency(pair: str) -> str:
     return ""
 
 
+def fill_requires_ledger_write(confirmation: FillConfirmation) -> bool:
+    """Whether the confirmation carries a real fill that must reach the ledger.
+
+    The gate is volume-based, never status-based: ``filled_volume > 0``
+    needs a ledger row regardless of the status label. Venue status
+    strings vary (Kraken reports a fully-executed market order as
+    ``closed``), so a status-string gate silently skips real fills.
+    """
+    return float(confirmation.get("filled_volume") or 0) > 0
+
+
 def write_fill_to_portfolio(
     confirmation: FillConfirmation,
     *,
@@ -343,20 +354,20 @@ def write_fill_to_portfolio(
 ) -> int:
     """Append a fill row to portfolio-mgmt's SQLite DB.
 
-    Returns the new transaction's row id. Skips the write if the fill is
-    in a non-terminal-positive state (``status not in filled/partial``).
+    Returns the new transaction's row id. Any confirmation carrying a
+    fill (``filled_volume > 0``) is written whatever its status label;
+    a non-positive fill is refused.
 
     Side is computed from the intent (when provided) — ``confirmation.side``
     is already correct for a successful order, but the caller may want to
     pass the intent for source-skill / thesis tagging.
     """
     status = confirmation.get("status")
-    if status not in ("filled", "partial"):
-        raise ValueError(f"refusing to write non-positive fill to portfolio (status={status!r})")
-
-    filled = confirmation.get("filled_volume", 0)
-    if filled <= 0:
+    if not fill_requires_ledger_write(confirmation):
+        if status not in ("filled", "partial"):
+            raise ValueError(f"refusing to write non-positive fill to portfolio (status={status!r})")
         raise ValueError("refusing to write zero-volume fill to portfolio")
+    filled = float(confirmation.get("filled_volume") or 0)
 
     fill_price = confirmation.get("fill_price")
     cost_quote = confirmation.get("cost_quote")
@@ -459,6 +470,7 @@ def write_fill_to_portfolio(
 
 __all__ = [
     "KRAKEN_CL_ORD_ID_MAX_LEN",
+    "fill_requires_ledger_write",
     "generate_intent_id",
     "intent_from_direct_args",
     "load_intent_file",

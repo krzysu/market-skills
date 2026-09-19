@@ -263,6 +263,120 @@ class TestKrakenPlaceOrder:
         assert fill["fee_currency"] == "USD"  # ZUSD canonicalised
         assert fill["venue"] == "kraken"
 
+    def test_market_buy_closed_status_full_fill_is_filled(self):
+        """Kraken returns venue status 'closed' for a fully-executed MARKET
+        order — it must normalise to 'filled', never leak through verbatim
+        (market-skills-05x: the leaked 'closed' made the ledger gate skip
+        the write entirely)."""
+        submit = {"txid": ["OCLOSE-1"], "descr": {"order": "buy 0.01 BTCUSD @ market"}}
+        query = {
+            "OCLOSE-1": {
+                "status": "closed",
+                "vol_exec": "0.01",
+                "cost": "650.5",
+                "fee": "1.30",
+                "fee_currency": "ZUSD",
+                "price": "65050",
+                "descr": {"order": "buy 0.01 BTCUSD @ market"},
+            }
+        }
+        intent = {
+            "intent_id": "05x-1",
+            "venue": "kraken",
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 0.01,
+        }
+        with self._setup_submit_mock(submit, [query]):
+            provider = get_execution_provider("kraken")
+            fill = provider.place_order(intent, wait=True, timeout_s=2.0)
+
+        assert fill["status"] == "filled"
+        assert fill["filled_volume"] == pytest.approx(0.01)
+        assert fill["order_id"] == "OCLOSE-1"
+
+    def test_market_buy_closed_status_partial_fill_is_partial(self):
+        """A 'closed' order with 0 < vol_exec < requested is recorded as
+        partial with filled_volume == vol_exec."""
+        submit = {"txid": ["OCLOSE-2"], "descr": {"order": "buy 0.01 BTCUSD @ market"}}
+        query = {
+            "OCLOSE-2": {
+                "status": "closed",
+                "vol_exec": "0.004",
+                "cost": "260.0",
+                "fee": "0.52",
+                "fee_currency": "ZUSD",
+                "price": "65000",
+                "descr": {"order": "buy 0.01 BTCUSD @ market"},
+            }
+        }
+        intent = {
+            "intent_id": "05x-2",
+            "venue": "kraken",
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 0.01,
+        }
+        with self._setup_submit_mock(submit, [query]):
+            provider = get_execution_provider("kraken")
+            fill = provider.place_order(intent, wait=True, timeout_s=2.0)
+
+        assert fill["status"] == "partial"
+        assert fill["filled_volume"] == pytest.approx(0.004)
+        assert fill["requested_volume"] == pytest.approx(0.01)
+
+    def test_unrecognised_venue_status_never_emitted_verbatim(self):
+        """An unrecognised venue status must never be passed through as if
+        it were contract-valid (market-skills-05x: the old ladder let raw
+        venue strings through the else branch)."""
+        submit = {"txid": ["OMYST-1"], "descr": {"order": "buy 0.01 BTCUSD @ market"}}
+        query = {"OMYST-1": {"status": "mystery_state", "vol_exec": "0", "descr": {}}}
+        intent = {
+            "intent_id": "05x-3",
+            "venue": "kraken",
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 0.01,
+        }
+        with self._setup_submit_mock(submit, [query]):
+            provider = get_execution_provider("kraken")
+            fill = provider.place_order(intent, wait=True, timeout_s=2.0)
+
+        assert fill["status"] == "unknown"
+
+    def test_unrecognised_venue_status_with_real_fill_is_rescued(self):
+        """An unrecognised status carrying vol_exec > 0 resolves to the
+        volume-derived positive status, never dropping the fill."""
+        submit = {"txid": ["OMYST-2"], "descr": {"order": "buy 0.01 BTCUSD @ market"}}
+        query = {
+            "OMYST-2": {
+                "status": "mystery_state",
+                "vol_exec": "0.01",
+                "cost": "650.5",
+                "fee": "1.30",
+                "fee_currency": "ZUSD",
+                "price": "65050",
+                "descr": {"order": "buy 0.01 BTCUSD @ market"},
+            }
+        }
+        intent = {
+            "intent_id": "05x-4",
+            "venue": "kraken",
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 0.01,
+        }
+        with self._setup_submit_mock(submit, [query]):
+            provider = get_execution_provider("kraken")
+            fill = provider.place_order(intent, wait=True, timeout_s=2.0)
+
+        assert fill["status"] == "filled"
+        assert fill["filled_volume"] == pytest.approx(0.01)
+
     def test_no_wait_returns_submitted(self):
         submit = {"txid": ["OLIVE-77777"], "descr": {"order": "buy 1.5 <PRIVATE_PERP>USD @ limit 60.15"}}
         intent = {
@@ -453,6 +567,66 @@ class TestKrakenSupports:
         with patch("subprocess.run", return_value=_kraken_resp(payload)):
             provider = get_execution_provider("kraken")
             assert provider.supports("NOPE") is False
+
+
+class TestVenueStatusNormalisation:
+    """Unit coverage for the venue-status mapping table (market-skills-05x).
+
+    Kraken reports a fully-executed MARKET order as venue status
+    ``closed``; the contract vocabulary never contains a raw venue string,
+    so ``closed`` with an executed volume must normalise to ``filled`` /
+    ``partial`` from the volumes, and anything unrecognised must become
+    ``unknown`` instead of leaking through verbatim.
+    """
+
+    def _norm(self, status, *, vol_exec=0.0, requested=0.0):
+        return _execution_kraken.normalise_venue_status(status, vol_exec=vol_exec, requested_volume=requested)
+
+    def test_filled_and_partial_labels_pass_through(self):
+        assert self._norm("filled", vol_exec=0.01, requested=0.01) == "filled"
+        assert self._norm("partial", vol_exec=0.005, requested=0.01) == "partial"
+
+    def test_closed_full_execution_is_filled(self):
+        assert self._norm("closed", vol_exec=0.01, requested=0.01) == "filled"
+
+    def test_closed_partial_execution_is_partial(self):
+        assert self._norm("closed", vol_exec=0.004, requested=0.01) == "partial"
+
+    def test_closed_zero_execution_is_cancelled_never_positive(self):
+        assert self._norm("closed", vol_exec=0.0, requested=0.01) == "cancelled"
+
+    def test_cancel_flavoured_with_real_fill_is_partial(self):
+        assert self._norm("canceled", vol_exec=0.003, requested=0.01) == "partial"
+        assert self._norm("cancelled", vol_exec=0.003, requested=0.01) == "partial"
+
+    def test_open_family_maps_to_open(self):
+        for label in ("open", "pending", "new"):
+            assert self._norm(label) == "open"
+
+    def test_terminal_no_fill_labels_pass_through(self):
+        assert self._norm("expired") == "expired"
+        assert self._norm("rejected") == "rejected"
+
+    def test_unrecognised_label_becomes_unknown_never_verbatim(self):
+        assert self._norm("mystery_state") == "unknown"
+
+    def test_empty_and_none_become_unknown(self):
+        assert self._norm("") == "unknown"
+        assert self._norm(None) == "unknown"
+
+    def test_unrecognised_label_with_real_fill_is_rescued(self):
+        assert self._norm("mystery_state", vol_exec=0.01, requested=0.01) == "filled"
+        assert self._norm("mystery_state", vol_exec=0.004, requested=0.01) == "partial"
+
+    def test_unknown_requested_volume_with_fill_is_filled(self):
+        assert self._norm("closed", vol_exec=0.01, requested=0.0) == "filled"
+
+    def test_fill_tolerance_absorbs_float_drift(self):
+        # One-part-per-million tolerance: vol_exec within 0.0001% of the
+        # requested volume is a full fill, not a phantom partial.
+        assert self._norm("closed", vol_exec=100.0 * (1 - 5e-7), requested=100.0) == "filled"
+        # A genuinely smaller fill stays partial.
+        assert self._norm("closed", vol_exec=99.999, requested=100.0) == "partial"
 
 
 # ───────────────────────────────────────────────────────────── execution-kraken-spot/lib.py
@@ -676,6 +850,96 @@ class TestLibPortfolioWiring:
         }
         with pytest.raises(ValueError, match="zero-volume fill"):
             write_fill_to_portfolio(conf, portfolio_id=pid, db_path=db_path)
+
+    def test_fill_requires_ledger_write_is_volume_based(self):
+        """The ledger gate is a fill-presence test, not a status-string
+        test (market-skills-05x): a 'closed' / 'unknown' confirmation
+        carrying a fill still requires the write; a zero-volume fill never
+        does, even with a positive label."""
+        lib = _load_lib()
+
+        def conf(status, filled):
+            return {
+                "intent_id": "05x-gate",
+                "order_id": "O05X-G",
+                "pair": "BTCUSD",
+                "side": "buy",
+                "order_type": "market",
+                "requested_volume": 0.01,
+                "filled_volume": filled,
+                "status": status,
+                "timestamp": "2026-09-19T00:00:00+00:00",
+                "venue": "kraken",
+            }
+
+        assert lib.fill_requires_ledger_write(conf("closed", 0.01)) is True
+        assert lib.fill_requires_ledger_write(conf("unknown", 0.01)) is True
+        assert lib.fill_requires_ledger_write(conf("filled", 0.01)) is True
+        assert lib.fill_requires_ledger_write(conf("filled", 0.0)) is False
+        assert lib.fill_requires_ledger_write(conf("rejected", 0.0)) is False
+
+    def test_write_fill_accepts_unknown_status_with_positive_volume(self, tmp_path):
+        """write_fill_to_portfolio must not refuse a real fill because of
+        its status label — 'unknown' with filled_volume > 0 writes the row
+        (market-skills-05x)."""
+        from portfolio.db import list_transactions
+
+        db_path, pid = self._write_fill(tmp_path)
+        write_fill_to_portfolio = _load_lib().write_fill_to_portfolio
+
+        conf: FillConfirmation = {
+            "intent_id": "05x-unk",
+            "order_id": "O05X-U",
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "requested_volume": 0.01,
+            "filled_volume": 0.01,
+            "fill_price": 65000.0,
+            "cost_quote": 650.0,
+            "fee": 1.3,
+            "fee_currency": "USD",
+            "status": "unknown",
+            "timestamp": "2026-09-19T00:00:00+00:00",
+            "venue": "kraken",
+        }
+        tx_id = write_fill_to_portfolio(conf, portfolio_id=pid, db_path=db_path)
+        assert tx_id > 0
+
+        rows = list_transactions(db_path, portfolio_id=pid)
+        assert len(rows) == 1
+        assert rows[0]["qty"] == pytest.approx(0.01)
+        assert rows[0]["tx_hash"] == "O05X-U"
+
+    def test_write_fill_accepts_legacy_closed_label_with_volume(self, tmp_path):
+        """Even the pre-fix leaked venue label ('closed') with a real fill
+        is written — the ledger no longer gates on the status string."""
+        from portfolio.db import list_transactions
+
+        db_path, pid = self._write_fill(tmp_path)
+        write_fill_to_portfolio = _load_lib().write_fill_to_portfolio
+
+        conf: FillConfirmation = {
+            "intent_id": "05x-closed",
+            "order_id": "O05X-C",
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "requested_volume": 0.01,
+            "filled_volume": 0.01,
+            "fill_price": 65000.0,
+            "cost_quote": 650.0,
+            "fee": 1.3,
+            "fee_currency": "USD",
+            "status": "closed",
+            "timestamp": "2026-09-19T00:00:00+00:00",
+            "venue": "kraken",
+        }
+        tx_id = write_fill_to_portfolio(conf, portfolio_id=pid, db_path=db_path)
+        assert tx_id > 0
+
+        rows = list_transactions(db_path, portfolio_id=pid)
+        assert len(rows) == 1
 
     def test_write_fill_retry_same_intent_id_keeps_first_decision(self, tmp_path):
         """Retry path: venue returns the original order (same intent_id),
@@ -1187,6 +1451,179 @@ class TestLedgerWriteFailureContract:
         init_db(db_path)
         pid = add_portfolio(db_path, "spot", base_ccy="USD")
         return db_path, pid
+
+
+class TestMarketOrderLedgerAutoWrite:
+    """Per-fix fixtures for market-skills-05x: a fully-filled MARKET order
+    comes back with venue status 'closed', which the old status-string
+    ledger gate (`status in ("filled", "partial")`) never matched — the
+    venue filled but ``write_fill_to_portfolio`` was never attempted
+    (exit 0, no row, clean logs). The gate must be volume-based: any
+    confirmation carrying a fill writes the row automatically.
+
+    Pre-fix, the first test below produced exit 0 with NO ledger row.
+    """
+
+    def _conf(self, order_id="O05X-CLI", status="closed", filled=0.01):
+        return {
+            "intent_id": "05x-cli",
+            "order_id": order_id,
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "requested_volume": 0.01,
+            "filled_volume": filled,
+            "fill_price": 65000.0,
+            "cost_quote": 650.0,
+            "fee": 1.3,
+            "fee_currency": "USD",
+            "status": status,
+            "timestamp": "2026-09-19T00:00:00+00:00",
+            "venue": "kraken",
+        }
+
+    def _run_cli(self, *argv, monkeypatch, tmp_path, confirmation):
+        """Drive cmd_submit with a patched provider returning the given
+        confirmation and the REAL write_fill_to_portfolio (not mocked),
+        against a fresh portfolio DB."""
+        from portfolio.db import add_portfolio, init_db
+
+        db_path = str(tmp_path / "cli.db")
+        init_db(db_path)
+        pid = add_portfolio(db_path, "spot", base_ccy="USD")
+        monkeypatch.setenv("MARKET_SKILLS_PORTFOLIO_DB", db_path)
+        monkeypatch.setenv("AFK_SLEEP_WINDOW_START_HOUR_UTC", "0")
+        monkeypatch.setenv("AFK_SLEEP_WINDOW_END_HOUR_UTC", "0")
+        skills_dir = os.path.join(os.path.dirname(__file__), "..", "skills")
+        if skills_dir not in sys.path:
+            sys.path.insert(0, skills_dir)
+        run_path = os.path.join(os.path.dirname(__file__), "..", "skills", "execution-kraken-spot", "scripts", "run.py")
+        spec = __import__("importlib").util.spec_from_file_location("execution_kraken_spot_05x_run", run_path)
+        mod = __import__("importlib").util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        args = argparse.Namespace(
+            command="submit",
+            db=db_path,
+            intent=None,
+            pair="BTCUSD",
+            side="buy",
+            order_type="market",
+            volume=0.01,
+            limit_price=None,
+            stop_price=None,
+            time_in_force=None,
+            deadline=None,
+            intent_id="05x-cli-1",
+            thesis=None,
+            strategy=None,
+            conviction=None,
+            source_skills=None,
+            decision_decoration=None,
+            override_from_suggestion=False,
+            portfolio="spot",
+            dry_run=False,
+            yes=True,
+            no_wait=False,
+            wait_timeout=5.0,
+            json="--json" in argv,
+        )
+
+        provider = get_execution_provider("kraken")
+        with patch.object(provider, "place_order", return_value=confirmation) as mock_place:
+            rc = mod.cmd_submit(args)
+
+        assert mock_place.called
+        return rc, args.json, db_path, pid
+
+    def test_cli_closed_full_fill_writes_ledger_row_automatically(self, tmp_path, monkeypatch, capsys):
+        """THE regression fixture: a market buy whose confirmation is venue
+        status 'closed' with full vol_exec must write the ledger row
+        automatically (pre-fix: exit 0 with NO row)."""
+        from portfolio.db import list_transactions
+
+        rc, as_json, db_path, pid = self._run_cli(
+            "--json",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            confirmation=self._conf(status="closed", filled=0.01),
+        )
+        assert rc == 0, "a closed full fill must auto-write the ledger row and exit 0"
+        assert as_json
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["confirmation"]["status"] == "closed"
+        assert "portfolio_tx_id" in payload, "ledger row must be auto-written for a closed full fill"
+
+        rows = list_transactions(db_path, portfolio_id=pid)
+        assert len(rows) == 1, "the market-order fill must land in the ledger without manual wiring"
+        assert rows[0]["qty"] == pytest.approx(0.01)
+        assert rows[0]["tx_hash"] == "O05X-CLI"
+        assert rows[0]["asset"] == "kraken:BTCUSD"
+
+    def test_cli_closed_partial_fill_is_recorded(self, tmp_path, monkeypatch, capsys):
+        """A partial fill under the leaked 'closed' label is written too —
+        the gate is the volume, not the label."""
+        from portfolio.db import list_transactions
+
+        rc, as_json, db_path, pid = self._run_cli(
+            "--json",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            confirmation=self._conf(status="closed", filled=0.004),
+        )
+        assert rc == 0
+        assert as_json
+        payload = json.loads(capsys.readouterr().out)
+        assert "portfolio_tx_id" in payload
+
+        rows = list_transactions(db_path, portfolio_id=pid)
+        assert len(rows) == 1
+        assert rows[0]["qty"] == pytest.approx(0.004)
+
+    def test_cli_no_fill_confirmation_writes_nothing(self, tmp_path, monkeypatch, capsys):
+        """Negative control: a zero-volume confirmation ('submitted') still
+        writes no row and stays exit 0 — the volume gate is not a blanket
+        always-write."""
+        from portfolio.db import list_transactions
+
+        rc, as_json, db_path, pid = self._run_cli(
+            "--json",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            confirmation=self._conf(status="submitted", filled=0.0),
+        )
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert "portfolio_tx_id" not in payload
+
+        rows = list_transactions(db_path, portfolio_id=pid)
+        assert len(rows) == 0
+
+    def test_cli_filled_label_zero_volume_is_loud_ledger_error(self, tmp_path, monkeypatch, capsys):
+        """A contradictory confirmation — positive status label with
+        filled_volume == 0 (e.g. a venue response missing or empty
+        vol_exec) — must still reach the write and hit the loud
+        venue/ledger-disagreement hard error; a volume-only gate would
+        silently skip it (exit 0, no row), regressing the hxe contract."""
+        from portfolio.db import list_transactions
+
+        rc, as_json, db_path, pid = self._run_cli(
+            "--json",
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            confirmation=self._conf(status="filled", filled=0.0),
+        )
+        assert rc == 1, "a 'filled' label with zero volume must be a loud hard error, not a silent skip"
+        assert as_json
+        captured = capsys.readouterr()
+        assert "warning: order placed but portfolio write failed" in captured.err
+        assert "DISAGREE" in captured.err
+        payload = json.loads(captured.out)
+        assert payload["errors"], "errors must be populated in the --json payload"
+        assert "portfolio_tx_id" not in payload
+
+        rows = list_transactions(db_path, portfolio_id=pid)
+        assert len(rows) == 0
 
 
 # ───────────────────────────────────────────────────────────── CLI surface
