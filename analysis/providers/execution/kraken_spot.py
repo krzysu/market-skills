@@ -25,9 +25,9 @@ rails apply:
 
   1. ``place_order(intent, wait=True, ...)`` — when the caller does not pass
      ``wait=False``, the method blocks until the order reaches a terminal
-     status (filled / partial / rejected / cancelled / expired) or the
-     timeout elapses. This gives the LLM a populated fill price before
-     portfolio-mgmt writes the row.
+     status (filled / partial / rejected / cancelled / expired / unknown)
+     or the timeout elapses. This gives the LLM a populated fill price
+     before portfolio-mgmt writes the row.
 
   2. The CLI skill ``skills/execution-kraken/scripts/run.py`` prompts for
      confirmation before invoking ``place_order`` unless ``--yes`` is passed.
@@ -90,6 +90,77 @@ _KRAKEN_ASSET_MAP = {
     "ZCAD": "CAD",
     "ZAUD": "AUD",
 }
+
+# Venue status (kraken ``query-orders``) -> contract status vocabulary.
+# The raw venue string must NEVER reach ``FillConfirmation.status``: any
+# label absent from this table normalises to ``"unknown"`` instead of
+# leaking through verbatim. ``closed`` — Kraken's terminal state, reached
+# by every fully-executed market order — maps to ``cancelled`` as its
+# zero-execution base label; ``normalise_venue_status`` upgrades it to
+# ``filled`` / ``partial`` from the executed volume.
+_VENUE_STATUS_MAP: dict[str, str] = {
+    "filled": "filled",
+    "partial": "partial",
+    "closed": "cancelled",
+    "canceled": "cancelled",
+    "cancelled": "cancelled",
+    "open": "open",
+    "pending": "open",
+    "new": "open",
+    "expired": "expired",
+    "rejected": "rejected",
+}
+
+# Relative tolerance for the "did the venue execute the full requested
+# volume?" comparison in ``normalise_venue_status`` (see its docstring).
+_FILL_COMPLETE_REL_TOL = 1e-6
+
+# Venue labels whose executed volume is reported as ``partial`` even when
+# the order reached a terminal non-positive state — Kraken's cancel
+# spellings. ``closed`` is NOT in this set: a closed order with an
+# executed volume is volume-derived (``filled`` / ``partial``).
+_CANCEL_FLAVOURED = ("canceled", "cancelled")
+
+
+def normalise_venue_status(venue_status: str, *, vol_exec: float, requested_volume: float) -> str:
+    """Map a raw venue status string onto the contract status vocabulary.
+
+    Returns exactly one of: ``filled`` / ``partial`` / ``open`` /
+    ``cancelled`` / ``expired`` / ``rejected`` / ``unknown``. A venue
+    label outside ``_VENUE_STATUS_MAP`` (including an empty string) is
+    never returned verbatim — it becomes ``unknown``.
+
+    The executed volume decides the positive status: when ``vol_exec >
+    0`` the result is ``filled`` (the venue executed (at least) the
+    requested volume, or the requested size is unknown) or ``partial``
+    (only part of the requested size executed), independent of the venue
+    label. This volume derivation runs after the table lookup so an
+    unrecognised label that still carries a real fill is rescued into
+    ``filled`` / ``partial`` instead of dropping the fill on the floor.
+
+    Cancel-flavoured venue labels (``canceled`` / ``cancelled``) with a
+    real execution keep the long-standing behaviour of reporting
+    ``partial``.
+
+    ``vol_exec == 0`` keeps the mapped label — ``closed`` with zero
+    execution maps to ``cancelled`` and never to a positive status.
+
+    The filled-vs-partial comparison uses the relative tolerance
+    ``_FILL_COMPLETE_REL_TOL`` (one part per million): Kraken volumes
+    arrive as decimal strings and a float/decimal round-trip can drift
+    by a few ULPs, which must not turn a full fill into a phantom
+    partial. A genuinely smaller fill differs by orders of magnitude
+    more than this tolerance.
+    """
+    raw = (venue_status or "").strip().lower()
+    mapped = _VENUE_STATUS_MAP.get(raw, "unknown")
+    if vol_exec > 0:
+        if raw in _CANCEL_FLAVOURED:
+            return "partial"
+        if requested_volume <= 0 or vol_exec >= requested_volume * (1 - _FILL_COMPLETE_REL_TOL):
+            return "filled"
+        return "partial"
+    return mapped
 
 
 def _now_iso() -> str:
@@ -258,11 +329,11 @@ class KrakenExecutionProvider:
     ) -> FillConfirmation:
         """Poll ``kraken query-orders`` until terminal state or timeout.
 
-        Maps Kraken order status codes:
-            "filled"  -> status="filled"
-            "partial" -> status="partial"
-            "open" / "pending" -> continues polling
-            "canceled" / "expired" / "rejected" -> terminal, no fill
+        Terminal normalisation is delegated to
+        ``normalise_venue_status`` — Kraken's ``closed`` (reached by every
+        fully-executed market order) with an executed volume becomes
+        ``filled`` / ``partial`` from the volumes; ``open`` / ``pending``
+        / ``new`` keeps polling.
         """
         deadline = time.monotonic() + timeout_s
         poll_interval = 0.5
@@ -333,22 +404,11 @@ class KrakenExecutionProvider:
         fill_price = avg_price
         cost_quote = float(cost) if cost not in (None, "0", 0) else None
 
-        if kraken_status == "filled":
-            status = "filled"
-        elif kraken_status == "partial":
-            status = "partial"
-        elif kraken_status in ("canceled", "cancelled"):
-            status = "cancelled"
-        elif kraken_status == "expired":
-            status = "expired"
-        elif kraken_status == "rejected":
-            status = "rejected"
-        else:
-            status = kraken_status or "unknown"
-
-        # If vol_exec > 0 but status was canceled, treat as partial.
-        if vol_exec > 0 and status == "cancelled":
-            status = "partial"
+        status = normalise_venue_status(
+            kraken_status,
+            vol_exec=vol_exec,
+            requested_volume=float(intent["volume"]),
+        )
 
         fee_currency_raw = order.get("fee_currency") or ""
         return FillConfirmation(

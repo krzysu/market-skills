@@ -263,9 +263,16 @@ def cmd_submit(args: argparse.Namespace) -> int:
         timeout_s=args.wait_timeout,
     )
 
-    # Write to portfolio-mgmt on positive fills when --portfolio is set.
+    # Write to portfolio-mgmt whenever the confirmation carries a real
+    # fill, regardless of the status label (Kraken reports fully-executed
+    # market orders as 'closed'). A positive status label with a
+    # non-positive filled_volume is ALSO routed to the write so
+    # write_fill_to_portfolio raises its loud zero-volume hard error
+    # instead of the shape being silently skipped — when --portfolio is set.
     tx_id: int | None = None
-    if args.portfolio and confirmation.get("status") in ("filled", "partial"):
+    if args.portfolio and (
+        _lib.fill_requires_ledger_write(confirmation) or confirmation.get("status") in ("filled", "partial")
+    ):
         try:
             pid = _resolve_portfolio_id(args.db, args.portfolio)
         except SystemExit:

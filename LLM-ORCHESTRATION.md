@@ -76,6 +76,7 @@ after the venue round-trip (or `--dry-run` validation).
 | `open` (post `--wait-timeout`, limit didn't fill) | The order is on the book. Narrate: *"Limit order is working at the venue. Watchdog will fire on fill."* Hand off to `position-watchdog`. Do not retry. |
 | `cancelled` / `expired` | Narrate the venue's reason. No portfolio side effect. Ask the user how to proceed. |
 | `rejected` / `error` | **Surface `reason` verbatim.** Ask: *"Venue rejected: {reason}. Retry? Cancel? Manual intervention?"* The user picks. If you retry, use the **same `intent_id`** (idempotency — see section 4). If you cancel, call `cancel <order_id>`. |
+| `unknown` | The venue returned an unrecognised status with **no executed volume** (`filled_volume = 0`); the volume gate writes nothing. Verify no fill occurred (check the venue's order/trade history) before believing the order did not execute — never create a manual ledger entry for a zero-volume confirmation. Surface the unrecognised status and the verification result to the user. |
 | `submitted` with TP-failed warning (perps only) | Stop succeeded, TP didn't. The position is still protected by the stop. Narrate: *"Stop is live, TP failed to attach. Place TP manually or hold."* |
 
 Important:

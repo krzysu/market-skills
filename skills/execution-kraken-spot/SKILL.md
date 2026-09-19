@@ -155,7 +155,7 @@ uv run skills/execution-kraken/scripts/run.py submit \
   --source-skills "market-accumulation,market-trend"
 ```
 
-> **LLM agent brain**: for the per-status workflow when this skill returns a `FillConfirmation` (filled / partial / open / error / rejected / submitted), see [`LLM-ORCHESTRATION.md`](../../../LLM-ORCHESTRATION.md) §3. For idempotency rules on `intent_id` / `--cl-ord-id`, see §4.
+> **LLM agent brain**: for the per-status workflow when this skill returns a `FillConfirmation`, see [`LLM-ORCHESTRATION.md`](../../../LLM-ORCHESTRATION.md) §3 — the canonical `status` vocabulary is the `status` bullet under "FillConfirmation shape" below. For idempotency rules on `intent_id` / `--cl-ord-id`, see §4.
 
 ## FillConfirmation shape (output)
 
@@ -164,7 +164,9 @@ After `submit`, the skill emits a `FillConfirmation` (TypedDict in
 narrate:
 
 - `status` — terminal state: `filled` / `partial` / `submitted` / `open`
-  / `cancelled` / `expired` / `rejected` / `error`
+  / `cancelled` / `expired` / `rejected` / `error` / `unknown` — raw
+  venue strings never leak through; a venue label outside the provider's
+  mapping table normalises to `unknown`
 - `order_id` — Kraken txid (use this with `cancel <order_id>` if needed)
 - `filled_volume` — what the venue reported as filled (`0.0` for
   `submitted` / `open`)
@@ -204,9 +206,12 @@ truncating an idempotency key could collide with a different order.
 
 ## Portfolio wiring
 
-Successful fills (`status="filled"` or `status="partial"`) auto-write a
-row to the portfolio-mgmt SQLite DB (`portfolio.db.add_transaction_with_decision`)
-when `--portfolio <name|id>` is supplied. The transaction row and its
+A confirmation carrying a fill (`filled_volume > 0`) auto-writes a row to
+the portfolio-mgmt SQLite DB (`portfolio.db.add_transaction_with_decision`)
+when `--portfolio <name|id>` is supplied — the gate is volume-based, not
+a status-string test, so a venue fill can never silently skip the ledger
+(Kraken reports fully-executed market orders as `closed`). The
+transaction row and its
 decision trace are written in a single SQLite transaction, so a partial
 write (one row without the other) is impossible. The asset notation is
 `kraken:<PAIR>` (e.g. `kraken:HYPEUSD`) — same convention the data
