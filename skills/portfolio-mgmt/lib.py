@@ -7,6 +7,16 @@ from portfolio.db import (
     get_portfolio_summary,
     list_portfolios,
 )
+from portfolio.sync import (
+    ENV_OPEN_POSITIONS_PATH,
+    FLAT_EPSILON,
+    POSITION_SIZE_DECIMALS,
+    STALE_ZONE_MIN_DISTANCE_PCT,
+    plan_open_positions_sync,
+    resolve_config_path,
+    sync_open_positions,
+    sync_open_positions_from_env,
+)
 
 
 def default_db_path() -> str:
@@ -63,9 +73,17 @@ def drawdown(
 
 
 __all__ = [
+    "ENV_OPEN_POSITIONS_PATH",
+    "FLAT_EPSILON",
+    "POSITION_SIZE_DECIMALS",
+    "STALE_ZONE_MIN_DISTANCE_PCT",
     "analyze",
     "default_db_path",
     "drawdown",
     "get_portfolio_summary",
     "list_portfolios",
+    "plan_open_positions_sync",
+    "resolve_config_path",
+    "sync_open_positions",
+    "sync_open_positions_from_env",
 ]

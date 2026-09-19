@@ -115,6 +115,8 @@ performance [--portfolio X] [--no-refresh]      # Realized PnL, profit factor
 replay [--portfolio X] [--json]                # FIFO audit trail — per-lot creation & consumption
 reconcile --portfolio X --balance-file FILE     # Compare DB positions vs external JSON snapshot
 export [--portfolio X] [--format csv|json] [--output FILE]
+sync-open-positions [--config PATH] [--portfolio X] [--dry-run]   # Derive the open-positions held file from the ledger
+                   [--price-override ASSET=PRICE ...]
 ```
 
 All commands accept `--json` for machine output and `--db PATH` to override the default database location.
@@ -316,6 +318,82 @@ reconcile --portfolio 1 --balance-file snapshot.json
 ```
 
 Status legend: `=` exact match, `!=` quantity mismatch, `+` asset in snapshot but not in DB, `-` asset in DB but not in snapshot.
+
+## Ledger -> open-positions sync
+
+The `position-watchdog` held file (its `open-positions.json` config) is derived from this
+ledger. **The source of truth is the LEDGER, never the venue** — the ledger records decisions,
+the venue records reality, and they are expected to diverge. **No venue API call happens
+anywhere in this path**: reference prices come from `--price-override` or the ledger-local
+`price_cache` table only.
+
+```bash
+uv run skills/portfolio-mgmt/scripts/run.py sync-open-positions \
+    --config /path/to/open-positions.json \
+    [--portfolio X] [--dry-run] [--json] [--price-override ASSET=PRICE ...]
+```
+
+`--config` defaults to `$MARKET_SKILLS_OPEN_POSITIONS_PATH`; when the env var is unset and no
+`--config` is passed, the CLI exits 2 naming the env var. `--dry-run` prints the diff and
+writes nothing. `--json` emits the AXI envelope (`data` = the sync report, `count` = number of
+watches in the config). Exit status is 0 even when drift is found; 2 only on a config/ledger/
+write error.
+
+Derivation rules — the sync derives **only membership, `position_size` and a missing
+`entry_price`**; everything else in an entry (`levels`, zones, `_comment_*`, `format_style`,
+`signals`, `monitor_provider`, `interval`, `period`) is hand-authored and preserved
+byte-identical. A sync that regenerates zones would be worse than the drift it fixes:
+
+- **Membership.** An enabled watch is matched against ledger assets by exact `monitor_provider`
+  asset key first, else by normalized bare ticker (drop the `provider:` prefix and a trailing
+  `USD`/`USDT`/`USDC`/`EUR` quote suffix, uppercase, strip `-`/`/`) — accepted when exactly one
+  ledger asset normalizes to it, whose net is then classified exactly like an exact-key match
+  (flat → removed watchlist candidate, negative → `negative_net`, never deleted; see below).
+  A ledger net with absolute value
+  `<= 1e-6` counts as flat: the watch is **removed** from the file and reported as a *watchlist
+  candidate* carrying its verbatim hand-authored levels — re-ground the zones in the watchlist
+  config, do not delete the watch outright (the ZEC failure mode). A **negative** ledger net is
+  NOT flat (a perps short is recorded as SELL on the same `kraken:<PAIR>` key, or an over-sold
+  residue): the watch is kept byte-identical and reported under `negative_net` — a short's size
+  is not the ledger net of the key it shares with spot, so `position_size` is not rewritten.
+  Unmatched/ambiguous watches (e.g. the same asset
+  held in more than one portfolio) are kept untouched and reported, as are held ledger assets
+  with no watch entry (`unwatched` — an entry cannot be invented; it needs hand-authored
+  levels). Disabled watches (`"enabled": false`) are never pruned — the "close a position: set
+  enabled false, config preserved for future re-adds" contract.
+- **`position_size`** = the ledger FIFO net quantity rounded to 8 decimals (the file's
+  quantity precision — the reference ETH case expects `0.03815984`, exactly
+  `round(0.0381598383, 8)`). Disagreeing values are corrected and the correction recorded.
+- **`entry_price`** is filled from the ledger FIFO average cost of the remaining lots ONLY when
+  the entry has none (missing or `null`). A hand-authored `entry_price` is **never overwritten**
+  — it anchors the watchdog's `drop`/`recovery` math and is a decision reference, not a ledger
+  field (a staking reward priced at 0 drags the ledger avg cost below the hand-authored entry;
+  only `position_size` is corrected).
+- **Audit trail.** When (and only when) something about an entry changed, the entry gets
+  (or extends) a single-line `_comment_ledger_sync` note, e.g.
+  `position_size 3417.0 -> 385.59124734 (ledger-derived 2026-09-18T13:22:05Z)`, appended after
+  ` | ` when earlier corrections exist. No other `_comment_*` key and not the top-level
+  `_comment` are ever touched.
+- **Stale levels are flagged, never rewritten.** If every `zone` level sits more than 25% below
+  the reference price (the runner case), the entry is listed under `stale_levels` with its name
+  and the distance — re-ground, never prune. When no price is known for a watch it is listed
+  under `price_unavailable` instead of crashing.
+- **Idempotent.** Serialization detects the file's indent width, ascii mode and trailing
+  newline, so untouched entries and untouched regions round-trip byte-identically; corrected
+  entries get only their changed value tokens spliced into their original raw bytes
+  (`position_size`, an inserted `entry_price`, the `_comment_ledger_sync` string), so
+  hand-authored `levels`/`signals` — including literals like `500.00` — stay byte-identical.
+  When nothing changed the file is not written at all (mtime untouched). Writes are atomic
+  (sibling temp file + `os.replace`).
+
+**Post-fill trigger.** Drift is created by fills, so both `execution-kraken-spot` and
+`execution-kraken-perps` run this sync automatically immediately after a successful
+`write_fill_to_portfolio` (see
+`analysis.providers.execution._cli_common.sync_open_positions_after_fill`). The hook prints
+one stderr line (`open-positions: no drift` / `open-positions: LIT position_size 3417.0 ->
+385.59124734`) and never changes the submit's exit code; when `$MARKET_SKILLS_OPEN_POSITIONS_PATH`
+is unset it prints one warning and skips. No cron job is added anywhere — run the subcommand on
+demand for everything else.
 
 ## Troubleshooting
 

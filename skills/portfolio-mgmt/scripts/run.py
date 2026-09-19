@@ -4,9 +4,11 @@
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from datetime import UTC, datetime
 
+from analysis.output import emit_envelope_json
 from analysis.skill_loader import load_lib_for_script
 from portfolio.db import (
     VALID_SIDES,
@@ -32,6 +34,7 @@ from portfolio.db import (
     rename_portfolio,
     replay_fifo,
 )
+from portfolio.sync import resolve_config_path, sync_open_positions
 
 _lib = load_lib_for_script(__file__)
 default_db_path = _lib.default_db_path
@@ -520,6 +523,116 @@ def cmd_export(args):
         print(content)
 
 
+# ───────────────────────────────────────────────────────────── sync-open-positions
+
+
+def _render_num(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        return repr(float(value))
+    return str(value)
+
+
+def _zones_clause(levels: list) -> str:
+    bounds = []
+    for lv in levels:
+        if isinstance(lv, dict) and lv.get("type") == "zone":
+            low, high = lv.get("low"), lv.get("high")
+            if low is not None or high is not None:
+                lo = low if low is not None else high
+                hi = high if high is not None else low
+                bounds.append(f"{lo}-{hi}")
+    return ", ".join(bounds)
+
+
+def _count_config_watches(config_path: str) -> int:
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            doc = json.load(f)
+        return len(doc.get("watches") or [])
+    except (OSError, ValueError):
+        return 0
+
+
+def _print_sync_report(report: dict) -> None:
+    width = 8
+    mode = "dry run (no file written)" if report.get("dry_run") else "synced"
+    print(f"open-positions sync — {mode}: {report['config']}")
+    for r in report["removed"]:
+        zones = _zones_clause(r.get("levels") or [])
+        zones_txt = f"; zones {zones} are a watchlist candidate" if zones else ""
+        print(f"  - {r['name']:<{width}} ledger flat -> removed{zones_txt} (re-ground, do not delete the watch)")
+    for entry in report["negative_net"]:
+        print(
+            f"  + {entry['name']:<{width}} ledger net negative ({_render_num(entry['net'])}) — "
+            "short or over-sold; watch kept untouched"
+        )
+    for u in report["updated"]:
+        print(f"  ~ {u['name']:<{width}} {u['field']} {_render_num(u['was'])} -> {_render_num(u['now'])}")
+    for name in report["unchanged"]:
+        print(f"  = {name:<{width}} unchanged")
+    for name in report["skipped_disabled"]:
+        print(f"  . {name:<{width}} disabled (skipped)")
+    for entry in report["unmatched"]:
+        print(f"  ? {entry['name']:<{width}} unmatched — {entry['reason']}")
+    for entry in report["ambiguous"]:
+        print(f"  ? {entry['name']:<{width}} ambiguous — {entry['reason']}")
+    for u in report["unwatched"]:
+        print(f"  ! unwatched  {u['asset']} ({_render_num(u['ledger_net'])}) — no watch entry")
+    for s in report["stale_levels"]:
+        print(
+            f"  [WARN] {s['name']} zones sit {abs(s['distance_pct']):.1f}% below the last cached price {s['price']:g}"
+        )
+    for name in report["price_unavailable"]:
+        print(f"  [SKIP] {name:<{width}} no cached price — stale-zone check skipped")
+    for note in report["notes"]:
+        print(f"  note: {note}")
+
+
+def cmd_sync_open_positions(args):
+    try:
+        config_path = resolve_config_path(args.config)
+    except OSError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    portfolio_id = _resolve_portfolio_id(args.portfolio, args.db) if args.portfolio is not None else None
+    if args.portfolio is not None and portfolio_id is None:
+        print(f"No portfolio matching '{args.portfolio}'", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        report = sync_open_positions(
+            args.db,
+            config_path,
+            dry_run=args.dry_run,
+            portfolio=portfolio_id,
+            price_overrides=_parse_price_overrides(args.price_override),
+        )
+    except (OSError, ValueError, KeyError, sqlite3.Error) as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    if args.json:
+        count = _count_config_watches(config_path)
+        emit_envelope_json(
+            report,
+            count=count,
+            errors=[],
+            help=[
+                "Re-ground removed/candidate zones in the watchlist config — do not delete the watch outright (ZEC failure mode)",
+                "Run sync-open-positions --dry-run to preview the diff without writing",
+                "Confirm the corrected file with position-watchdog --status",
+            ],
+        )
+        return
+
+    _print_sync_report(report)
+
+
 # ──────────────────────────────────────────────────────────────────── argument parser
 
 
@@ -659,6 +772,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", choices=["csv", "json"], default="json")
     p.add_argument("--output", help="Output file path (default: stdout)")
     p.set_defaults(func=cmd_export)
+
+    # sync-open-positions
+    p = sub.add_parser(
+        "sync-open-positions",
+        help="Derive the open-positions held file from the portfolio ledger",
+        parents=[shared],
+    )
+    p.add_argument("--config", help="Held-file path (default: $MARKET_SKILLS_OPEN_POSITIONS_PATH)")
+    p.add_argument("--portfolio", help="Portfolio id (int) or name")
+    p.add_argument("--dry-run", action="store_true", help="Print the diff without writing")
+    p.add_argument("--price-override", action="append", help="e.g. hl:LIT=4.9")
+    p.set_defaults(func=cmd_sync_open_positions)
 
     return parser
 

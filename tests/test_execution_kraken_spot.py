@@ -2057,3 +2057,197 @@ class TestDryRunVenueErrorSurfacing:
         assert "EGeneral:Invalid arguments:cl_ord_id" in out
         assert "kraken --validate failed" not in out
         assert "kraken rc" in out
+
+
+# ─────────────────────────────────────────── open-positions sync after fill
+#
+# The execution -> portfolio-mgmt write path must re-ground the
+# position-watchdog held file right after a recorded fill (drift is
+# created by fills; no cron job). The hook is advisory: env unset or a
+# broken config path must never change the submit's exit code.
+
+
+class TestOpenPositionsSyncAfterFill:
+    def _fixture(self, tmp_path):
+        from portfolio.db import add_portfolio, init_db
+
+        db_path = str(tmp_path / "portfolio.db")
+        init_db(db_path)
+        add_portfolio(db_path, "spot", base_ccy="USD")
+        held = tmp_path / "open-positions.json"
+        held.write_text(
+            json.dumps(
+                {
+                    "_comment": "held positions",
+                    "watches": [
+                        {
+                            "name": "BTC",
+                            "enabled": True,
+                            "monitor_provider": "kraken:BTCUSD",
+                            "entry_price": 64000.0,
+                            "position_size": 0.005,
+                            "levels": [{"type": "stop", "price": 60000.0}],
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return db_path, held
+
+    def _run_cli(self, *argv, monkeypatch):
+        monkeypatch.setenv("AFK_SLEEP_WINDOW_START_HOUR_UTC", "0")
+        monkeypatch.setenv("AFK_SLEEP_WINDOW_END_HOUR_UTC", "0")
+        run_path = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "skills",
+            "execution-kraken-spot",
+            "scripts",
+            "run.py",
+        )
+        spec = __import__("importlib").util.spec_from_file_location("execution_kraken_spot_hook", run_path)
+        mod = __import__("importlib").util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with patch.object(sys, "argv", ["run.py", *argv]):
+            return mod.main()
+
+    @staticmethod
+    def _filled_submit_responses():
+        submit = {"txid": ["OFILL-SYNC-1"], "descr": {"order": "buy 0.01 BTCUSD @ market"}}
+        query = {
+            "OFILL-SYNC-1": {
+                "status": "filled",
+                "vol_exec": "0.01",
+                "cost": "650.5",
+                "fee": "1.30",
+                "fee_currency": "ZUSD",
+                "price": "65050",
+                "descr": {"order": "buy 0.01 BTCUSD @ market"},
+            }
+        }
+        return [_kraken_resp(submit), _kraken_resp(query)]
+
+    def test_successful_fill_triggers_sync_and_corrects_held_file(self, tmp_path, monkeypatch, capsys):
+        db_path, held = self._fixture(tmp_path)
+        monkeypatch.setenv("MARKET_SKILLS_PORTFOLIO_DB", db_path)
+        monkeypatch.setenv("MARKET_SKILLS_OPEN_POSITIONS_PATH", str(held))
+        responses = self._filled_submit_responses()
+
+        def runner(cmd, *args, **kwargs):
+            if not responses:
+                raise AssertionError(f"too many subprocess calls: {cmd}")
+            return responses.pop(0)
+
+        with patch("subprocess.run", side_effect=runner):
+            rc = self._run_cli(
+                "submit",
+                "--pair",
+                "BTCUSD",
+                "--side",
+                "buy",
+                "--order-type",
+                "market",
+                "--volume",
+                "0.01",
+                "--portfolio",
+                "spot",
+                "--yes",
+                "--json",
+                monkeypatch=monkeypatch,
+            )
+
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "open-positions: BTC position_size 0.005 -> 0.01" in captured.err
+        # The JSON payload on stdout is untouched by the hook.
+        payload = json.loads(captured.out)
+        assert payload["mode"] == "live"
+        doc = json.loads(held.read_text())
+        assert doc["watches"][0]["position_size"] == pytest.approx(0.01)
+        assert doc["watches"][0]["entry_price"] == 64000.0
+        assert "position_size 0.005 -> 0.01 (ledger-derived" in doc["watches"][0]["_comment_ledger_sync"]
+
+    def test_env_unset_submit_still_exits_0_and_warns(self, tmp_path, monkeypatch, capsys):
+        db_path, held = self._fixture(tmp_path)
+        monkeypatch.setenv("MARKET_SKILLS_PORTFOLIO_DB", db_path)
+        monkeypatch.delenv("MARKET_SKILLS_OPEN_POSITIONS_PATH", raising=False)
+        responses = self._filled_submit_responses()
+
+        def runner(cmd, *args, **kwargs):
+            return responses.pop(0)
+
+        with patch("subprocess.run", side_effect=runner):
+            rc = self._run_cli(
+                "submit",
+                "--pair",
+                "BTCUSD",
+                "--side",
+                "buy",
+                "--order-type",
+                "market",
+                "--volume",
+                "0.01",
+                "--portfolio",
+                "spot",
+                "--yes",
+                "--json",
+                monkeypatch=monkeypatch,
+            )
+
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "warning: MARKET_SKILLS_OPEN_POSITIONS_PATH not set — open-positions drift not checked after fill" in (
+            captured.err
+        )
+        assert json.loads(captured.out)["mode"] == "live"
+
+    def test_broken_config_path_submit_still_exits_0_and_warns(self, tmp_path, monkeypatch, capsys):
+        db_path, held = self._fixture(tmp_path)
+        monkeypatch.setenv("MARKET_SKILLS_PORTFOLIO_DB", db_path)
+        monkeypatch.setenv("MARKET_SKILLS_OPEN_POSITIONS_PATH", str(tmp_path / "missing.json"))
+        responses = self._filled_submit_responses()
+
+        def runner(cmd, *args, **kwargs):
+            return responses.pop(0)
+
+        with patch("subprocess.run", side_effect=runner):
+            rc = self._run_cli(
+                "submit",
+                "--pair",
+                "BTCUSD",
+                "--side",
+                "buy",
+                "--order-type",
+                "market",
+                "--volume",
+                "0.01",
+                "--portfolio",
+                "spot",
+                "--yes",
+                "--json",
+                monkeypatch=monkeypatch,
+            )
+
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert captured.err.startswith("warning: open-positions sync failed: ")
+        assert json.loads(captured.out)["mode"] == "live"
+
+    def test_perps_run_py_wires_the_hook(self):
+        perps_path = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "skills",
+            "execution-kraken-perps",
+            "scripts",
+            "run.py",
+        )
+        with open(perps_path) as f:
+            src = f.read()
+        assert "from analysis.providers.execution._cli_common import" in src
+        assert "sync_open_positions_after_fill," in src
+        assert "if tx_id is not None:" in src
+        assert "sync_open_positions_after_fill(args.db)" in src

@@ -35,6 +35,7 @@ from analysis.providers.execution._cli_common import (
     _confirm,
     _emit_json,
     _resolve_portfolio_id,
+    sync_open_positions_after_fill,
 )
 from analysis.providers.execution.base import (
     Intent,
@@ -252,6 +253,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
                 )
             except Exception as e:
                 print(f"warning: order placed but portfolio write failed: {e}", file=sys.stderr)
+            if tx_id is not None:
+                sync_open_positions_after_fill(args.db)
 
     if args.json:
         payload: dict = {"mode": "live", "intent": intent, "confirmation": confirmation}

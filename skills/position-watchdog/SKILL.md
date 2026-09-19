@@ -388,6 +388,16 @@ Notes:
 - Exit codes: `0` clean (all live prices returned), `2` partial (one or more fetches failed but lines still print).
 - No new state fields, no new thresholds, no behavioral change to the existing tick path.
 
+## Where the held file comes from
+
+`open-positions.json` is derived from the portfolio ledger — the source of truth — with
+`portfolio-mgmt sync-open-positions` (see that skill's "Ledger -> open-positions sync"
+section). The sync derives only membership, `position_size` and a missing `entry_price`;
+hand-authored `levels` and every other field are preserved byte-identical. The watchdog never
+rewrites levels: it reads the file and alerts only. Assets that went flat are reported as
+watchlist candidates by the sync — re-ground them in the watchlist config instead of deleting
+the watch outright.
+
 ## Cross-reference with market-watchlist
 
 If you maintain a [`market-watchlist`](../market-watchlist/) registry, pass `--watchlist` to cross-check every watch's `monitor_provider` bare ticker against it. Any watch using a monitor ticker that isn't registered in any basket gets a stderr warning — useful for catching stale `watches.json` entries when you rebalance the watchlist.
