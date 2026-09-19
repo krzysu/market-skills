@@ -55,7 +55,7 @@ from typing import Any
 from analysis.contracts import RiskVerdict, RiskVerdictFragment
 from analysis.providers.execution.base import Intent, validate_intent
 
-from ._common import RiskContext, _worst
+from ._common import RiskContext, _worst, resolve_intent_notional, resolve_reference_price
 from .perps import (
     PERPS_POLICIES,
     duplicate_perps_position_policy,
@@ -447,6 +447,8 @@ __all__ = [
     "regime_consistency_policy",
     "portfolio_drawdown_policy",
     "position_size_policy",
+    "resolve_intent_notional",
+    "resolve_reference_price",
     "select_policies",
     "stop_distance_policy",
     "vet",

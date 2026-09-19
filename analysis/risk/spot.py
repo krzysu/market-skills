@@ -17,33 +17,37 @@ from datetime import UTC, datetime, timedelta
 from analysis.contracts import RiskVerdictFragment
 from analysis.providers.execution.base import Intent
 
-from ._common import RiskContext, _empty_fragment
+from ._common import RiskContext, _empty_fragment, resolve_intent_notional
 
 
 def position_size_policy(intent: Intent, ctx: RiskContext) -> RiskVerdictFragment:
     """SCALE / REJECT when intent cost exceeds ``max_position_pct`` of portfolio.
 
-    Approximation: ``cost = intent.volume * intent.limit_price`` for limit
-    orders; market orders use the most-recent close (caller should populate
-    ``ctx`` with a price hint). For ``buy`` intents, the cost is the
-    notional; for ``sell``, we size against the position's current value
-    (proposed exit size as % of held).
+    ``cost = intent.volume * intent.limit_price`` for limit orders; market
+    orders resolve a price through :func:`resolve_intent_notional`
+    (``extras.reference_price`` / ``est_notional`` / ``position_value``, the
+    held position's ``current_price``, then ``ctx.reference_prices``). When
+    nothing resolves the policy emits CONCERN — an unknown fill price is a
+    reason to estimate, never to skip the check. For ``buy`` intents, the
+    cost is the notional; for ``sell``, we size against the position's
+    current value (proposed exit size as % of held).
     """
     if ctx.total_value <= 0:
         return _empty_fragment("position_size")
 
     notional = 0.0
     if intent["side"] == "buy":
-        lp = intent.get("limit_price")
-        if lp is not None:
-            notional = intent["volume"] * lp
-        else:
-            # No price reference — can't size without it.
+        resolved, _source = resolve_intent_notional(intent, ctx)
+        if resolved is None:
             return RiskVerdictFragment(
                 policy="position_size",
                 status="CONCERN",
-                reason="no limit_price on buy intent — cannot size-check",
+                reason=(
+                    f"buy of {intent['volume']} {intent['pair']} has no price reference "
+                    f"— cannot size-check; pass a limit_price or a reference price"
+                ),
             )
+        notional = resolved
     else:  # sell
         # Look up held qty for the asset.
         asset = f"kraken:{intent['pair'].replace('-', '').replace('/', '').upper()}"
@@ -150,8 +154,11 @@ def per_tier_exposure_policy(intent: Intent, ctx: RiskContext) -> RiskVerdictFra
     """SCALE / REJECT when adding to a tier pushes exposure above its cap.
 
     Tier is resolved from ``ctx.watchlist_metadata[bare_ticker].tier`` (falls
-    back to CONCERN if the pair isn't registered). The notional is the same
-    computation as in ``position_size_policy``.
+    back to CONCERN if the pair isn't registered). The notional is resolved
+    the same way as in ``position_size_policy`` — market orders fall back to
+    ``extras`` / held-position / ``ctx.reference_prices`` prices, and a buy
+    with no price reference degrades to CONCERN instead of silently
+    counting as zero exposure.
     """
     if not ctx.tier_limits:
         return _empty_fragment("per_tier_exposure")
@@ -173,12 +180,20 @@ def per_tier_exposure_policy(intent: Intent, ctx: RiskContext) -> RiskVerdictFra
         return _empty_fragment("per_tier_exposure")
 
     current = ctx.tier_exposure.get(str(tier), 0.0)
-    notional = 0.0
-    if intent["side"] == "buy" and intent.get("limit_price") is not None:
-        notional = intent["volume"] * intent["limit_price"]
-    elif intent["side"] == "sell":
+    if intent["side"] == "sell":
         # Selling reduces exposure — no need to check.
         return _empty_fragment("per_tier_exposure")
+    resolved, _source = resolve_intent_notional(intent, ctx)
+    if resolved is None:
+        return RiskVerdictFragment(
+            policy="per_tier_exposure",
+            status="CONCERN",
+            reason=(
+                f"buy of {intent['volume']} {bare} has no price reference — "
+                f"cannot tier-check; pass a limit_price or a reference price"
+            ),
+        )
+    notional = resolved
 
     projected = current + notional
     over_total = max_total is not None and projected > max_total
@@ -216,25 +231,24 @@ def per_tier_exposure_policy(intent: Intent, ctx: RiskContext) -> RiskVerdictFra
                 detail=common_detail,
             )
 
-        lp = intent.get("limit_price")
-        if lp is None or lp <= 0:
-            # Defensive: this branch is currently unreachable for buys that
-            # triggered over_total/over_pct (notional=0 implies current
-            # already exceeded the cap -> REJECT above). Kept as a safety net
-            # for any future notional source that might let a no-price intent
-            # into this branch.
+        volume = intent["volume"]
+        price = notional / volume if isinstance(volume, (int, float)) and volume > 0 else None
+        if price is None or price <= 0:
+            # Defensive: unreachable for validated intents (notional > 0 and
+            # volume > 0 imply a positive price). Kept as a safety net for a
+            # genuinely non-positive price.
             return RiskVerdictFragment(
                 policy="per_tier_exposure",
                 status="CONCERN",
                 reason=(
                     f"tier {tier} projected exposure {projected:.0f} {ctx.base_ccy} "
-                    f"would exceed its cap but intent has no usable limit_price — "
+                    f"would exceed its cap but intent has no usable price — "
                     f"cannot compute a scaling volume"
                 ),
                 detail=common_detail,
             )
 
-        suggested_volume = max(0.0, binding_capacity / lp)
+        suggested_volume = max(0.0, binding_capacity / price)
         return RiskVerdictFragment(
             policy="per_tier_exposure",
             status="SCALE",
@@ -287,6 +301,12 @@ def daily_budget_policy(intent: Intent, ctx: RiskContext) -> RiskVerdictFragment
 def insufficient_funds_policy(intent: Intent, ctx: RiskContext) -> RiskVerdictFragment:
     """REJECT a buy when cash < cost; CONCERN on a sell when held < sell qty.
 
+    The buy cost is resolved via :func:`resolve_intent_notional` — a market
+    order with no ``limit_price`` is costed from ``extras`` price hints, the
+    held position's ``current_price``, or ``ctx.reference_prices``. When no
+    price resolves the policy emits CONCERN naming the missing price; it
+    never silently approves a buy whose cost it cannot compute.
+
     If the portfolio context is unloaded (``ctx.total_value == 0`` and
     ``ctx.cash_available == 0``) we cannot distinguish "zero cash" from
     "no info" — treat as CONCERN rather than REJECT. The LLM narrates
@@ -294,11 +314,19 @@ def insufficient_funds_policy(intent: Intent, ctx: RiskContext) -> RiskVerdictFr
     """
     context_loaded = ctx.total_value > 0 or ctx.cash_available > 0
     if intent["side"] == "buy":
-        cost = 0.0
-        if intent.get("limit_price") is not None:
-            cost = intent["volume"] * intent["limit_price"]
-        else:
-            return _empty_fragment("insufficient_funds")
+        resolved, _source = resolve_intent_notional(intent, ctx)
+        if resolved is None:
+            return RiskVerdictFragment(
+                policy="insufficient_funds",
+                status="CONCERN",
+                reason=(
+                    f"{intent['order_type']} buy of {intent['volume']} {intent['pair']} "
+                    f"has no price reference — cannot verify cash; "
+                    f"pass a limit_price or a reference price"
+                ),
+                detail={"required": None, "available": ctx.cash_available},
+            )
+        cost = resolved
         if cost > ctx.cash_available:
             if not context_loaded:
                 return RiskVerdictFragment(

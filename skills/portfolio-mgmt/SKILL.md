@@ -53,7 +53,7 @@ This ledger records **decisions**, not the venue's balance sheet. Logging is tri
 
 Why the bucket exists at all: without a cash key the ledger has no liquidity figure, and any `insufficient_funds` check has nothing to read. With `kraken:EUR` present the policy is live — verified: a EUR 399.82 intent resolves `APPROVED`, while a EUR 2,023.20 intent resolves `REJECT — insufficient cash: need 2023.20 EUR, have 1000.00`.
 
-> **Caveat — the policy only runs when `limit_price` is set.** `analysis/risk/spot.py::insufficient_funds_policy` returns an empty fragment immediately for an intent with no `limit_price`, so a **market** order never reaches the funds check. Do not read an `APPROVED` on a market order as evidence the bucket works.
+> **Caveat — market orders are costed, not skipped.** `analysis/risk/spot.py::insufficient_funds_policy` no longer requires `limit_price`: a market buy is costed from a resolved reference price (the intent's `extras` hints, the held position's `current_price`, or the price risk-engine injects into `ctx.reference_prices` from `--reference-price`, the price cache, or a live spot fetch), and when no price resolves the price-dependent policies emit a CONCERN naming the missing price rather than silently approving. An `APPROVED` on a market order means a reference price resolved and the funds check actually ran.
 
 **Test before adding a row:** did the user decide to acquire this asset at a known price? If no — it arrived unbidden, the price is unknown, or it is too small to trade — it does not belong here. Leave it out rather than inserting a row priced at `0`.
 
