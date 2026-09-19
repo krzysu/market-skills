@@ -25,11 +25,15 @@ from analysis.risk import (
     RiskContext,
     daily_budget_policy,
     insufficient_funds_policy,
+    liquidation_distance_policy,
     per_pair_cooldown_policy,
     per_tier_exposure_policy,
     portfolio_drawdown_policy,
     position_size_policy,
     regime_consistency_policy,
+    resolve_intent_notional,
+    resolve_reference_price,
+    stop_distance_policy,
     vet,
 )
 
@@ -82,6 +86,179 @@ def _ctx(**overrides) -> RiskContext:
     return base
 
 
+def _pendle_intent(**overrides):
+    """Live shape (2026-09-18): market buy of 177.85682 PENDLEEUR, no limit_price."""
+    base = {
+        "intent_id": "pendle-market-1",
+        "venue": "kraken",
+        "pair": "PENDLEEUR",
+        "side": "buy",
+        "order_type": "market",
+        "volume": 177.85682,
+        "limit_price": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def _pendle_ctx(**overrides) -> RiskContext:
+    """Live shape: EUR 1,000 working-capital bucket (kraken:EUR), nothing held."""
+    base = RiskContext(
+        portfolio_name="spot",
+        base_ccy="EUR",
+        total_value=1000.0,
+        cash_available=1000.0,
+    )
+    for k, v in overrides.items():
+        setattr(base, k, v)
+    return base
+
+
+# ───────────────────────────────────────────────────────────── price resolvers
+
+
+class TestResolveReferencePrice:
+    """Unit tests for analysis.risk._common.resolve_reference_price.
+
+    Every source, the None case, and the resolution order (first usable,
+    strictly positive value wins).
+    """
+
+    def _intent(self, **overrides):
+        base = {
+            "intent_id": "resolve-1",
+            "venue": "kraken",
+            "pair": "PENDLEEUR",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 4.0,
+            "limit_price": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_limit_price_source(self):
+        intent = self._intent(limit_price=60.0)
+        assert resolve_reference_price(intent, RiskContext()) == (60.0, "limit_price")
+
+    def test_extras_reference_price_source(self):
+        intent = self._intent(extras={"reference_price": 11.3755})
+        assert resolve_reference_price(intent, RiskContext()) == (11.3755, "extras.reference_price")
+
+    def test_extras_est_notional_derives_unit_price(self):
+        intent = self._intent(extras={"est_notional": 100.0})
+        assert resolve_reference_price(intent, RiskContext()) == (25.0, "extras.est_notional")
+
+    def test_extras_position_value_derives_unit_price(self):
+        intent = self._intent(extras={"position_value": 100.0})
+        assert resolve_reference_price(intent, RiskContext()) == (25.0, "extras.position_value")
+
+    def test_held_position_current_price_strips_provider_prefix(self):
+        ctx = RiskContext(positions={"kraken:PENDLEEUR": {"qty": 1.0, "current_price": 11.0}})
+        assert resolve_reference_price(self._intent(), ctx) == (11.0, "position.current_price")
+
+    def test_held_position_scan_not_hardcoded_to_kraken(self):
+        # The scan must match any provider prefix (hl:, yf:, ...).
+        ctx = RiskContext(positions={"hl:PENDLEEUR": {"qty": 1.0, "current_price": 12.0}})
+        assert resolve_reference_price(self._intent(), ctx) == (12.0, "position.current_price")
+
+    def test_ctx_reference_prices_source(self):
+        ctx = RiskContext(reference_prices={"PENDLEEUR": 11.4})
+        assert resolve_reference_price(self._intent(), ctx) == (11.4, "ctx.reference_prices")
+
+    def test_none_when_nothing_resolves(self):
+        assert resolve_reference_price(self._intent(), RiskContext()) == (None, "")
+
+    def test_pair_separators_are_stripped_for_matching(self):
+        # ``PENDLE-EUR`` must match position key ``kraken:PENDLEEUR`` and the
+        # ``PENDLEEUR`` reference-prices key.
+        ctx = RiskContext(
+            positions={"kraken:PENDLEEUR": {"qty": 1.0, "current_price": 11.0}},
+            reference_prices={"PENDLEEUR": 11.4},
+        )
+        assert resolve_reference_price(self._intent(pair="PENDLE-EUR"), ctx) == (11.0, "position.current_price")
+
+    def test_non_positive_and_non_numeric_values_are_skipped(self):
+        intent = self._intent(limit_price=0, extras={"reference_price": "11.3755", "est_notional": -5})
+        ctx = RiskContext(
+            positions={"kraken:PENDLEEUR": {"qty": 1.0, "current_price": None}},
+            reference_prices={"PENDLEEUR": True},
+        )
+        assert resolve_reference_price(intent, ctx) == (None, "")
+
+    def test_defensive_when_extras_missing_or_not_a_dict(self):
+        for extras in (None, "nope"):
+            intent = self._intent(extras=extras)
+            assert resolve_reference_price(intent, RiskContext()) == (None, "")
+
+    def test_precedence_limit_price_wins(self):
+        ctx = RiskContext(
+            positions={"kraken:PENDLEEUR": {"qty": 1.0, "current_price": 11.0}},
+            reference_prices={"PENDLEEUR": 11.4},
+        )
+        intent = self._intent(limit_price=60.0, extras={"reference_price": 11.3755})
+        assert resolve_reference_price(intent, ctx) == (60.0, "limit_price")
+
+    def test_precedence_extras_beats_held_position_and_ctx(self):
+        ctx = RiskContext(
+            positions={"kraken:PENDLEEUR": {"qty": 1.0, "current_price": 11.0}},
+            reference_prices={"PENDLEEUR": 11.4},
+        )
+        intent = self._intent(extras={"reference_price": 11.3755})
+        assert resolve_reference_price(intent, ctx) == (11.3755, "extras.reference_price")
+
+    def test_precedence_held_position_beats_ctx_reference_prices(self):
+        ctx = RiskContext(
+            positions={"kraken:PENDLEEUR": {"qty": 1.0, "current_price": 11.0}},
+            reference_prices={"PENDLEEUR": 11.4},
+        )
+        assert resolve_reference_price(self._intent(), ctx) == (11.0, "position.current_price")
+
+    def test_est_notional_skipped_when_volume_unusable(self):
+        # A non-positive volume can't derive a unit price from a notional
+        # source — the source is skipped, not raised on.
+        intent = self._intent(volume=0, extras={"est_notional": 100.0})
+        assert resolve_reference_price(intent, RiskContext()) == (None, "")
+
+
+class TestResolveIntentNotional:
+    """Unit tests for analysis.risk._common.resolve_intent_notional."""
+
+    def _intent(self, **overrides):
+        base = {
+            "intent_id": "resolve-2",
+            "venue": "kraken",
+            "pair": "PENDLEEUR",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 4.0,
+            "limit_price": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_price_source_multiplies_volume(self):
+        intent = self._intent(limit_price=60.0)
+        assert resolve_intent_notional(intent, RiskContext()) == (240.0, "limit_price")
+
+    def test_extras_reference_price_multiplies_volume(self):
+        intent = self._intent(extras={"reference_price": 11.3755})
+        assert resolve_intent_notional(intent, RiskContext()) == (45.502, "extras.reference_price")
+
+    def test_explicit_notional_sources_pass_through(self):
+        intent = self._intent(extras={"est_notional": 100.0})
+        assert resolve_intent_notional(intent, RiskContext()) == (100.0, "extras.est_notional")
+        intent = self._intent(extras={"position_value": 250.0})
+        assert resolve_intent_notional(intent, RiskContext()) == (250.0, "extras.position_value")
+
+    def test_none_when_no_price_resolves(self):
+        assert resolve_intent_notional(self._intent(), RiskContext()) == (None, "")
+
+    def test_none_when_volume_unusable_with_price_source(self):
+        intent = self._intent(volume="4.0", limit_price=60.0)
+        assert resolve_intent_notional(intent, RiskContext()) == (None, "")
+
+
 # ───────────────────────────────────────────────────────────── position_size_policy
 
 
@@ -112,13 +289,39 @@ class TestPositionSizePolicy:
         assert f["status"] == "CONCERN"
 
     def test_no_limit_price_buy_is_concern(self):
-        ctx = _ctx()
+        # Market buy with NO price source anywhere (pair not held, no
+        # extras, empty reference_prices) -> CONCERN, never silent APPROVED.
+        ctx = _ctx(positions={}, reference_prices={})
         intent = _intent(volume=0.5)
         intent["order_type"] = "market"
         intent["limit_price"] = None
         f = position_size_policy(intent, ctx)
         assert f["status"] == "CONCERN"
-        assert "no limit_price" in f["reason"]
+        assert "cannot size-check" in f["reason"]
+        assert "no price reference" in f["reason"]
+
+    def test_market_buy_sizes_from_held_position_price(self):
+        # Held position's current_price supplies the price for a market buy.
+        # 50 * 60 = 3000 USD = 30% of 10k -> SCALE to the 25% cap.
+        ctx = _ctx()
+        intent = _intent(volume=50.0)
+        intent["order_type"] = "market"
+        intent["limit_price"] = None
+        f = position_size_policy(intent, ctx)
+        assert f["status"] == "SCALE"
+        assert f["suggested_volume"] is not None
+        # 2500 / 60 ~= 41.67
+        assert 41.0 < f["suggested_volume"] < 42.0
+
+    def test_market_buy_sizes_from_ctx_reference_prices(self):
+        # ctx.reference_prices supplies the price when the pair isn't held.
+        ctx = _ctx(positions={}, reference_prices={"<PRIVATE_PERP>USD": 60.0})
+        intent = _intent(volume=50.0)
+        intent["order_type"] = "market"
+        intent["limit_price"] = None
+        f = position_size_policy(intent, ctx)
+        assert f["status"] == "SCALE"
+        assert 41.0 < f["suggested_volume"] < 42.0
 
     def test_sell_with_no_position_concern(self):
         ctx = _ctx(positions={})
@@ -227,6 +430,58 @@ class TestPerTierExposurePolicy:
         assert f["status"] == "CONCERN"
         assert "no tier metadata" in f["reason"]
 
+    def test_market_buy_breach_tier_cap_scales(self):
+        # Per-fix fixture: market buy costed from extras.reference_price.
+        # tier_exposure at 5500 with pct cap 60 -> headroom 500; adding
+        # 10 * 60 = 600 pushes projected to 6100 -> over the pct cap.
+        ctx = _ctx(
+            tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
+            tier_exposure={"tier1": 5500.0},
+        )
+        ctx.watchlist_metadata = {"<PRIVATE_PERP>USD": {"tier": "tier1"}}
+        intent = _intent(volume=10.0)
+        intent["order_type"] = "market"
+        intent["limit_price"] = None
+        intent["extras"] = {"reference_price": 60.0}
+        f = per_tier_exposure_policy(intent, ctx)
+        assert f["status"] == "SCALE"
+        assert f["suggested_volume"] is not None
+        # 500 headroom / 60 ~= 8.33
+        assert 8.0 < f["suggested_volume"] < 8.5
+
+    def test_market_buy_breach_tier_cap_rejects_when_no_headroom(self):
+        # Market buy with a resolvable price over an already-breached cap
+        # must REJECT, not silently pass (notional no longer sticks at 0.0).
+        ctx = _ctx(
+            tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
+            tier_exposure={"tier1": 11000.0},
+        )
+        ctx.watchlist_metadata = {"<PRIVATE_PERP>USD": {"tier": "tier1"}}
+        intent = _intent(volume=10.0)
+        intent["order_type"] = "market"
+        intent["limit_price"] = None
+        intent["extras"] = {"reference_price": 60.0}
+        f = per_tier_exposure_policy(intent, ctx)
+        assert f["status"] == "REJECT"
+        assert f.get("suggested_volume") is None
+
+    def test_market_buy_no_price_tier_concern(self):
+        # Market buy, tier registered, but no price source anywhere ->
+        # CONCERN naming the missing price, never a silent APPROVED.
+        ctx = _ctx(
+            tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
+            positions={},
+            reference_prices={},
+        )
+        ctx.watchlist_metadata = {"<PRIVATE_PERP>USD": {"tier": "tier1"}}
+        intent = _intent(volume=10.0)
+        intent["order_type"] = "market"
+        intent["limit_price"] = None
+        f = per_tier_exposure_policy(intent, ctx)
+        assert f["status"] == "CONCERN"
+        assert "cannot tier-check" in f["reason"]
+        assert "no price reference" in f["reason"]
+
     def test_sell_always_approved_for_tier(self):
         # Selling reduces exposure — never over cap.
         ctx = _ctx(tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}})
@@ -309,6 +564,50 @@ class TestInsufficientFundsPolicy:
         ctx = _ctx(positions={})
         f = insufficient_funds_policy(_intent(side="sell", volume=1.0), ctx)
         assert f["status"] == "REJECT"
+
+    def test_market_buy_over_cash_rejects(self):
+        # Per-fix fixture (bead market-skills-czl): the 2026-09-18 live shape.
+        # A market buy of 177.85682 PENDLEEUR at ~11.3755 EUR (~2023.20 EUR)
+        # against a EUR 1,000 bucket used to return silent APPROVED because
+        # the policy short-circuited when limit_price was absent. Now the
+        # notional resolves from extras.reference_price and REJECTs.
+        ctx = _pendle_ctx()
+        intent = _pendle_intent(extras={"reference_price": 11.3755})
+        f = insufficient_funds_policy(intent, ctx)
+        assert f["status"] == "REJECT"
+        # 177.85682 * 11.3755 = 2023.21 EUR
+        assert f["reason"] == "insufficient cash: need 2023.21 EUR, have 1000.00"
+        assert f["detail"] == {"required": 2023.2102559100001, "available": 1000.0}
+
+    def test_market_buy_with_limit_price_within_cash_approved(self):
+        # The live sibling: the same market buy costed at ~EUR 399.82 fits
+        # the EUR 1,000 bucket -> APPROVED. Pins the observed APPROVED half.
+        ctx = _pendle_ctx()
+        intent = _pendle_intent(limit_price=2.24796)
+        f = insufficient_funds_policy(intent, ctx)
+        assert f["status"] == "APPROVED"
+        assert f["reason"] == "no objection"
+
+    def test_market_buy_no_price_concern(self):
+        # Market buy with no price source anywhere -> CONCERN naming the
+        # missing price. Never a silent APPROVED / empty fragment.
+        ctx = _pendle_ctx(positions={}, reference_prices={})
+        intent = _pendle_intent()
+        f = insufficient_funds_policy(intent, ctx)
+        assert f["status"] == "CONCERN"
+        assert "market buy of 177.85682 PENDLEEUR" in f["reason"]
+        assert "no price reference" in f["reason"]
+        assert "cannot verify cash" in f["reason"]
+
+    def test_market_buy_resolves_from_ctx_reference_prices(self):
+        # risk-engine injects the price via ctx.reference_prices for a market
+        # order whose intent carries no extras — same REJECT shape as the
+        # extras path.
+        ctx = _pendle_ctx(reference_prices={"PENDLEEUR": 11.3755})
+        intent = _pendle_intent()
+        f = insufficient_funds_policy(intent, ctx)
+        assert f["status"] == "REJECT"
+        assert f["reason"] == "insufficient cash: need 2023.21 EUR, have 1000.00"
 
 
 # ───────────────────────────────────────────────────────────── per_pair_cooldown_policy
@@ -436,8 +735,13 @@ class TestVetComposition:
         assert v["suggested_volume"] > 16.0
 
     def test_vet_market_order_over_tier_cap_does_not_crash(self):
-        """vet() must yield a verdict (not a crash) even when per_tier would
-        have escalated to SCALE-with-no-volume under the old logic.
+        """vet() must yield a verdict (not a crash) for a market order.
+
+        Since the market-order price fix, per_tier resolves the price from
+        the held position's current_price (60.0) and evaluates normally:
+        5500 + 60 = 5560 is under both caps, so the fragment APPROVES. The
+        stale reason ("per_tier can't compute scaling without price") no
+        longer applies — a market order is costed, not skipped.
         """
         ctx = _ctx(
             tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
@@ -450,9 +754,39 @@ class TestVetComposition:
         v = vet(intent, ctx)
         # No crash, no "None" formatting in the narrative.
         assert "None" not in v["narrative_hint"]
-        # Worst case is CONCERN (per_tier can't compute scaling without price),
-        # never REJECT on missing data alone.
         assert v["status"] in ("CONCERN", "APPROVED")
+
+    def test_vet_market_order_over_tier_cap_scales(self):
+        """End-to-end: a market buy whose projected tier exposure exceeds the
+        cap SCALEs — the held position's current_price supplies the notional.
+        Acceptance: a market buy can no longer silently pass the tier cap.
+        """
+        ctx = _ctx(
+            tier_limits={"tier1": {"max_pct": 60, "max_total": 10000}},
+            tier_exposure={"tier1": 5500.0},
+            watchlist_metadata={"<PRIVATE_PERP>USD": {"tier": "tier1"}},
+        )
+        intent = _intent(volume=10.0)
+        intent["order_type"] = "market"
+        intent["limit_price"] = None
+        v = vet(intent, ctx)
+        assert v["status"] == "SCALE"
+        # Tier headroom 500 / 60 ~= 8.33 is the binding suggestion.
+        assert 8.0 < v["suggested_volume"] < 8.5
+
+    def test_vet_market_order_funds_reject_bubbles(self):
+        """End-to-end: a market buy whose cost exceeds cash REJECTs via
+        insufficient_funds (previously silently approved on missing price).
+        """
+        ctx = _ctx(cash_available=10.0)
+        intent = _intent(volume=1.0)
+        intent["order_type"] = "market"
+        intent["limit_price"] = None
+        v = vet(intent, ctx)
+        assert v["status"] == "REJECT"
+        fragment = next(f for f in v["fragments"] if f["policy"] == "insufficient_funds")
+        assert fragment["status"] == "REJECT"
+        assert "insufficient cash: need 60.00 USD, have 10.00" in fragment["reason"]
 
     # ───────────────────────────────────────────────────────────── risk-engine CLI surface
 
@@ -660,6 +994,61 @@ class TestRegimeConsistencyPolicy:
 # ───────────────────────────────────────────────────────────── end regime_consistency_policy
 
 
+# ───────────────────────────────────────────────────────────── perps market-order audit
+
+
+class TestPerpsMarketOrderNeverSilentApprove:
+    """Perps price audit (see analysis/risk/perps.py module docstring).
+
+    Perps policies are exempt from the spot resolve_reference_price fallback
+    because none of them can silently APPROVE on a missing price. These tests
+    pin that: a perps MARKET intent (no limit_price, no extras.reference_entry)
+    must never yield a silent APPROVED from liquidation_distance or
+    stop_distance.
+    """
+
+    def _perps_market_intent(self, **overrides):
+        base = {
+            "intent_id": "perps-market-1",
+            "venue": "kraken-perps",
+            "pair": "SOLUSD",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 10.0,
+            "leverage": 2,
+            "bracket": {"stop_loss": 90.0, "take_profit": 140.0},
+        }
+        base.update(overrides)
+        return base
+
+    def test_liquidation_distance_concerns_without_reference_entry(self):
+        # Static MM_RATES resolves SOLUSD, bracket + leverage present — the
+        # policy still degrades to CONCERN because reference_entry is missing.
+        f = liquidation_distance_policy(self._perps_market_intent(), RiskContext())
+        assert f["status"] == "CONCERN"
+        assert f["reason"] != "no objection"
+        assert "reference entry" in f["reason"]
+
+    def test_stop_distance_concerns_without_reference_entry(self):
+        f = stop_distance_policy(self._perps_market_intent(), RiskContext())
+        assert f["status"] == "CONCERN"
+        assert f["reason"] != "no objection"
+        assert "reference_entry" in f["reason"]
+
+    def test_liquidation_distance_concerns_without_mm_rate(self):
+        # No instrument spec at all (unmapped pair, no mm override) — CONCERN.
+        intent = self._perps_market_intent(pair="<PRIVATE_PERP>USD")
+        assert liquidation_distance_policy(intent, RiskContext())["status"] == "CONCERN"
+
+    def test_vet_perps_market_intent_is_never_silent_approved(self):
+        """Aggregate: a perps market intent with no price/entry info must
+        produce at least one CONCERN fragment (never overall APPROVED).
+        """
+        v = vet(self._perps_market_intent(), RiskContext())
+        assert v["status"] in ("CONCERN", "REJECT", "SCALE")
+        assert v["concerns"], "expected at least one CONCERN fragment"
+
+
 # ───────────────────────────────────────────────────────────── risk-engine CLI surface
 
 
@@ -720,6 +1109,92 @@ class TestRiskEngineCLI:
         assert "verdict" in payload
         assert "context" in payload
         assert payload["verdict"]["status"] in ("APPROVED", "CONCERN", "SCALE", "REJECT")
+
+    def _seed_eur_portfolio(self, tmp_path, monkeypatch):
+        """EUR 1,000 working-capital portfolio + a held <PRIVATE_PERP> position.
+
+        Returns (db_path, intent_file). The PENDLEEUR market intent carries no
+        limit_price and no extras — the CLI must inject the price itself.
+        """
+        db_path, _pid = _seed_db(tmp_path)
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 60.0},
+        )
+
+        def fail_fetch(_ticker):
+            raise OSError("kraken CLI not installed")
+
+        monkeypatch.setattr("analysis.data.fetch_spot_price", fail_fetch)
+        intent_file = tmp_path / "market_intent.json"
+        intent_file.write_text(
+            json.dumps(
+                {
+                    "intent_id": "cli-market-1",
+                    "venue": "kraken",
+                    "pair": "PENDLEEUR",
+                    "side": "buy",
+                    "order_type": "market",
+                    "volume": 177.85682,
+                    "limit_price": None,
+                }
+            )
+        )
+        return db_path, intent_file
+
+    def test_market_buy_with_reference_price_rejects(self, tmp_path, capsys, monkeypatch):
+        """Per-fix fixture at CLI level: `--reference-price` costs a market
+        order, so the EUR 1,000 bucket REJECTs a ~EUR 2,023 market buy.
+        """
+        db_path, intent_file = self._seed_eur_portfolio(tmp_path, monkeypatch)
+        rc = self._run_cli(
+            "--intent",
+            str(intent_file),
+            "--portfolio",
+            "spot",
+            "--reference-price",
+            "11.3755",
+            "--json",
+            "--no-macro",
+            "--config",
+            "/tmp/does-not-exist-policies.yaml",
+            db_path=db_path,
+            monkeypatch=monkeypatch,
+        )
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        # The flag wins: it lands in ctx.reference_prices keyed by bare pair.
+        assert payload["context"]["reference_prices"] == {"PENDLEEUR": 11.3755}
+        assert payload["verdict"]["status"] == "REJECT"
+        fragment = next(f for f in payload["verdict"]["fragments"] if f["policy"] == "insufficient_funds")
+        assert fragment["status"] == "REJECT"
+        # 177.85682 * 11.3755 = 2023.21 EUR
+        assert fragment["reason"] == "insufficient cash: need 2023.21 EUR, have 1000.00"
+
+    def test_market_buy_without_price_source_yields_concern(self, tmp_path, capsys, monkeypatch):
+        """Same market intent, no price source anywhere -> the funds/size
+        policies emit CONCERN, never a silent APPROVED.
+        """
+        db_path, intent_file = self._seed_eur_portfolio(tmp_path, monkeypatch)
+        rc = self._run_cli(
+            "--intent",
+            str(intent_file),
+            "--portfolio",
+            "spot",
+            "--json",
+            "--no-macro",
+            "--config",
+            "/tmp/does-not-exist-policies.yaml",
+            db_path=db_path,
+            monkeypatch=monkeypatch,
+        )
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["context"]["reference_prices"] == {}
+        assert payload["verdict"]["status"] == "CONCERN"
+        fragment = next(f for f in payload["verdict"]["fragments"] if f["policy"] == "insufficient_funds")
+        assert fragment["status"] == "CONCERN"
+        assert "no price reference" in fragment["reason"]
 
 
 def patch_argv(argv):
@@ -1076,6 +1551,209 @@ class TestBuildContext:
         ctx = lib.build_context(self._args(tmp_path, refresh_prices=True))
         assert refresh_calls == [str(tmp_path / "risk.db")]
         assert ctx.positions["kraken:<PRIVATE_PERP>USD"]["current_price"] == 99.0
+
+    def test_reference_prices_populated_from_price_cache(self, tmp_path, monkeypatch):
+        """build_context injects the INTENT pair's cached price into
+        ctx.reference_prices so a market order without limit_price can be
+        costed. Monkeypatched cache — no network."""
+        _seed_db(tmp_path)
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 60.0, "kraken:PENDLEEUR": 11.3755},
+        )
+        lib = _load_risk_engine_lib()
+        args = self._args(tmp_path, venue="kraken", pair="PENDLEEUR", no_macro=True)
+        ctx = lib.build_context(args)
+        # Keyed by bare pair (uppercase, separators stripped), not the
+        # provider:ticker asset key.
+        assert ctx.reference_prices == {"PENDLEEUR": 11.3755}
+
+    def test_reference_prices_explicit_flag_wins_over_cache(self, tmp_path, monkeypatch):
+        _seed_db(tmp_path)
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 60.0, "kraken:PENDLEEUR": 11.3755},
+        )
+        lib = _load_risk_engine_lib()
+        args = self._args(tmp_path, venue="kraken", pair="PENDLEEUR", reference_price=99.5, no_macro=True)
+        ctx = lib.build_context(args)
+        assert ctx.reference_prices == {"PENDLEEUR": 99.5}
+
+    def test_reference_prices_populated_without_portfolio(self, tmp_path, monkeypatch):
+        """The lookup doesn't depend on portfolio state — it populates even
+        when --portfolio is absent (market order vet without portfolio
+        context still gets priced).
+        """
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:PENDLEEUR": 11.3755},
+        )
+        lib = _load_risk_engine_lib()
+        args = self._args(tmp_path, portfolio=None, venue="kraken", pair="PENDLEEUR", no_macro=True)
+        ctx = lib.build_context(args)
+        assert ctx.reference_prices == {"PENDLEEUR": 11.3755}
+        assert ctx.cash_available == 0.0
+
+    def test_reference_prices_skip_perps_venues(self, tmp_path, monkeypatch):
+        """Perps intents are skipped — perps policies never cost notional
+        from a unit price (see analysis/risk/perps.py module docstring)."""
+        _seed_db(tmp_path)
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:SOLUSD": 150.0},
+        )
+        lib = _load_risk_engine_lib()
+        args = self._args(tmp_path, venue="kraken-perps", pair="SOLUSD", no_macro=True)
+        ctx = lib.build_context(args)
+        assert ctx.reference_prices == {}
+
+    def test_reference_prices_skip_lookup_when_intent_has_limit_price(self, tmp_path, monkeypatch):
+        """Regression: a limit-order intent (the exact case the market-order
+        fix targets) must not trigger the reference-price lookup at all —
+        the resolver reads ``intent.limit_price`` and never reaches
+        ``ctx.reference_prices``. A pair missing from the price cache must
+        not trigger the live-fetch fallback.
+        """
+        _seed_db(tmp_path)
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 60.0},
+        )
+        fetch_calls = []
+
+        def must_not_fetch(_ticker):
+            fetch_calls.append(_ticker)
+            raise OSError("kraken CLI not installed")
+
+        monkeypatch.setattr("analysis.data.fetch_spot_price", must_not_fetch)
+        intent_file = tmp_path / "limit_intent.json"
+        intent_file.write_text(
+            json.dumps(
+                {
+                    "intent_id": "limit-skip-1",
+                    "venue": "kraken",
+                    "pair": "SOLUSD",
+                    "side": "buy",
+                    "order_type": "limit",
+                    "volume": 1.0,
+                    "limit_price": 150.0,
+                }
+            )
+        )
+        lib = _load_risk_engine_lib()
+        args = self._args(tmp_path, venue="kraken", pair="SOLUSD", intent=str(intent_file), no_macro=True)
+        ctx = lib.build_context(args)
+        assert ctx.reference_prices == {}
+        assert fetch_calls == []
+
+    def test_reference_prices_skip_lookup_for_sell_intent(self, tmp_path, monkeypatch):
+        """Regression: a SELL intent (market, no price hints) must not
+        trigger the auto-resolution lookup at all — no price-cache read and
+        no live fetch. No spot policy consults ``ctx.reference_prices`` on
+        the sell path: position_size sizes the exit off limit_price / the
+        held position's current_price, insufficient_funds checks held qty,
+        per_tier_exposure returns early. A pair missing from the cache must
+        not trigger the live-fetch fallback either.
+        """
+        _seed_db(tmp_path)
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 60.0},
+        )
+        fetch_calls = []
+
+        def must_not_fetch(_ticker):
+            fetch_calls.append(_ticker)
+            raise OSError("kraken CLI not installed")
+
+        monkeypatch.setattr("analysis.data.fetch_spot_price", must_not_fetch)
+        intent_file = tmp_path / "sell_intent.json"
+        intent_file.write_text(
+            json.dumps(
+                {
+                    "intent_id": "sell-skip-1",
+                    "venue": "kraken",
+                    "pair": "SOLUSD",
+                    "side": "sell",
+                    "order_type": "market",
+                    "volume": 1.0,
+                }
+            )
+        )
+        lib = _load_risk_engine_lib()
+        args = self._args(tmp_path, venue="kraken", pair="SOLUSD", intent=str(intent_file), no_macro=True)
+        ctx = lib.build_context(args)
+        assert ctx.reference_prices == {}
+        assert fetch_calls == []
+
+    def test_reference_prices_reuse_held_price_dict_single_refresh(self, tmp_path, monkeypatch):
+        """--portfolio path reuses the held-asset price pass: the intent
+        pair's price comes from the ``current_prices`` dict build_context
+        already resolved, and --refresh-prices refreshes exactly once (no
+        second refresh from the reference-price path).
+        """
+        _seed_db(tmp_path)
+        refresh_calls = []
+
+        def fake_refresh(db):
+            refresh_calls.append(db)
+            return {"kraken:<PRIVATE_PERP>USD": 61.0}
+
+        monkeypatch.setattr("portfolio.db.refresh_prices", fake_refresh)
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:<PRIVATE_PERP>USD": 61.0},
+        )
+
+        def must_not_fetch(_ticker):
+            raise AssertionError("live fetch not expected — pair is held and priced")
+
+        monkeypatch.setattr("analysis.data.fetch_spot_price", must_not_fetch)
+        lib = _load_risk_engine_lib()
+        args = self._args(tmp_path, venue="kraken", pair="<PRIVATE_PERP>USD", refresh_prices=True, no_macro=True)
+        ctx = lib.build_context(args)
+        assert refresh_calls == [str(tmp_path / "risk.db")]
+        assert ctx.reference_prices == {"<PRIVATE_PERP>USD": 61.0}
+
+    def test_reference_prices_refresh_on_cash_only_portfolio(self, tmp_path, monkeypatch):
+        """Regression: --refresh-prices with a CASH-ONLY portfolio (the live
+        EUR-bucket shape) must not silently drop the flag for the pair-alone
+        reference-price lookup. The held-asset pass returns ({}, {}) from
+        _get_position_prices before it can refresh when no held assets
+        exist, so the pair-alone lookup honors --refresh-prices itself:
+        exactly one refresh_prices call, and the reference price comes from
+        the refreshed cache — not a stale row and not the live fallback.
+        """
+        from portfolio.db import add_portfolio, add_transaction, init_db
+
+        db_path = str(tmp_path / "cashonly.db")
+        init_db(db_path)
+        pid = add_portfolio(db_path, "spot", base_ccy="EUR")
+        # Cash position only — the held-asset list is empty after the
+        # base-ccy row is excluded.
+        add_transaction(db_path, pid, "2026-06-22T08:00:00+00:00", "BUY", "kraken:EUR", qty=1000.0, price=1.0)
+
+        refresh_calls = []
+
+        def fake_refresh(db):
+            refresh_calls.append(db)
+            return {}
+
+        monkeypatch.setattr("portfolio.db.refresh_prices", fake_refresh)
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:PENDLEEUR": 11.3755},
+        )
+
+        def must_not_fetch(_ticker):
+            raise AssertionError("live fetch not expected — pair comes from the refreshed cache")
+
+        monkeypatch.setattr("analysis.data.fetch_spot_price", must_not_fetch)
+        lib = _load_risk_engine_lib()
+        args = self._args(tmp_path, db=db_path, venue="kraken", pair="PENDLEEUR", refresh_prices=True, no_macro=True)
+        ctx = lib.build_context(args)
+        assert refresh_calls == [db_path]
+        assert ctx.reference_prices == {"PENDLEEUR": 11.3755}
 
     def test_missing_portfolio_exits_2(self, tmp_path, monkeypatch, capsys):
         from portfolio.db import init_db

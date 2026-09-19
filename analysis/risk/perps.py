@@ -8,6 +8,15 @@ All perps policies short-circuit on spot intents via :func:`_is_perps_intent`
 (``analysis.risk.vet``) only routes perps intents through this list, so
 the short-circuit is defence-in-depth — it keeps the policies correct even
 if a future caller passes a perps policy to a spot-only flow.
+
+Market-order price audit (2026-09-18): these policies are EXEMPT from the
+spot ``resolve_reference_price`` fallback because none of them can silently
+APPROVE on a missing price. ``leverage_cap`` reads ``intent.leverage`` (no
+price); ``liquidation_distance`` and ``stop_distance`` require
+``extras.reference_entry`` and degrade to CONCERN without it;
+``duplicate_perps_position`` needs no price; ``funding_drag``'s notional
+only scales the quoted ``drag_quote`` detail — its verdict comes from the
+funding rate. Do not add price resolution to perps policies.
 """
 
 from __future__ import annotations

@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from analysis.risk import RiskContext  # noqa: E402
+from analysis.risk._common import _positive_number  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.dirname(HERE)
@@ -149,6 +150,7 @@ def build_context(args: argparse.Namespace) -> RiskContext:
     _populate_perps_context(ctx, args)
     _populate_macro_context(ctx, args)
     if not args.portfolio:
+        _populate_reference_prices(ctx, args)
         return ctx
     pf = get_portfolio(args.db, args.portfolio)
     if pf is None:
@@ -168,9 +170,18 @@ def build_context(args: argparse.Namespace) -> RiskContext:
     # denominated in base_ccy, so no price lookup is needed.
     cash_asset_key = ctx.base_ccy.upper()
     held_assets = [p["asset"] for p in raw_positions if _strip_prefix(p["asset"]).upper() != cash_asset_key]
-    current_prices, _price_sources = _get_position_prices(
-        args.db, held_assets, refresh=getattr(args, "refresh_prices", False)
-    )
+    refresh_requested = bool(getattr(args, "refresh_prices", False))
+    current_prices, _price_sources = _get_position_prices(args.db, held_assets, refresh=refresh_requested)
+    # _get_position_prices returns ({}, {}) before it can call refresh_prices
+    # when the held-asset list is empty (cash-only portfolio), so the held
+    # pass actually refreshed iff the flag was on AND there was at least one
+    # held asset. The pair-alone reference lookup below refreshes itself only
+    # when that pass could not — at most one refresh_prices call per vet.
+    held_refreshed = refresh_requested and bool(held_assets)
+    # The intent pair's reference price reuses the held-asset price dict
+    # above (no second cache read / live fetch); only a pair absent from it
+    # gets a pair-alone lookup.
+    _populate_reference_prices(ctx, args, held_prices=current_prices, held_refreshed=held_refreshed)
 
     # Second pass: positions enriched with live prices. compute_positions is
     # deterministic over (lots, current_prices) so this is the canonical view.
@@ -356,6 +367,141 @@ def _resolve_intent_meta(args: argparse.Namespace) -> tuple[str, str | None, str
         except (OSError, json.JSONDecodeError):
             return "", None, None
     return str(getattr(args, "venue", None) or ""), None, None
+
+
+def _intent_carries_price_hint(args: argparse.Namespace) -> bool:
+    """True when the intent carries a price hint the resolver reads before
+    ``ctx.reference_prices`` — i.e. the reference-price lookup can be skipped.
+
+    Mirrors the front of the resolution chain in
+    :func:`analysis.risk._common.resolve_reference_price`: ``limit_price``,
+    then ``extras.reference_price``, then ``extras.est_notional`` /
+    ``extras.position_value`` (the notional hints need a usable volume, same
+    as the resolver). Values go through the same strictly-positive numeric
+    rule (``_positive_number``): booleans excluded, non-numeric and
+    non-positive values skipped. Direct-mode args only carry
+    ``limit_price``; intent-file hints are read off ``args.intent`` (the
+    file wins over direct flags, same as ``_build_intent_from_args``).
+    """
+    intent_path = getattr(args, "intent", None)
+    if intent_path:
+        try:
+            with open(intent_path) as f:
+                raw = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            raw = None
+        if isinstance(raw, dict):
+            if _positive_number(raw.get("limit_price")) is not None:
+                return True
+            extras = raw.get("extras")
+            if isinstance(extras, dict) and _positive_number(extras.get("reference_price")) is not None:
+                return True
+            volume = _positive_number(raw.get("volume"))
+            return (
+                volume is not None
+                and isinstance(extras, dict)
+                and any(_positive_number(extras.get(key)) is not None for key in ("est_notional", "position_value"))
+            )
+    return _positive_number(getattr(args, "limit_price", None)) is not None
+
+
+def _populate_reference_prices(
+    ctx: RiskContext,
+    args: argparse.Namespace,
+    held_prices: dict[str, float] | None = None,
+    held_refreshed: bool = False,
+) -> None:
+    """Populate ``ctx.reference_prices`` for the INTENT's pair.
+
+    Spot funds/size/tier policies cost a buy against a price; a market order
+    carries no ``limit_price``, so the risk-engine injects one here:
+    ``ctx.reference_prices[bare_pair]``.
+
+    No lookup at all (no cache read, no live fetch) when the intent already
+    carries a usable ``limit_price`` or ``extras`` price hint — the resolver
+    (:func:`analysis.risk._common.resolve_reference_price`) checks those
+    before ``ctx.reference_prices``, so the injected price would never be
+    read. Skips perps venues too (their policies don't cost notional from a
+    unit price).
+
+    The explicit ``--reference-price`` flag always populates
+    ``ctx.reference_prices`` — it wins over the auto-resolved price below.
+    It does NOT outrank the intent-level ``limit_price`` / ``extras`` hints
+    or a held position's ``current_price``: those take precedence inside the
+    resolver, so the flag is effectively the last fallback for the vet.
+
+    Auto-resolution order:
+
+      1. the held-asset price dict ``build_context`` already resolved
+         (``current_prices``, keyed ``f"{venue or 'kraken'}:{pair}"``) when
+         ``--portfolio`` is set — no second lookup, no second
+         ``refresh_prices`` on ``--refresh-prices``,
+      2. when the pair is absent from that dict, a lookup for the pair
+         alone — with ``refresh=False`` when the held-asset pass actually
+         refreshed (no second ``refresh_prices`` call), or with the
+         ``--refresh-prices`` flag honored when it could not: an empty
+         held-asset list (cash-only portfolio) returns from
+         ``_get_position_prices`` before it can refresh, so this lookup
+         refreshes itself instead of reading a stale cache,
+      3. without ``--portfolio``: the cache-then-one-shot-live lookup with
+         the ``--refresh-prices`` flag honored (no held-asset pass exists).
+
+    Sell intents skip auto-resolution entirely (no cache read, no live
+    fetch): no spot policy consults ``ctx.reference_prices`` on the sell
+    path — ``position_size`` sizes the exit off ``limit_price`` / the held
+    position's ``current_price``, ``insufficient_funds`` checks held qty,
+    ``per_tier_exposure`` returns early. An explicit ``--reference-price``
+    still populates (it performs no lookup).
+
+    Never raises: a resolution failure warns to stderr and the vet proceeds
+    price-less (policies degrade to CONCERN).
+    """
+    venue, pair_from_file, side_from_file = _resolve_intent_meta(args)
+    pair = getattr(args, "pair", None) or pair_from_file
+    if not pair or (venue or "").endswith("-perps"):
+        return
+    asset = pair if ":" in pair else f"{venue or 'kraken'}:{pair}"
+    bare = pair.replace("-", "").replace("/", "").upper()
+
+    explicit = getattr(args, "reference_price", None)
+    if explicit is not None:
+        try:
+            price = float(explicit)
+        except (TypeError, ValueError) as e:
+            print(f"warning: --reference-price {explicit!r} ignored: {e}", file=sys.stderr)
+            return
+        if price <= 0:
+            print(f"warning: --reference-price {explicit!r} ignored: must be > 0", file=sys.stderr)
+            return
+        ctx.reference_prices[bare] = price
+        return
+
+    # File side wins over direct flags (same precedence as the intent file
+    # over direct flags elsewhere); unknown/absent side keeps today's
+    # behaviour — only an unambiguous sell skips.
+    side = side_from_file or getattr(args, "side", None)
+    if isinstance(side, str) and side.strip().lower() == "sell":
+        return
+
+    if _intent_carries_price_hint(args):
+        return
+
+    if held_prices is not None:
+        price = held_prices.get(asset)
+        if price is not None and price > 0:
+            ctx.reference_prices[bare] = float(price)
+            return
+        refresh = bool(getattr(args, "refresh_prices", False)) and not held_refreshed
+    else:
+        refresh = bool(getattr(args, "refresh_prices", False))
+    try:
+        prices, _sources = _get_position_prices(args.db, [asset], refresh=refresh)
+    except Exception as e:  # noqa: BLE001 — reference-price lookup must never abort the vet
+        print(f"warning: reference price lookup failed for {asset}: {type(e).__name__}: {e}", file=sys.stderr)
+        return
+    price = prices.get(asset)
+    if price is not None and price > 0:
+        ctx.reference_prices[bare] = float(price)
 
 
 def _populate_macro_context(ctx: RiskContext, args: argparse.Namespace) -> None:

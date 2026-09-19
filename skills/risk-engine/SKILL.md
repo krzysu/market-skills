@@ -43,6 +43,13 @@ uv run skills/risk-engine/scripts/run.py \
   --pair HYPEUSD --side buy --order-type limit --volume 1.5 --limit-price 60.15 \
   --portfolio spot
 
+# Market order — pass --reference-price so the funds/size/tier checks can
+# cost it (a market intent carries no limit_price; the flag is the last
+# fallback — see "Market orders" below)
+uv run skills/risk-engine/scripts/run.py \
+  --pair PENDLEEUR --side buy --order-type market --volume 177.86 \
+  --reference-price 11.3755 --portfolio spot
+
 # Without portfolio context — policies degrade to "no info" (CONCERN at worst)
 uv run skills/risk-engine/scripts/run.py --intent intent.json
 ```
@@ -85,12 +92,16 @@ The skill builds a `RiskContext` from:
 | `--drawdown-pct` (or 0.0) | portfolio drawdown override |
 | `kraken futures` (`--perps-account`) | open perps positions, current funding rate — only when intent's `venue` ends in `-perps` |
 | Static `MM_RATES` (in `analysis/providers/execution_kraken_perps.py`) | first-tier maintenance margin rate for the intent's pair — only when intent is perps |
-| CLI overrides | `--funding-rate-per-8h`, `--maintenance-margin-rate`, `--open-perps-positions` — win over auto-fetch (testing, custom sourcing) |
+| Price cache / `--reference-price` | `ctx.reference_prices` — bare-pair price for the intent's pair, so a market order (no `limit_price`) can still be costed by funds/size/tier checks |
+| CLI overrides | `--funding-rate-per-8h`, `--maintenance-margin-rate`, `--open-perps-positions`, `--reference-price` — win over auto-fetch (testing, custom sourcing) |
 | Built-in defaults | `max_position_pct=25`, `max_drawdown_pct=20`, `daily_trade_budget=10`, `pair_cooldown_hours=4`, perps thresholds `liq_min_distance_pct=30`, `stop_min_distance_pct=2`, `stop_max_distance_pct=25`, `funding_warn_pct=1.0` |
 
 Without `--portfolio`, policies degrade to "no info" → APPROVED with the
 relevant `CONCERN` fragment (e.g. position_size emits CONCERN if no
-portfolio total_value to size against).
+portfolio total_value to size against). `ctx.reference_prices` is still
+populated for buy intents — the market-order price lookup doesn't depend
+on portfolio state (sell intents skip the lookup: no spot policy costs a
+sell from a reference price).
 
 ### Perps context
 
@@ -123,6 +134,22 @@ cron; risk-engine then reads the cache directly. For cache misses,
 risk-engine falls back to a one-shot live fetch (`fetch_spot_price`) so
 a cold cache doesn't regress a hot one. Pass `--refresh-prices` to force
 a refresh before vetting (rare — usually only for ad-hoc verification).
+
+**Market orders**: a market intent carries no `limit_price`, so the spot
+policies cost it from a resolved reference price instead. Resolution order
+(`analysis/risk/_common.py::resolve_intent_notional`, first
+strictly-positive value wins): the intent's `limit_price` →
+`extras.reference_price` → `extras.est_notional` / `extras.position_value`
+(quote notional ÷ volume) → the held position's `current_price` →
+`ctx.reference_prices[bare_pair]`. That last entry is what risk-engine
+injects — from `--reference-price`, the price cache, or a one-shot live
+spot fetch — so `--reference-price` supplies the LAST fallback and is
+ignored whenever the intent itself carries a price hint or the pair is
+already held. When no price can be resolved, `insufficient_funds` /
+`position_size` / `per_tier_exposure` emit a CONCERN naming the missing
+price — a market buy is never silently approved just because its cost is
+unknown. Perps intents skip this lookup (perps policies degrade to
+CONCERN on their own missing inputs).
 
 ## Configuration
 

@@ -83,6 +83,16 @@ def main() -> int:
     p.add_argument("--order-type", help="Order type (direct mode)")
     p.add_argument("--volume", type=float, help="Base-asset volume (direct mode)")
     p.add_argument("--limit-price", type=float, help="Limit/trigger price (direct mode)")
+    p.add_argument(
+        "--reference-price",
+        type=float,
+        help=(
+            "Reference price (quote-ccy per base asset) used to cost a market "
+            "order that has no limit_price — the funds/size/tier checks cannot "
+            "run without one. Wins over the portfolio price cache; ignored for "
+            "perps intents."
+        ),
+    )
     p.add_argument("--stop-price", type=float, help="Stop price (direct mode)")
     p.add_argument("--intent-id", help="Idempotency key (direct mode)")
 
@@ -227,6 +237,7 @@ def _ctx_to_dict(ctx) -> dict:
         "positions": {
             k: {"qty": v.get("qty"), "market_value": v.get("market_value")} for k, v in ctx.positions.items()
         },
+        "reference_prices": dict(ctx.reference_prices),
         "perps": {
             "open_positions": ctx.open_perps_positions,
             "funding_rate_per_8h": ctx.funding_rate_per_8h,
