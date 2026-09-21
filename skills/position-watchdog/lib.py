@@ -31,11 +31,41 @@ Event dict shapes (see ``formatter.py`` for the text rendering layer):
                 "label", "emoji", "triggered_at"}
   invalidation:{"type": "invalidation", "level_id", "current_price", "below_price", "triggered_at"}
   signal:      {"type": "signal", "strategy", "direction", "conviction", "entry_price",
-                "entry_range", "stop_loss", "take_profit", "reasoning", "source_skills",
-                "entry_type", "triggered_at"}
+                 "entry_range", "stop_loss", "take_profit", "reasoning", "source_skills",
+                 "entry_type", "triggered_at"}
+  venue_stop_fill: {"type": "venue_stop_fill", "level_id", "name", "order_id", "order_type",
+                 "side", "pair", "fill_quote", "fill_price", "filled_volume", "order_volume",
+                 "position_size", "entry_price", "cost", "fee", "realised_pnl",
+                 "partial", "closed_position", "closed_at", "triggered_at"}
+
+Per-watch state keys added by the venue-stop detector:
+
+  venue_stop_fills — {order_id: {...seen summary...}} dedupe ledger across ticks
+  position_closed  — closure record dict (order_id, closed_at, fill_price,
+                     filled_volume, reported_at), or absent/None while the
+                     position is still open
 """
 
 import datetime as _dt
+
+# Single source of truth for Kraken's legacy asset codes (XXBT -> BTC, ...):
+# the execution adapter owns the table and the watchdog process already loads
+# that module for the venue read (see run.py's `_read_venue_closed_orders`).
+from analysis.providers.execution.kraken_spot import _KRAKEN_ASSET_MAP as _KRAKEN_ASSET_MAP
+
+VENUE_STOP_ORDER_TYPES = frozenset({"stop-loss", "stop-loss-limit", "trailing-stop", "trailing-stop-limit"})
+"""Venue order types that are a resting stop/trailing stop — the exit family."""
+
+POSITION_CLOSED_REL_TOL = 0.01
+"""Relative tolerance for "the fill covers the whole position" (1%).
+
+The executed quantity is the venue's number and ``position_size`` is the
+ledger-derived number; venue/ledger rounding and a fee taken in the base asset
+make a full exit fill slightly smaller than the held size. Anything below 99%
+of the held size is a partial exit and must NOT stop monitoring."""
+
+_LEGACY_CODES = {"XBT": "BTC", "XDG": "DOGE"}
+_QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "EUR", "GBP", "JPY")
 
 
 def _now_iso(now: _dt.datetime | None = None) -> str:
@@ -298,6 +328,212 @@ def evaluate_signals(
     return events, new_state
 
 
+def _canonical_base(code: str) -> str:
+    """Map Kraken legacy asset codes onto the canonical codes this repo keys on."""
+    code = _KRAKEN_ASSET_MAP.get(code, code)
+    return _LEGACY_CODES.get(code, code)
+
+
+def _split_pair(pair: str) -> tuple[str, str]:
+    """Split a pair token into ``(base, quote)``, both normalised.
+
+    Handles a ``provider:`` prefix, ``-`` / ``/`` separators, the legacy Kraken
+    forms this repo uses as canonical pair keys (``XXBTZUSD``, ``XETHZEUR`` —
+    ``Z``-infixed quote, ``X``-prefixed base) and the plain legacy codes
+    (``XBTUSD``). The quote is ``""`` when no known quote suffix is present.
+    """
+    token = pair.strip().upper()
+    token = token.split(":", 1)[1] if ":" in token else token
+    token = token.replace("-", "").replace("/", "")
+    for q in _QUOTE_SUFFIXES:
+        if token.endswith("Z" + q) and len(token) > len(q) + 1:
+            return _canonical_base(token[: -(len(q) + 1)]), q
+        if token.endswith(q) and len(token) > len(q):
+            return _canonical_base(token[: -len(q)]), q
+    return _canonical_base(token), ""
+
+
+def _pair_quote(pair: str) -> str:
+    """Canonical quote currency of a pair token (``""`` when none recognised)."""
+    return _split_pair(pair)[1]
+
+
+def venue_pair_matches(provider_ticker: str, venue_pair: str) -> bool:
+    """True when a watch's ``monitor_provider`` and a venue pair name the same asset.
+
+    Compares the *base* asset: strip the ``provider:`` prefix, uppercase, drop
+    ``-`` / ``/``, drop a trailing quote suffix (USDT/USDC/USD/EUR/GBP/JPY),
+    including the legacy Kraken ``Z``-infixed quote forms (``XXBTZUSD``,
+    ``XETHZEUR``), and map legacy asset codes through the provider's own
+    ``_KRAKEN_ASSET_MAP`` (``XXBT`` -> ``BTC``) plus ``XBT`` -> ``BTC`` /
+    ``XDG`` -> ``DOGE``. The quote is ignored on purpose: a held file may
+    monitor ``kraken:<TICKER>USD`` while the venue filled the ``<TICKER>EUR``
+    pair, and the ledger keys and monitor providers are matched
+    quote-insensitively elsewhere in this repo.
+    """
+
+    def _base_asset(token: str) -> str:
+        return _split_pair(token)[0]
+
+    if not provider_ticker or not venue_pair:
+        return False
+    watch_base = _base_asset(provider_ticker)
+    venue_base = _base_asset(venue_pair)
+    if not watch_base or not venue_base:
+        return False
+    return watch_base == venue_base
+
+
+def evaluate_venue_stop_fills(
+    watch: dict,
+    closed_orders: list[dict],
+    prev_state: dict | None,
+    now: _dt.datetime | None = None,
+) -> tuple[list[dict], dict]:
+    """Detect venue-side stop fills for one watch from the venue's closed orders.
+
+    Returns ``(events, new_state)``. Events (one per newly-seen fill):
+
+      {"type": "venue_stop_fill", "level_id": "venue_stop_fill:<order_id>",
+       "name", "order_id", "order_type", "side", "pair", "fill_quote",
+       "fill_price": float|None, "filled_volume": float, "order_volume": float,
+       "position_size": float|None, "entry_price": float|None,
+       "cost": float|None, "fee": float, "realised_pnl": float|None,
+       "partial": bool, "closed_position": bool,
+       "closed_at": float|None, "triggered_at": iso-8601}
+
+    ``realised_pnl`` is ``(fill_price − entry_price) × filled_volume − fee``
+    and is computed ONLY when the fill's quote equals the monitor's quote —
+    ``entry_price`` is denominated in the monitor quote, and the pair match is
+    quote-insensitive (a ``kraken:<TICKER>USD`` monitor can be filled on the
+    ``<TICKER>EUR`` pair), so a cross-quote fill reports ``None`` instead of a
+    fabricated figure. ``fill_quote`` carries the fill's quote so renderers
+    can show the price in its own quote rather than the monitor's symbol.
+
+    ``new_state`` keys (both always present so the caller's merge is explicit):
+      ``venue_stop_fills`` — {order_id: {...seen summary...}} dedup ledger,
+      ``position_closed`` — the closure record dict, or nothing/None when the
+      position is still open.
+
+    An order is a candidate only when it is a venue-side stop-family SELL with
+    executed volume on the watch's base asset (see ``venue_pair_matches``).
+    Manual ``market`` / ``limit`` sells are deliberately not reported.
+
+    Events are emitted even when the caller's state is stale (>24h). Staleness
+    exists to stop *level* alerts re-firing; a venue fill is reported once ever
+    (exact ``order_id`` dedupe), so suppressing it would silently lose the
+    report.
+
+    Once a closure is recorded (``position_closed`` set in ``prev_state``), the
+    function returns no events and carries both state keys forward unchanged —
+    no re-detection, no repeat alerts.
+    """
+    state = prev_state or {}
+    seen: dict = dict(state.get("venue_stop_fills") or {})
+
+    prior_closed = state.get("position_closed")
+    if prior_closed:
+        return [], {"venue_stop_fills": seen, "position_closed": prior_closed}
+
+    name = watch.get("name", "?")
+    monitor = watch.get("monitor_provider", "")
+    monitor_quote = _pair_quote(monitor)
+    position_size = watch.get("position_size")
+    entry_price = watch.get("entry_price")
+
+    ts = _now_iso(now)
+    events: list[dict] = []
+    closed_record: dict | None = None
+
+    for order in closed_orders or []:
+        order_id = order.get("order_id")
+        if not order_id:
+            continue
+        side = (order.get("side") or "").strip().lower()
+        order_type = (order.get("order_type") or "").strip().lower()
+        filled_volume = float(order.get("filled_volume") or 0)
+        if side != "sell":
+            continue
+        if order_type not in VENUE_STOP_ORDER_TYPES:
+            continue
+        if filled_volume <= 0:
+            continue
+        if not venue_pair_matches(monitor, order.get("pair") or ""):
+            continue
+        if order_id in seen:
+            continue
+
+        fill_price = order.get("fill_price")
+        fill_price = float(fill_price) if fill_price is not None else None
+        fill_quote = _pair_quote(order.get("pair") or "")
+        order_volume = float(order.get("volume") or 0)
+        cost = order.get("cost")
+        cost = float(cost) if cost is not None else None
+        fee = float(order.get("fee") or 0)
+
+        # P&L only when the fill's quote IS the monitor quote: entry_price is
+        # denominated in the monitor quote and the pair match is
+        # quote-insensitive, so subtracting across quotes would fabricate a
+        # figure. A cross-quote fill reports realised_pnl=None.
+        if fill_price is not None and entry_price is not None and monitor_quote and fill_quote == monitor_quote:
+            realised_pnl: float | None = round((fill_price - float(entry_price)) * filled_volume - fee, 2)
+        else:
+            realised_pnl = None
+
+        if order_volume > 0:
+            partial = filled_volume < order_volume * (1 - POSITION_CLOSED_REL_TOL)
+        else:
+            partial = True
+
+        closed_position = position_size is not None and filled_volume >= float(position_size) * (
+            1 - POSITION_CLOSED_REL_TOL
+        )
+
+        events.append(
+            {
+                "type": "venue_stop_fill",
+                "level_id": f"venue_stop_fill:{order_id}",
+                "name": name,
+                "order_id": order_id,
+                "order_type": order_type,
+                "side": side,
+                "pair": order.get("pair") or "",
+                "fill_quote": fill_quote,
+                "fill_price": fill_price,
+                "filled_volume": filled_volume,
+                "order_volume": order_volume,
+                "position_size": position_size,
+                "entry_price": float(entry_price) if entry_price is not None else None,
+                "cost": cost,
+                "fee": fee,
+                "realised_pnl": realised_pnl,
+                "partial": partial,
+                "closed_position": closed_position,
+                "closed_at": order.get("closed_at"),
+                "triggered_at": ts,
+            }
+        )
+        seen[order_id] = {
+            "reported_at": ts,
+            "fill_price": fill_price,
+            "filled_volume": filled_volume,
+            "order_type": order_type,
+            "closed_position": closed_position,
+        }
+
+        if closed_position and closed_record is None:
+            closed_record = {
+                "order_id": order_id,
+                "closed_at": order.get("closed_at"),
+                "fill_price": fill_price,
+                "filled_volume": filled_volume,
+                "reported_at": ts,
+            }
+
+    new_state = {"venue_stop_fills": seen, "position_closed": closed_record}
+    return events, new_state
+
+
 def _level_id(level: dict) -> str:
     """Stable identifier for a level so we can dedupe alerts across ticks."""
     level_type = level.get("type", "?")
@@ -334,7 +570,8 @@ def _status_summary(
       name, current_price, entry_price, prev_price, above_entry_streak,
       alerted_levels, active_zone (dict|None), next_zone_below (dict|None),
       invalidation_floor (float|None), next_tp_unfired (dict|None),
-      fired_drops (list[dict]), position_size, pct_from_entry.
+      fired_drops (list[dict]), position_size, pct_from_entry,
+      position_closed (dict|None — read from state, None when unset).
     """
     levels = config.get("levels", []) or []
     entry = config.get("entry_price")
@@ -431,4 +668,5 @@ def _status_summary(
         "fired_drops": fired_drops,
         "position_size": size,
         "pct_from_entry": pct_from_entry,
+        "position_closed": state.get("position_closed"),
     }

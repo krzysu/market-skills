@@ -14,6 +14,14 @@ The ``format_event`` entry point dispatches to the style selected by
 ``ctx["format_style"]`` and returns ``None`` for unrenderable events so
 the wrapper can filter them out.
 
+Event types covered: the price/level transitions emitted by
+``lib.evaluate_levels`` / ``lib.evaluate_signals`` (stop, tp, drop,
+recovery, zone, invalidation, signal) plus the venue-side stop fill
+report from ``lib.evaluate_venue_stop_fills`` (``venue_stop_fill`` — a
+closed-position report naming the fill price, quantity and realised
+P&L; the ``venue_stop_fill`` event carries no live price, the fill
+price IS the price).
+
 ctx shape (built by run.py from the watch + tick state):
 
   {
@@ -30,6 +38,13 @@ All prices in every event dict (``current_price``, ``stop_price``,
 ``stop_loss``, ``take_profit``, ``entry_range``) are in the monitor's
 quote — they came from candles fetched via ``monitor_provider``. The
 formatter renders them with the symbol for ``primary_quote``.
+
+The one exception is the ``venue_stop_fill`` event: the pair match is
+quote-insensitive, so ``fill_price`` may be in the fill's own quote
+(carried on the event as ``fill_quote``). A cross-quote fill is rendered
+as ``<price> <QUOTE>`` — never with the monitor's currency symbol — and
+its ``realised_pnl`` is ``None`` (an honest "unavailable", since
+``entry_price`` is in the monitor quote).
 
 The library renders a single-currency alert — see SKILL.md
 "Single-currency alert rendering" for the rationale.
@@ -245,6 +260,119 @@ def format_as_default_signal(event: dict, ctx: dict) -> str:
     return "\n".join(lines)
 
 
+def _fill_quote(event: dict) -> str:
+    """Quote currency of the venue fill, from the event (``""`` when unknown)."""
+    return str(event.get("fill_quote") or "").strip().upper()
+
+
+def _fill_uses_monitor_quote(event: dict, ctx: dict) -> bool:
+    """True when the fill price is in the monitor's quote (or its quote is unknown).
+
+    ``venue_pair_matches`` is quote-insensitive, so a ``kraken:<TICKER>USD``
+    monitor can be filled on the ``<TICKER>EUR`` pair. Rendering that fill
+    price with the monitor's currency symbol would present a foreign-quote
+    figure as a monitor figure.
+    """
+    fq = _fill_quote(event)
+    return not fq or fq == str(ctx.get("primary_quote") or "").strip().upper()
+
+
+def _fmt_fill_price(event: dict, ctx: dict) -> str:
+    """Render the venue fill price: monitor symbol when the quotes match, else
+    ``<price> <QUOTE>`` in the fill's own quote — never the monitor symbol."""
+    fill = event.get("fill_price")
+    if fill is None:
+        return "price n/a"
+    if _fill_uses_monitor_quote(event, ctx):
+        return _fmt_price(fill, ctx)
+    return f"{fill:.2f} {_fill_quote(event)}"
+
+
+def _fmt_fill_segment(event: dict, ctx: dict) -> str:
+    """``sold <qty> [<pair>] @ <price>`` segment for a venue stop fill.
+
+    Cross-quote fills name the pair and render the price in the fill's own
+    quote; same-quote fills keep the original ``sold <qty> @ $<price>`` shape.
+    """
+    qty = event.get("filled_volume")
+    price = _fmt_fill_price(event, ctx)
+    if _fill_uses_monitor_quote(event, ctx):
+        return f"sold {qty} @ {price}"
+    return f"sold {qty} {event.get('pair') or '?'} @ {price}"
+
+
+def _fmt_realised_pnl(event: dict, ctx: dict) -> str:
+    """Rendered realised P&L for the compact one-liner — an honest
+    "unavailable" whenever the figure cannot be computed."""
+    pnl = event.get("realised_pnl")
+    if pnl is not None:
+        return f"{pnl:+.2f}"
+    if event.get("entry_price") is None:
+        return "cost basis unknown"
+    if not _fill_uses_monitor_quote(event, ctx):
+        return f"n/a ({_fill_quote(event)} fill vs {ctx.get('primary_quote')} monitor)"
+    return "n/a"
+
+
+def _format_venue_stop_fill(event: dict, ctx: dict) -> str:
+    """Compact one-liner for a venue-side stop fill."""
+    name = _ctx_name(ctx)
+    closure = "POSITION CLOSED" if event.get("closed_position") else "partial exit"
+    segment = _fmt_fill_segment(event, ctx)
+    return f"🔴 VENUE STOP FILL ({closure}) — {name}: {segment}. P&L {_fmt_realised_pnl(event, ctx)}."
+
+
+def format_as_default_venue_stop_fill(event: dict, ctx: dict) -> str:
+    """Default-style closed-position report for a venue-side stop fill.
+
+    A venue-executed resting stop never passes through the execution skill, so
+    this is the only notification the exit gets. ``realised_pnl is None`` means
+    the figure is not computable and is never fabricated: either the watch has
+    no ``entry_price`` (cost basis unknown) or the fill is in a different quote
+    than the monitor's (the pair match is quote-insensitive) — the cross-quote
+    fill is rendered in its own quote, not with the monitor's currency symbol.
+
+    The headline is conditional on ``closed_position``: a partial fill keeps
+    the position monitored, so the render must never claim the position is
+    closed when ``closed_position`` is false.
+    """
+    name = _ctx_name(ctx)
+    fee = event.get("fee")
+
+    headline = (
+        f"🔴 POSITION CLOSED BY VENUE STOP — {name}."
+        if event.get("closed_position")
+        else f"🔴 VENUE STOP FILL (partial exit) — {name}."
+    )
+    lines: list[str] = [
+        headline,
+        f"  Venue-side fill (no execution-skill call): {_fmt_fill_segment(event, ctx)}.",
+    ]
+
+    pnl = event.get("realised_pnl")
+    if pnl is not None:
+        lines.append(f"  Realised P&L {pnl:+.2f} (fees {fee:.2f} included).")
+    elif event.get("entry_price") is None:
+        lines.append("  Realised P&L: cost basis unknown (no entry_price on the watch).")
+    elif not _fill_uses_monitor_quote(event, ctx):
+        lines.append(
+            f"  Realised P&L: not computed — the fill is in {_fill_quote(event)}, the watch's "
+            f"entry_price is in {ctx.get('primary_quote')}; no cross-quote figure is fabricated."
+        )
+    else:
+        lines.append("  Realised P&L: unavailable for this fill (no fill price on the venue record).")
+
+    if event.get("closed_position"):
+        lines.append(
+            "  Position closed and no longer monitored. The exit is NOT in the "
+            "ledger yet — record it with `portfolio-mgmt add --side sell` so "
+            "sync-open-positions prunes the held entry."
+        )
+    else:
+        lines.append("  Partial exit — position still open; monitoring continues.")
+    return "\n".join(lines)
+
+
 def format_as_verbose_signal(event: dict, ctx: dict) -> str:
     """Verbose = default + reasoning + source_skills line."""
     base = format_as_default_signal(event, ctx)
@@ -283,6 +411,7 @@ _COMPACT_FORMATTERS = {
     "zone": _format_zone,
     "invalidation": _format_invalidation,
     "signal": _format_signal,
+    "venue_stop_fill": _format_venue_stop_fill,
 }
 
 
@@ -294,6 +423,7 @@ _DEFAULT_FORMATTERS = {
     "zone": format_as_default_zone,
     "invalidation": format_as_default_invalidation,
     "signal": format_as_default_signal,
+    "venue_stop_fill": format_as_default_venue_stop_fill,
 }
 
 
@@ -419,8 +549,11 @@ def format_as_default_status(event: dict, ctx: dict) -> str:
     streak = int(event.get("above_entry_streak", 0) or 0)
     streak_suffix = f"; above entry streak={streak}" if streak > 0 else ""
 
+    closed = event.get("position_closed")
+    closed_suffix = "; position closed venue-side, not monitored" if closed else ""
+
     if middle and tail:
-        return f"[{name}] @ {live} | {middle} | {tail}{streak_suffix}"
+        return f"[{name}] @ {live} | {middle} | {tail}{streak_suffix}{closed_suffix}"
     if middle:
-        return f"[{name}] @ {live} | {middle}{streak_suffix}"
-    return f"[{name}] @ {live}{streak_suffix}"
+        return f"[{name}] @ {live} | {middle}{streak_suffix}{closed_suffix}"
+    return f"[{name}] @ {live}{streak_suffix}{closed_suffix}"

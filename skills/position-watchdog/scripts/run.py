@@ -9,6 +9,14 @@ The pure evaluator (``lib.py``) emits structured event dicts; this
 orchestrator (``run.py``) is responsible for fetching prices, building
 the formatter context, invoking the formatter, and printing the result.
 
+With ``--venue-stops`` the tick also reads the venue's closed-order
+history (read-only) and reports venue-side stop fills — a resting stop
+the venue executed never passes through the execution skill, so this is
+the only notification the exit gets. A detected closure sets a
+``position_closed`` marker in per-watch state: that watch's
+levels/signals are no longer evaluated. ``--status`` stays read-only
+and never reads the venue.
+
 Exit codes:
   0 — normal tick (silent or alerts printed); also when every enabled watch had a
       single-tick fetch blip (all-fetches-failed but the rolling 5-tick window
@@ -368,6 +376,35 @@ def _current_price(provider_ticker: str, *, interval: str = "4h", period: str = 
     return float(last_close)
 
 
+def _read_venue_closed_orders() -> list[dict]:
+    """Read the venue's closed-order history (read-only, one call per tick).
+
+    Resolves the kraken execution provider and returns its normalised closed
+    orders. Raises on failure (missing CLI, no credentials, bad response) — the
+    caller warns and skips venue detection for that tick only.
+    """
+    # The watchdog process never imports the execution skill, so the kraken
+    # adapter must be imported here for its registration side effect — without
+    # it the registry is empty and get_execution_provider("kraken") raises
+    # ValueError on every tick. Same idiom as the execution skill's own
+    # provider import (skills/execution-kraken-spot/scripts/run.py).
+    from analysis.providers.execution import kraken_spot as _kraken_spot  # noqa: F401 — side-effect: registers provider
+    from analysis.providers.execution.base import get_execution_provider
+
+    return get_execution_provider("kraken").get_closed_orders()
+
+
+def _venue_stops_wanted(watches: list[dict], watch_filter: str | None) -> bool:
+    """True when at least one watch to be processed is venue-eligible (kraken, not `venue_stops: false`)."""
+    return any(
+        w.get("enabled")
+        and (not watch_filter or w.get("name") == watch_filter)
+        and (w.get("monitor_provider") or "").startswith("kraken:")
+        and w.get("venue_stops") is not False
+        for w in watches
+    )
+
+
 def _run_strategies(
     strategies: list[str],
     provider_ticker: str,
@@ -495,6 +532,8 @@ def _validate_watch(watch: dict) -> list[str]:
     fmt_style = watch.get("format_style")
     if fmt_style is not None and fmt_style not in FORMATTERS:
         errors.append(f"unknown format_style '{fmt_style}' (valid: {', '.join(sorted(FORMATTERS))})")
+    if "venue_stops" in watch and not isinstance(watch.get("venue_stops"), bool):
+        errors.append(f"venue_stops must be a boolean (got {watch.get('venue_stops')!r})")
     return errors
 
 
@@ -527,7 +566,9 @@ def _render_status_mode(watches: list[dict], args) -> int:
 
     Read-only: makes one live-price fetch per watch (via the existing
     ``_current_price`` retry/error path), reads the existing state file
-    (treating stale >24h state as empty), and prints the rendered lines.
+    (treating stale >24h state as empty except the ``position_closed``
+    closure marker, which is read from the raw state so a closed watch
+    keeps rendering closed), and prints the rendered lines.
     Does not advance ``alerted_levels``, ``above_entry_streak``, or
     ``prev_price`` — and does not update ``fetch_failures_window``.
 
@@ -566,6 +607,12 @@ def _render_status_mode(watches: list[dict], args) -> int:
 
         raw_state = _load_state(name) or {}
         state = {} if _state_is_stale(raw_state) else raw_state
+        # The closure marker comes from the RAW state regardless of staleness —
+        # a closed watch must keep rendering closed even when the rest of the
+        # state (streaks, alerted levels) is >24h old and treated as empty.
+        closed_marker = raw_state.get("position_closed")
+        if closed_marker and state.get("position_closed") is None:
+            state = {**state, "position_closed": closed_marker}
 
         if price is not None:
             ctx = _build_ctx(watch, price, monitor, args.config)
@@ -615,6 +662,7 @@ def _process_watch(
     config_path: str | None = None,
     *,
     regime_data: dict | None = None,
+    venue_closed_orders: list[dict] | None = None,
 ) -> tuple[list[str], dict | None]:
     """Process a single watch. Returns (alerts, new_state or None on fetch failure).
 
@@ -628,6 +676,13 @@ def _process_watch(
     renders in both quotes. Static levels (stop, TP, invalidation, entry)
     render in the monitor's quote only — they are stored there and the skill
     never synthesizes an execution-quote level from a live ratio.
+
+    ``venue_closed_orders``: ``None`` = no venue data this tick (``--venue-stops``
+    off, or the venue read failed) — venue detection is skipped. ``[]`` = the
+    read succeeded and nothing is closed. When a venue stop fill closes the
+    position, the levels/signals blocks are skipped for this tick (a closed
+    position is not level-evaluated) and the ``position_closed`` marker sticks
+    across subsequent ticks.
     """
     name = watch["name"]
     monitor = watch["monitor_provider"]
@@ -669,7 +724,46 @@ def _process_watch(
 
     events: list[dict] = []
 
-    if watch.get("levels"):
+    # Venue keys are read from the RAW prev_state regardless of level-state
+    # staleness: the order-id dedupe ledger and the sticky closure marker must
+    # survive a >24h gap. Staleness exists to silence level/signal alerts — it
+    # must not re-report an already-reported fill or unfreeze a closed watch.
+    raw_state = prev_state or {}
+    venue_stop_fills_state = raw_state.get("venue_stop_fills", {})
+    position_closed_state = raw_state.get("position_closed")
+
+    if position_closed_state:
+        # Position already closed venue-side: no venue re-detection and no
+        # level/signal evaluation of a phantom position. Carry the closure
+        # forward so it sticks across ticks.
+        new_state = {
+            "name": name,
+            "levels": levels_state,
+            "signals": signals_state,
+            "venue_stop_fills": venue_stop_fills_state,
+            "position_closed": position_closed_state,
+        }
+        if dry_run:
+            print(f"[DRY-RUN] [{name}] @ {monitor} price={price} position closed venue-side, skipping evaluation")
+            return [], None
+        return [], new_state
+
+    if venue_closed_orders is not None and monitor.startswith("kraken:") and watch.get("venue_stops") is not False:
+        venue_state = {
+            "venue_stop_fills": venue_stop_fills_state,
+            "position_closed": position_closed_state,
+        }
+        venue_events, new_venue_state = _pw_lib.evaluate_venue_stop_fills(
+            watch, venue_closed_orders, venue_state, now=now
+        )
+        if venue_events:
+            events.extend(venue_events)
+        venue_stop_fills_state = new_venue_state.get("venue_stop_fills", venue_stop_fills_state)
+        position_closed_state = new_venue_state.get("position_closed") or position_closed_state
+
+    closure_this_tick = any(ev.get("closed_position") for ev in events)
+
+    if watch.get("levels") and not closure_this_tick:
         level_events, new_levels_state = evaluate_levels(
             watch,
             price,
@@ -688,7 +782,7 @@ def _process_watch(
         events.extend(level_events)
         levels_state = new_levels_state
 
-    if watch.get("signals"):
+    if watch.get("signals") and not closure_this_tick:
         strategies = []
         for sg in watch["signals"]:
             strategies.extend(sg.get("strategies", []))
@@ -711,6 +805,8 @@ def _process_watch(
         "name": name,
         "levels": levels_state,
         "signals": signals_state,
+        "venue_stop_fills": venue_stop_fills_state,
+        "position_closed": position_closed_state,
     }
 
     if dry_run:
@@ -762,6 +858,17 @@ def main() -> int:
             "Render a one-line current-state snapshot per enabled watch and "
             "exit. Read-only: does not advance state, fire alerts, or write "
             "the fetch-failures window. --watch is ignored when --status is set."
+        ),
+    )
+    parser.add_argument(
+        "--venue-stops",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Also read the venue's closed-order history each tick and report "
+            "venue-side stop fills (a resting stop the venue executed never passes "
+            "through the execution skill, so nothing else reports it). scripts/run.sh "
+            "enables this for the scheduled tick; --no-venue-stops overrides it."
         ),
     )
     args = parser.parse_args()
@@ -816,6 +923,14 @@ def main() -> int:
 
     regime_data = _load_regime_state()
 
+    venue_closed_orders: list[dict] | None = None
+    if args.venue_stops and _venue_stops_wanted(watches, args.watch):
+        try:
+            venue_closed_orders = _read_venue_closed_orders()
+        except Exception as e:  # noqa: BLE001 - a venue read must never fail the tick
+            print(f"[WARN] venue closed-orders read failed: {type(e).__name__}: {e}", file=sys.stderr)
+            venue_closed_orders = None
+
     for watch in watches:
         if not watch.get("enabled"):
             continue
@@ -836,7 +951,14 @@ def main() -> int:
         if args.formatter and not watch.get("format_style"):
             watch = {**watch, "format_style": args.formatter}
 
-        alerts, new_state = _process_watch(watch, args.dry_run, now, config_path=args.config, regime_data=regime_data)
+        alerts, new_state = _process_watch(
+            watch,
+            args.dry_run,
+            now,
+            config_path=args.config,
+            regime_data=regime_data,
+            venue_closed_orders=venue_closed_orders,
+        )
         if new_state is None and not args.dry_run:
             _record_fetch_outcome(watch["name"], fetch_failed=True)
             fetch_failures += 1
