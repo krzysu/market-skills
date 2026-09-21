@@ -70,6 +70,12 @@ uv run skills/position-watchdog/scripts/run.py --config /path/to/watches.json
 # Custom state directory (per-watch state files go here)
 uv run skills/position-watchdog/scripts/run.py --state-dir /path/to/state
 
+# Also report venue-side stop fills (reads the venue's closed-order history
+# each tick). scripts/run.sh enables this for the scheduled tick;
+# --no-venue-stops turns it back off.
+uv run skills/position-watchdog/scripts/run.py --venue-stops
+uv run skills/position-watchdog/scripts/run.py --no-venue-stops
+
 # Or via env vars (CLI flags still win):
 export MARKET_SKILLS_WATCHDOG_PATH=/path/to/watches.json
 export MARKET_SKILLS_WATCHDOG_STATE_DIR=/path/to/state
@@ -176,6 +182,7 @@ held file with `position_size: null` (entry candidates misfiled as positions).
 | `interval` | optional, default `"4h"` | Candle interval for both live-price tick and L3 strategy evaluation. Validated against `analysis/intervals.py`. Common values: `15m`, `1h`, `4h`, `1d`. |
 | `period` | optional, default `"6mo"` | Candle lookback for both jobs. Validated against `analysis/intervals.py`. Common values: `1mo`, `3mo`, `6mo`, `1y`. |
 | `format_style` | optional, default `"compact"` (watchlist) or `"default"` (open positions) | Alert rendering style. One of `"compact"` (one-liner), `"default"` (richer multi-line), or `"verbose"` (default + reasoning/sources on signal events). Overrides the filename default and the `--formatter` CLI flag. |
+| `venue_stops` | optional, default `true` for kraken-monitored watches | Opt in/out of venue-side stop-fill detection for this watch. Only read when the tick runs with `--venue-stops`. Set `"venue_stops": false` on a watch whose held position is NOT parked on Kraken spot. Must be a boolean (schema-validated). |
 | `entry_price` | for `drop`/`recovery` | Reference price (in the monitor's quote) for percentage drops and recovery detection |
 | `position_size` | for TP `exit_pct` math | Position size (in base asset) used to compute `size × exit_pct / 100` for TP alerts |
 | `levels` | one of `levels` or `signals` required | Price-driven alert rules (see below) |
@@ -287,8 +294,10 @@ State fields per watch:
 - `above_entry_streak` — consecutive ticks above `entry_price` (used by `recovery`)
 - `prev_price` — last seen price (used by `zone` for transition detection)
 - `last_signal_alert_at` — per `(strategy, direction)` last alert timestamp (cooldown)
+- `venue_stop_fills` — per order-id dedupe ledger of already-reported venue stop fills (`--venue-stops`)
+- `position_closed` — closure record (order id, fill price, filled volume, timestamps) set when a venue stop fill covers the held size; stops level/signal evaluation for that watch (`--venue-stops`). The marker is keyed on the watch name alone, never cleared by re-enabling or re-adding the watch, and never ages out — clearing it is a manual, marker-only edit (remove just the `position_closed` key; never delete the state file for re-entry — see "Re-enter a closed position").
 
-Stale state (>24h old) is treated as fresh on the first tick — no alerts fire, state is rewritten.
+Stale state (>24h old) is treated as fresh on the first tick — no alerts fire, state is rewritten. The venue keys are exempt: the `venue_stop_fills` dedupe ledger and the `position_closed` marker survive staleness, so an already-reported stop fill never re-fires and a closed watch stays closed.
 
 ## Workflows
 
@@ -300,12 +309,13 @@ Stale state (>24h old) is treated as fresh on the first tick — no alerts fire,
 **Close a position:**
 1. Sell on the exchange
 2. Edit `watches.json`: set `enabled: false`
-3. Config preserved for future re-adds
+3. Config preserved for future re-adds (note: if the closure was venue-side, re-entry also requires clearing the `position_closed` marker — see below)
 
 **Re-enter a closed position:**
 1. Buy on the exchange
-2. Edit `watches.json`: flip `enabled: true`, update fills if needed
-3. Done
+2. If the watch was closed venue-side (a `position_closed` marker in its state file — `--status` shows `closed venue-side`), clear the marker ONLY: edit the state file and delete the `position_closed` key. **Never delete the state file to re-enter.** It also holds the `venue_stop_fills` dedupe ledger, and the venue-stop detector has no time bound: the previous stop fill is usually still inside the fetched closed-orders page, so with the ledger wiped the next `--venue-stops` tick re-reports it as a fresh `POSITION CLOSED BY VENUE STOP` — with P&L computed against the NEW `entry_price` — and, when the old fill's volume covers ≥99% of the new `position_size`, immediately re-marks the freshly re-entered position closed and silently stops monitoring it again (only `--status` reveals this). The `--no-venue-stops` flag and the per-watch `venue_stops: false` switch are not re-entry tools either: they turn detection off entirely instead of retaining the ledger. The marker is keyed on the watch name alone and never clears itself: flipping `enabled` back to true or re-adding the watch does not reset it, and it never ages out (every tick rewrites `_updated_at`, so staleness never applies). Without this step the re-entered position gets no venue detection, no level evaluation and no signal evaluation.
+3. Edit `watches.json`: flip `enabled: true`, update fills if needed
+4. Done
 
 ## Scheduled integration
 
@@ -371,7 +381,8 @@ Envelope shape:
         "next_tp_unfired": null,
         "fired_drops": [{"pct": -20.0}, {"pct": -10.0}],
         "position_size": null,
-        "pct_from_entry": -33.92
+        "pct_from_entry": -33.92,
+        "position_closed": null
       }
     ]
   },
@@ -384,9 +395,53 @@ Envelope shape:
 Notes:
 - `--watch` is ignored when `--status` is set; status mode always renders every enabled watch (pipe to `grep <TICKER>` to filter).
 - Per-watch fetch failure renders as `<fetch failed>` in human mode and as `current_price: null` in JSON mode; lines still print with a fallback to the last `prev_price` from state for the `% from entry` clause.
-- Stale state (>24h old) is treated as empty so streaks and `alerted_levels` reflect only the current tick + config.
+- Stale state (>24h old) is treated as empty so streaks and `alerted_levels` reflect only the current tick + config. The `position_closed` closure marker is exempt — it is read from the raw state and still renders.
 - Exit codes: `0` clean (all live prices returned), `2` partial (one or more fetches failed but lines still print).
-- No new state fields, no new thresholds, no behavioral change to the existing tick path.
+- `--status` is read-only and never reads the venue. A `position_closed` marker in per-watch state renders as a `closed venue-side` clause (human) and as the `position_closed` field (JSON).
+
+## Venue-side stop fills (closed positions)
+
+A resting stop-loss that the **venue** executes never passes through
+`execution-kraken-spot` — the venue fills it, so no ledger row is written and
+no notification fires. The position simply disappears and the watchdog keeps
+monitoring a phantom. With `--venue-stops` (enabled by `scripts/run.sh` for
+the scheduled tick) the watchdog closes that gap on its own tick:
+
+- **What is detected:** closed orders from the venue whose `descr.ordertype`
+  is in the stop family (`stop-loss`, `stop-loss-limit`, `trailing-stop`,
+  `trailing-stop-limit`), whose side is `sell` (the exit side for the long
+  positions this skill monitors), whose executed volume is > 0, and whose pair
+  names the watch's base asset (quote-insensitive: a `kraken:<TICKER>USD`
+  monitor matches a `<TICKER>EUR` fill). Manual `market` / `limit` sells are
+  deliberately not reported. Attribution comes from the venue's own order
+  record — never from price geometry or a balance-vs-held-file diff, and no
+  balance is read anywhere in this path (see
+  [ADR-0008](../../docs/adr/0008-venue-side-stop-fill-detection.md)).
+- **The notification** names the position, the fill price, the filled
+  quantity and the realised P&L — `(fill_price − entry_price) × filled_volume
+  − fee`, with `entry_price` taken from the watch config. The P&L is computed
+  only when the fill's quote equals the monitor's quote (`entry_price` is in
+  the monitor quote); a cross-quote fill (detection is quote-insensitive)
+  reports the P&L as unavailable and renders the fill price in the fill's own
+  quote — never as a monitor-currency figure. When the watch has
+  no `entry_price`, the alert says the cost basis is unknown instead of
+  inventing a number. It also states the exit is not in the ledger yet and
+  must be recorded (`portfolio-mgmt add --side sell`) so the next
+  `sync-open-positions` prunes the held entry.
+- **Reconciliation:** a detected closure sets a `position_closed` marker in
+  per-watch state; that watch's levels/signals are no longer evaluated and
+  the marker is visible in `--status`. A partial fill (executed quantity
+  below 99% of the held `position_size`) is reported but the position keeps
+  being monitored. The watchdog itself never writes the ledger and never
+  places, modifies or cancels orders.
+- **Coverage limits (explicit — never claim full coverage):** detection
+  reads order *history*, so a wick that fills and recovers between samples is
+  still detected; but (a) latency is up to one tick (the 30-minute cadence);
+  (b) only the orders inside the fetched closed-orders page are seen — a
+  burst larger than that page between two ticks can push a fill out of view;
+  (c) a tick whose price fetch fails (the existing early-return) or whose
+  venue read fails (a `[WARN]` on stderr, that tick only) reports nothing;
+  (d) Kraken spot only, sell-side exits only.
 
 ## Where the held file comes from
 

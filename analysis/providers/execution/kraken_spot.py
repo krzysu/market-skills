@@ -495,6 +495,54 @@ class KrakenExecutionProvider:
             )
         return result
 
+    def get_closed_orders(self) -> list[dict[str, Any]]:
+        """Return closed/cancelled orders from the venue, normalised.
+
+        Kraken envelope: ``{"closed": {<txid>: <order>}, "count": N}``. A closed
+        order carries ``descr.ordertype``, ``vol`` / ``vol_exec``, ``price``
+        (average fill), ``cost``, ``fee``, ``opentm`` / ``closetm`` and
+        ``status`` ("closed" / "canceled") — the payload a venue-side stop-fill
+        detector needs. Read-only; never places or cancels anything.
+        """
+        data = _run_kraken(["closed-orders", "--trades"], timeout=15)
+        if not isinstance(data, dict):
+            raise RuntimeError(f"Unexpected closed-orders response shape: {type(data).__name__}")
+        if "error" in data:
+            raise RuntimeError(f"Kraken closed-orders error: {data['error']}")
+        closed_orders = data.get("closed") or {}
+        result: list[dict[str, Any]] = []
+        for txid, order in closed_orders.items():
+            if not isinstance(order, dict):
+                continue
+            descr = order.get("descr") if isinstance(order.get("descr"), dict) else {}
+            price = order.get("price")
+            cost = order.get("cost")
+            limit_price = descr.get("price")
+            trigger_price = order.get("stopprice")
+            opentm = order.get("opentm")
+            closetm = order.get("closetm")
+            result.append(
+                {
+                    "order_id": txid,
+                    "pair": descr.get("pair", ""),
+                    "side": descr.get("type", ""),  # "buy" / "sell"
+                    "order_type": descr.get("ordertype", ""),
+                    "volume": float(order.get("vol", 0) or 0),
+                    "filled_volume": float(order.get("vol_exec", 0) or 0),
+                    "fill_price": float(price) if price not in (None, "0", 0) else None,
+                    "cost": float(cost) if cost not in (None, "0", 0) else None,
+                    "fee": float(order.get("fee", 0) or 0),
+                    "status": (order.get("status") or "").lower(),
+                    "opened_at": float(opentm) if opentm not in (None, "0", 0) else None,
+                    "closed_at": float(closetm) if closetm not in (None, "0", 0) else None,
+                    "trigger_price": float(trigger_price) if trigger_price not in (None, "0", 0) else None,
+                    "limit_price": float(limit_price) if limit_price not in (None, "0", 0) else None,
+                    "cl_ord_id": descr.get("cl_ord_id"),
+                    "raw": order,
+                }
+            )
+        return result
+
     def cancel_order(self, order_id: str) -> bool:
         try:
             resp = _run_kraken(["order", "cancel", order_id, "--yes"], timeout=15)

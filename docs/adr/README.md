@@ -41,6 +41,7 @@ ADRs are append-only. To reverse a decision, write a new ADR with
 | [0005](./0005-measure-the-whole-l3-registry.md) | Measure the whole L3 registry (minus declared unmeasurable strategies) | accepted | 2026-09-16 |
 | [0006](./0006-minimum-trades-guard.md) | Minimum-trades guard for backtest conviction floors | accepted | 2026-09-17 |
 | [0007](./0007-as-of-last-closed-bar.md) | As-of-last-closed-bar for OHLC consumers | accepted | 2026-09-18 |
+| [0008](./0008-venue-side-stop-fill-detection.md) | Venue-side stop-fill detection in the watchdog | accepted | 2026-09-21 |
 
 ## Template
 

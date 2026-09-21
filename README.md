@@ -141,7 +141,7 @@ Skills the LLM calls between analytics and order placement. Both consume the sam
 | Skill | Purpose |
 |-------|---------|
 | [portfolio-mgmt](./skills/portfolio-mgmt/SKILL.md) | SQLite-backed portfolio tracking with FIFO cost basis, multi-portfolio support, live price fetching, P&L, replay, and external reconciliation |
-| [position-watchdog](./skills/position-watchdog/SKILL.md) | Unified position monitor — entry/stop/TP ladders, multi-zone entry tracking, and L3 strategy signal evaluation. Per-watch state, alert dedup, per-watch `interval`/`period` (default `4h`/`6mo`), and a single `watches.json` config for any number of assets. Cross-checks bare tickers against `market-watchlist` via `--watchlist`. **Monitoring + manual confirm only; never executes orders.** |
+| [position-watchdog](./skills/position-watchdog/SKILL.md) | Unified position monitor — entry/stop/TP ladders, multi-zone entry tracking, and L3 strategy signal evaluation. Per-watch state, alert dedup, per-watch `interval`/`period` (default `4h`/`6mo`), and a single `watches.json` config for any number of assets. Cross-checks bare tickers against `market-watchlist` via `--watchlist`. Reports venue-side stop fills (`--venue-stops`) so a stop the venue executed — which never passes through the execution skill — surfaces as a closed-position alert instead of staying silent. **Monitoring + manual confirm only; never executes orders.** |
 
 
 ## Quick Start
@@ -202,6 +202,7 @@ uv run skills/portfolio-mgmt/scripts/run.py positions
 # Position monitoring (entry/stop/TP alerts + L3 signal evaluation)
 uv run skills/position-watchdog/scripts/run.py
 uv run skills/position-watchdog/scripts/run.py --dry-run   # show what would alert, no state writes
+uv run skills/position-watchdog/scripts/run.py --venue-stops   # also report venue-side stop fills (closed positions)
 uv run skills/position-watchdog/scripts/run.py --watchlist skills/market-watchlist/data/watchlist.json   # cross-ref ticks against the registry
 
 # Risk vet (advisory — the LLM calls this before asking the user to confirm execution)

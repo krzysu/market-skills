@@ -536,6 +536,58 @@ class TestKrakenReadOps:
         assert o["limit_price"] == pytest.approx(60.15)
         assert o["cl_ord_id"] == "test-123"
 
+    def test_get_closed_orders_parses_envelope(self):
+        payload = {
+            "closed": {
+                "OABC-1": {
+                    "vol": "1.66",
+                    "vol_exec": "1.66",
+                    "price": "48.20",
+                    "cost": "80.01",
+                    "fee": "0.80",
+                    "status": "closed",
+                    "opentm": 1700000000.0,
+                    "closetm": 1700003600.0,
+                    "stopprice": "50.00",
+                    "descr": {
+                        "pair": "<TICKER>USD",
+                        "type": "sell",
+                        "ordertype": "stop-loss",
+                        "price": "0",
+                    },
+                }
+            },
+            "count": 1,
+        }
+        with patch("subprocess.run", return_value=_kraken_resp(payload)):
+            provider = get_execution_provider("kraken")
+            orders = provider.get_closed_orders()
+        assert len(orders) == 1
+        o = orders[0]
+        assert o["order_id"] == "OABC-1"
+        assert o["pair"] == "<TICKER>USD"
+        assert o["side"] == "sell"
+        assert o["order_type"] == "stop-loss"
+        assert o["volume"] == pytest.approx(1.66)
+        assert o["filled_volume"] == pytest.approx(1.66)
+        assert o["fill_price"] == pytest.approx(48.20)
+        assert o["cost"] == pytest.approx(80.01)
+        assert o["fee"] == pytest.approx(0.80)
+        assert o["status"] == "closed"
+        assert o["opened_at"] == pytest.approx(1700000000.0)
+        assert o["closed_at"] == pytest.approx(1700003600.0)
+        assert o["trigger_price"] == pytest.approx(50.00)
+        # Zero/unset numerics normalise to None.
+        assert o["limit_price"] is None
+        assert o["cl_ord_id"] is None
+
+    def test_get_closed_orders_error_raises(self):
+        payload = {"error": ["EAPI:Invalid key"]}
+        with patch("subprocess.run", return_value=_kraken_resp(payload)):
+            provider = get_execution_provider("kraken")
+            with pytest.raises(RuntimeError, match="closed-orders error"):
+                provider.get_closed_orders()
+
     def test_cancel_order_success(self):
         payload = {"count": 1, "pending": False}
         with patch("subprocess.run", return_value=_kraken_resp(payload)):
