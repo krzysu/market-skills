@@ -147,6 +147,19 @@ Each portfolio has its own `base_ccy` (EUR, USD, USDC, etc.). All numbers are re
 
 **All transactions in a given portfolio must use the same base currency.** If you trade in both EUR and USD, create two portfolios (e.g., `spot-eur` and `spot-usd`).
 
+### Reporting rule — never total across portfolios
+
+The no-aggregation rule above governs the **tool**; this governs the **agent narrating to the user**. Violating it produces a real and confusing error: a single "book total" is reported by summing a EUR-based portfolio with a USDC-based one, which requires a silent currency conversion. The user then reasonably concludes a position is held in the wrong portfolio and asks for it to be deleted — chasing a problem the reporting invented.
+
+- **Report per portfolio, in that portfolio's base currency.** Two books are two numbers, never one.
+- **A cross-portfolio total is never valid**, even when the currencies happen to match — they are separate books with separate theses and separate risk budgets.
+- **If you convert between base currencies at all, label the conversion explicitly** (`<X> USDC ≈ <Y> EUR at <rate>`) instead of folding it into a total.
+- **Never derive positions from the position-watchdog held file.** `open-positions.json` is a **cross-portfolio monitoring list**, not a book: it has no portfolio field and unions every venue. Reading it as a portfolio is the exact mechanism that produces the error above. Positions come from `positions --portfolio <name>` (the ledger), always.
+
+| Wrong | Right |
+|---|---|
+| `Book: EUR <sum> — <ASSET_A> <n>, <ASSET_B> <n>, <ASSET_C> <n>` | `<portfolio-a> (<ccy>): <total>` and `<portfolio-b> (<ccy>): <total>` as two separate lines |
+
 `view`, `positions`, `pnl`, `allocation`, `performance` auto-refresh prices from `analysis/data.py` on every call. Add `--no-refresh` to skip network calls and use stale cache. `--price-override` always takes precedence.
 
 ## Price overrides
