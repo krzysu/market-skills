@@ -279,6 +279,80 @@ class TestDerivedCashRow:
         assert derive_cash_balances(db_path, pid) == {}
         assert [p["asset"] for p in compute_positions(db_path, pid)] == ["kraken:COINUSD"]
 
+    def test_deposit_booked_after_earlier_trades_ignores_them(self, tmp_path):
+        """A cash row booked AFTER earlier trades derives its balance from
+        its own lifetime only: the pre-deposit flows are not charged to it."""
+        from portfolio.db import derive_cash_balances
+
+        db_path = str(tmp_path / "test.db")
+        pid = _init_db_with_peak(db_path)
+        add_transaction(
+            db_path, pid, "2026-06-22T08:00:00+00:00", "BUY", "kraken:COINUSD", qty=400.0, price=1.0, fee=1.0
+        )
+        # Deposit booked LAST — the 400 buy predates the row's existence.
+        add_transaction(db_path, pid, "2026-06-22T09:00:00+00:00", "BUY", "kraken:EUR", qty=1000.0, price=1.0)
+        # Row = its own deposit (1000); the earlier buy is NOT charged.
+        assert derive_cash_balances(db_path, pid) == {pid: {"kraken:EUR": 1000.0}}
+
+        # Flows after the deposit still adjust the row normally.
+        add_transaction(
+            db_path, pid, "2026-06-22T10:00:00+00:00", "BUY", "kraken:COINUSD", qty=100.0, price=2.0, fee=1.0
+        )
+        # 1000 - (200 + 1) = 799
+        assert derive_cash_balances(db_path, pid) == {pid: {"kraken:EUR": 799.0}}
+
+        # A cash-asset SELL (withdrawal) after the boundary also applies.
+        add_transaction(db_path, pid, "2026-06-22T11:00:00+00:00", "SELL", "kraken:EUR", qty=50.0, price=1.0)
+        # 799 - 50 = 749
+        assert derive_cash_balances(db_path, pid) == {pid: {"kraken:EUR": 749.0}}
+
+    def test_deposit_booked_first_charges_earlier_none(self, tmp_path):
+        """Deposit FIRST then the same buy: the row charges the buy —
+        600, unchanged from the whole-stream behaviour."""
+        from portfolio.db import derive_cash_balances
+
+        db_path = str(tmp_path / "test.db")
+        pid = _init_db_with_peak(db_path)
+        add_transaction(db_path, pid, "2026-06-22T08:00:00+00:00", "BUY", "kraken:EUR", qty=1000.0, price=1.0)
+        add_transaction(db_path, pid, "2026-06-22T09:00:00+00:00", "BUY", "kraken:COINUSD", qty=400.0, price=1.0)
+        # 1000 - 400 = 600
+        assert derive_cash_balances(db_path, pid) == {pid: {"kraken:EUR": 600.0}}
+
+    def test_multiple_transactions_before_deposit_are_all_ignored(self, tmp_path):
+        """Several pre-deposit flows (buys and sells) are all outside the
+        row's lifetime; only post-deposit flows count."""
+        from portfolio.db import derive_cash_balances
+
+        db_path = str(tmp_path / "test.db")
+        pid = _init_db_with_peak(db_path)
+        add_transaction(
+            db_path, pid, "2026-06-22T06:00:00+00:00", "BUY", "kraken:COINUSD", qty=300.0, price=1.0, fee=2.0
+        )
+        add_transaction(
+            db_path, pid, "2026-06-22T07:00:00+00:00", "SELL", "kraken:COINUSD", qty=100.0, price=1.5, fee=1.0
+        )
+        add_transaction(db_path, pid, "2026-06-22T08:00:00+00:00", "BUY", "kraken:EUR", qty=1000.0, price=1.0)
+        # Row = 1000 — both pre-deposit flows ignored.
+        assert derive_cash_balances(db_path, pid) == {pid: {"kraken:EUR": 1000.0}}
+
+    def test_deposit_as_very_first_row_is_whole_stream(self, tmp_path):
+        """When the deposit is the very first transaction of the book the
+        boundary is the start of the stream — behaviour identical to the
+        simple whole-stream sum."""
+        from portfolio.db import derive_cash_balances
+
+        db_path = str(tmp_path / "test.db")
+        pid = _init_db_with_peak(db_path)
+        add_transaction(db_path, pid, "2026-06-22T06:00:00+00:00", "BUY", "kraken:EUR", qty=1000.0, price=1.0)
+        add_transaction(
+            db_path, pid, "2026-06-22T07:00:00+00:00", "BUY", "kraken:COINUSD", qty=300.0, price=1.0, fee=2.0
+        )
+        add_transaction(
+            db_path, pid, "2026-06-22T08:00:00+00:00", "SELL", "kraken:COINUSD", qty=100.0, price=1.5, fee=1.0
+        )
+        # 1000 - (300 + 2) + (150 - 1) = 847
+        assert derive_cash_balances(db_path, pid) == {pid: {"kraken:EUR": 847.0}}
+
 
 class TestDrawdownDerivedCashEquity:
     """Equity = derived cash + positions: breakeven/losing closes register
