@@ -4,6 +4,24 @@ import sqlite3
 
 VALID_SIDES = ("BUY", "SELL")
 
+# Value stamped into ``portfolios.peak_model`` once a portfolio's
+# ``peak_value`` has been re-based onto the derived-cash valuation model
+# (see portfolio.db.positions.compute_portfolio_drawdown).
+PEAK_MODEL_DERIVED_CASH = "derived-cash-v1"
+
+
+def ensure_peak_model_column(conn: sqlite3.Connection) -> None:
+    """Add the ``portfolios.peak_model`` column if the DB predates it.
+
+    Same lazy-migration style as the ``peak_value`` column (PRAGMA
+    table_info + ALTER TABLE) so pre-existing DBs get the marker without a
+    rebuild. Safe to call on every connection; the stamping/reset logic
+    itself is idempotent per portfolio.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(portfolios)").fetchall()}
+    if "peak_model" not in cols:
+        conn.execute("ALTER TABLE portfolios ADD COLUMN peak_model TEXT")
+
 
 def init_db(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
@@ -62,6 +80,7 @@ def init_db(db_path: str) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(portfolios)").fetchall()}
     if "peak_value" not in cols:
         conn.execute("ALTER TABLE portfolios ADD COLUMN peak_value REAL NOT NULL DEFAULT 0")
+    ensure_peak_model_column(conn)
     conn.commit()
     conn.close()
 

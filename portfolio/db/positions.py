@@ -4,7 +4,102 @@ import sqlite3
 from collections import defaultdict, deque
 
 from portfolio.db.fifo import _fetch_transactions_sorted, compute_fifo, compute_lots
-from portfolio.db.schema import get_db
+from portfolio.db.schema import PEAK_MODEL_DERIVED_CASH, ensure_peak_model_column, get_db
+
+
+def derive_cash_balances(db_path: str, portfolio_id: int | None = None) -> dict[int, dict[str, float]]:
+    """Derive each portfolio's cash-row balance from its own transaction stream.
+
+    The base-ccy cash row (asset key ``<provider>:<BASE_CCY>``, e.g.
+    ``kraken:EUR``) is a running balance computed from the portfolio's
+    transactions — never a frozen notional and never a venue mirror:
+
+    ::
+
+        cash_balance(portfolio, base_ccy)
+          = sum(cash-asset deposits)                    # the row's own BUY rows
+          - sum(qty*price + fee for BUY  of non-cash assets)
+          + sum(qty*price - fee for SELL of non-cash assets)
+
+    Classification rule: a transaction's asset is the CASH ROW when
+    ``asset.split(":", 1)[-1].upper() == portfolio.base_ccy.upper()``.
+    A cash-asset BUY is a deposit and a cash-asset SELL is a withdrawal —
+    both move the row by ``qty * price`` (fees on cash legs are ignored).
+
+    A portfolio with NO cash-asset transaction has no cash row at all —
+    none is synthesized (a book that never booked deposits has no
+    liquidity figure to derive, and a phantom negative row would distort
+    its equity). Non-cash BUY/SELL legs adjust the cash row only when the
+    portfolio actually has one.
+
+    Invariants:
+
+    1. **Ledger-only.** The balance is a function of the ``transactions``
+       table alone. No venue API is consulted; withdrawals, deposits,
+       staking drift and dust on the exchange are NOT reconciled in.
+    2. **The row's asset key stays the prefixed form** (``kraken:EUR``,
+       not ``EUR``) — it is the key seen in the transactions and the key
+       risk-engine's ``cash_available`` resolution matches against.
+    3. **Equity = derived cash + sum(position market value).** Buying
+       moves value from cash into a position instead of double-counting
+       both, so closing a swing no longer registers its notional as
+       drawdown.
+
+    A NEGATIVE derived balance is permitted and reported as-is: a book
+    that deployed more than its cash row is over-deployed, and the
+    negative figure is the truthful signal. Never clamp, never abs().
+
+    Returns ``{portfolio_id: {cash_asset_key: balance}}``. Portfolios with
+    no base-ccy-cash transaction are absent from the map.
+    """
+    conn = get_db(db_path)
+    try:
+        base_ccys = {row["id"]: row["base_ccy"] for row in conn.execute("SELECT id, base_ccy FROM portfolios")}
+        rows = _fetch_transactions_sorted(conn, portfolio_id)
+    finally:
+        conn.close()
+
+    # Pass 1: which portfolios actually have a cash row, and its key.
+    # The row is identified by its own deposits/withdrawals (BUY/SELL of
+    # the base-ccy asset); its key is whatever prefixed key the ledger
+    # uses. No phantom row is created for a portfolio without one.
+    cash_keys: dict[int, str] = {}
+    for tx in rows:
+        pid = tx["portfolio_id"]
+        base_ccy = base_ccys.get(pid)
+        if base_ccy is None:
+            continue
+        if tx["asset"].split(":", 1)[-1].upper() == base_ccy.upper():
+            cash_keys.setdefault(pid, tx["asset"])
+
+    # Pass 2: walk the stream once, applying the formula.
+    balances: dict[int, dict[str, float]] = {}
+    for tx in rows:
+        pid = tx["portfolio_id"]
+        base_ccy = base_ccys.get(pid)
+        if base_ccy is None:
+            continue
+        asset = tx["asset"]
+        side = tx["side"]
+        qty = tx["qty"] or 0
+        price = tx["price"] or 0
+        fee = tx["fee"] or 0
+        if asset.split(":", 1)[-1].upper() == base_ccy.upper():
+            per_pid = balances.setdefault(pid, {})
+            balance = per_pid.setdefault(asset, 0.0)
+            if side == "BUY":
+                per_pid[asset] = balance + qty * price
+            elif side == "SELL":
+                per_pid[asset] = balance - qty * price
+        elif pid in cash_keys:
+            cash_key = cash_keys[pid]
+            per_pid = balances.setdefault(pid, {cash_key: 0.0})
+            balance = per_pid[cash_key]
+            if side == "BUY":
+                per_pid[cash_key] = balance - (qty * price + fee)
+            elif side == "SELL":
+                per_pid[cash_key] = balance + (qty * price - fee)
+    return balances
 
 
 def compute_positions(
@@ -22,8 +117,40 @@ def compute_positions(
         grouped[key]["qty"] += lot["qty"]
         grouped[key]["cost_basis"] += lot["qty"] * lot["entry_price"]
 
+    # The base-ccy cash row's value is the DERIVED running balance from the
+    # portfolio's transactions (see derive_cash_balances), not the frozen
+    # notional of its deposit lots. The row stays visible even at balance 0
+    # so risk-engine correctly reports 0 free cash rather than dropping it.
+    cash_balances = derive_cash_balances(db_path, portfolio_id)
+    for pid, assets in cash_balances.items():
+        for asset, balance in assets.items():
+            key = (pid, asset)
+            g = grouped.get(key)
+            if g is None:
+                g = {"qty": 0, "cost_basis": 0, "portfolio_id": pid, "asset": asset}
+                grouped[key] = g
+            g["qty"] = balance
+            g["cost_basis"] = balance
+            g["is_cash_row"] = True
+
     result = []
     for (pid, asset), g in sorted(grouped.items()):
+        if g.get("is_cash_row"):
+            balance = round(g["qty"], 2)
+            result.append(
+                {
+                    "portfolio_id": pid,
+                    "asset": asset,
+                    "qty": round(g["qty"], 10),
+                    "avg_cost": 1.0,
+                    "cost_basis": balance,
+                    "current_price": 1.0,
+                    "current_value": balance,
+                    "unrealized_pnl": 0.0,
+                    "unrealized_pnl_pct": None,
+                }
+            )
+            continue
         qty = g["qty"]
         cost_basis = g["cost_basis"]
         avg_cost = cost_basis / qty if qty > 1e-12 else 0
@@ -167,6 +294,26 @@ def get_portfolio_summary(
 def compute_portfolio_drawdown(
     db_path: str, portfolio_id: int, current_prices: dict[str, float] | None = None
 ) -> float:
+    """Equity drawdown vs the persisted high-water mark, in percent.
+
+    Equity = derived cash row (see :func:`derive_cash_balances`) + sum of
+    position market values (falling back to cost basis when a position has
+    no live price). ``portfolios.peak_value`` is maintained as
+    ``max(peak, equity)`` on each call.
+
+    **One-time peak re-baseline (``portfolios.peak_model``).** Persisted
+    peaks produced by the pre-derived-cash model double-counted closed
+    swings: the frozen cash notional and position notionals were both on
+    the books, so every position close registered as drawdown. On the
+    first call for a portfolio whose ``peak_model`` marker is unset, the
+    stale peak is reset to 0 (only if the portfolio actually has a
+    base-ccy cash row — its valuation semantics changed) and the peak is
+    re-seeded from the corrected equity by the usual ``max`` logic. The
+    marker is stamped in the same transaction, so the reset happens at
+    most once per portfolio and never touches a portfolio without a cash
+    row. Portfolios without a cash row keep their persisted high-water
+    mark untouched.
+    """
     positions = compute_positions(db_path, portfolio_id, current_prices)
     current_value = 0.0
     for p in positions:
@@ -179,11 +326,34 @@ def compute_portfolio_drawdown(
             current_value += float(p.get("cost_basis", 0) or 0)
 
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     try:
-        row = conn.execute("SELECT peak_value FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+        ensure_peak_model_column(conn)
+        row = conn.execute("SELECT peak_value, peak_model FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
         if row is None:
             return 0.0
-        peak = float(row[0] or 0.0)
+        peak = float(row["peak_value"] or 0.0)
+
+        # One-time re-baseline for the derived-cash valuation model.
+        if row["peak_model"] != PEAK_MODEL_DERIVED_CASH:
+            base_ccy_row = conn.execute("SELECT base_ccy FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+            base_ccy = base_ccy_row["base_ccy"] if base_ccy_row else None
+            has_cash_row = bool(base_ccy) and any(
+                (p["asset"].split(":", 1)[-1].upper() == str(base_ccy).upper()) for p in positions
+            )
+            if has_cash_row:
+                peak = 0.0
+                conn.execute(
+                    "UPDATE portfolios SET peak_value = 0, peak_model = ? WHERE id = ?",
+                    (PEAK_MODEL_DERIVED_CASH, portfolio_id),
+                )
+                conn.commit()
+            else:
+                conn.execute(
+                    "UPDATE portfolios SET peak_model = ? WHERE id = ?",
+                    (PEAK_MODEL_DERIVED_CASH, portfolio_id),
+                )
+                conn.commit()
 
         new_peak = max(peak, current_value)
         if new_peak != peak:

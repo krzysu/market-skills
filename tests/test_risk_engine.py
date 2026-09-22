@@ -102,7 +102,7 @@ def _pendle_intent(**overrides):
 
 
 def _pendle_ctx(**overrides) -> RiskContext:
-    """Live shape: EUR 1,000 working-capital bucket (kraken:EUR), nothing held."""
+    """Live shape: EUR 1,000 working-capital cash row (kraken:EUR), nothing held."""
     base = RiskContext(
         portfolio_name="spot",
         base_ccy="EUR",
@@ -568,7 +568,7 @@ class TestInsufficientFundsPolicy:
     def test_market_buy_over_cash_rejects(self):
         # Per-fix fixture (bead market-skills-czl): the 2026-09-18 live shape.
         # A market buy of 177.85682 PENDLEEUR at ~11.3755 EUR (~2023.20 EUR)
-        # against a EUR 1,000 bucket used to return silent APPROVED because
+        # against a EUR 1,000 cash row used to return silent APPROVED because
         # the policy short-circuited when limit_price was absent. Now the
         # notional resolves from extras.reference_price and REJECTs.
         ctx = _pendle_ctx()
@@ -581,7 +581,7 @@ class TestInsufficientFundsPolicy:
 
     def test_market_buy_with_limit_price_within_cash_approved(self):
         # The live sibling: the same market buy costed at ~EUR 399.82 fits
-        # the EUR 1,000 bucket -> APPROVED. Pins the observed APPROVED half.
+        # the EUR 1,000 cash row -> APPROVED. Pins the observed APPROVED half.
         ctx = _pendle_ctx()
         intent = _pendle_intent(limit_price=2.24796)
         f = insufficient_funds_policy(intent, ctx)
@@ -1144,7 +1144,7 @@ class TestRiskEngineCLI:
 
     def test_market_buy_with_reference_price_rejects(self, tmp_path, capsys, monkeypatch):
         """Per-fix fixture at CLI level: `--reference-price` costs a market
-        order, so the EUR 1,000 bucket REJECTs a ~EUR 2,023 market buy.
+        order, so the EUR 1,000 cash row REJECTs a ~EUR 2,023 market buy.
         """
         db_path, intent_file = self._seed_eur_portfolio(tmp_path, monkeypatch)
         rc = self._run_cli(
@@ -1229,8 +1229,10 @@ def _seed_db(tmp_path):
     db_path = str(tmp_path / "risk.db")
     init_db(db_path)
     pid = add_portfolio(db_path, "spot", base_ccy="EUR")
-    # Cash position in EUR (prefixed).
-    add_transaction(db_path, pid, "2026-06-22T08:00:00+00:00", "BUY", "kraken:EUR", qty=1000.0, price=1.0)
+    # Cash deposit in EUR (prefixed). The row's balance is DERIVED from the
+    # transaction stream: 2000 deposited - 1000 deployed by the buy below
+    # = 1000 free cash, matching the pre-derived-cash fixture's figures.
+    add_transaction(db_path, pid, "2026-06-22T08:00:00+00:00", "BUY", "kraken:EUR", qty=2000.0, price=1.0)
     # Held position in <PRIVATE_PERP>USD.
     add_transaction(db_path, pid, "2026-06-22T08:05:00+00:00", "BUY", "kraken:<PRIVATE_PERP>USD", qty=20.0, price=50.0)
     return db_path, pid
@@ -1399,6 +1401,32 @@ class TestBuildContext:
         ctx = lib.build_context(self._args(tmp_path))
         assert ctx.cash_available == 1000.0
         assert ctx.base_ccy == "EUR"
+
+    def test_cash_available_reads_derived_cash_balance(self, tmp_path, monkeypatch):
+        """The DERIVED cash-row figure reaches ctx.cash_available: deposit
+        2000, buy 500 + 5 fee -> cash_available 1495.0, and total_value =
+        position market value + 1495.0. This is the funds path the
+        insufficient_funds / position_size policies read.
+        """
+        from portfolio.db import add_portfolio, add_transaction, init_db
+
+        db_path = str(tmp_path / "derived.db")
+        init_db(db_path)
+        pid = add_portfolio(db_path, "spot", base_ccy="EUR")
+        add_transaction(db_path, pid, "2026-06-22T08:00:00+00:00", "BUY", "kraken:EUR", qty=2000.0, price=1.0)
+        add_transaction(
+            db_path, pid, "2026-06-22T08:05:00+00:00", "BUY", "kraken:<PRIVATE_PERP>EUR", qty=500.0, price=1.0, fee=5.0
+        )
+        monkeypatch.setattr(
+            "portfolio.db.get_cached_prices",
+            lambda db: {"kraken:<PRIVATE_PERP>EUR": 1.0},
+        )
+        lib = _load_risk_engine_lib()
+        ctx = lib.build_context(self._args(tmp_path, db=db_path))
+        assert ctx.cash_available == 1495.0
+        # Position at cached price 1.0 = 500 market value; cash = 1495.
+        assert ctx.positions["kraken:<PRIVATE_PERP>EUR"]["market_value"] == 500.0
+        assert ctx.total_value == 1995.0
 
     def test_total_value_includes_positions_and_cash(self, tmp_path, monkeypatch):
         _seed_db(tmp_path)
@@ -1717,7 +1745,7 @@ class TestBuildContext:
 
     def test_reference_prices_refresh_on_cash_only_portfolio(self, tmp_path, monkeypatch):
         """Regression: --refresh-prices with a CASH-ONLY portfolio (the live
-        EUR-bucket shape) must not silently drop the flag for the pair-alone
+        EUR-cash-row shape) must not silently drop the flag for the pair-alone
         reference-price lookup. The held-asset pass returns ({}, {}) from
         _get_position_prices before it can refresh when no held assets
         exist, so the pair-alone lookup honors --refresh-prices itself:
