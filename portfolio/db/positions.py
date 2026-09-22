@@ -26,6 +26,13 @@ def derive_cash_balances(db_path: str, portfolio_id: int | None = None) -> dict[
     A cash-asset BUY is a deposit and a cash-asset SELL is a withdrawal —
     both move the row by ``qty * price`` (fees on cash legs are ignored).
 
+    The walk is scoped to the row's own lifetime, per portfolio: only
+    transactions at or after the portfolio's FIRST cash-asset transaction
+    are charged to it. Flows occurring before the row first exists are NOT
+    charged (they were funded from capital the ledger does not model). A
+    portfolio that books its allocation first — the documented convention —
+    is unaffected: the row then equals the simple sum over the whole stream.
+
     A portfolio with NO cash-asset transaction has no cash row at all —
     none is synthesized (a book that never booked deposits has no
     liquidity figure to derive, and a phantom negative row would distort
@@ -72,8 +79,11 @@ def derive_cash_balances(db_path: str, portfolio_id: int | None = None) -> dict[
         if tx["asset"].split(":", 1)[-1].upper() == base_ccy.upper():
             cash_keys.setdefault(pid, tx["asset"])
 
-    # Pass 2: walk the stream once, applying the formula.
+    # Pass 2: walk the stream once, applying the formula. A per-portfolio
+    # boundary flag scopes the walk to the row's own lifetime: flows
+    # before the portfolio's first cash-asset transaction are ignored.
     balances: dict[int, dict[str, float]] = {}
+    boundary_seen: set[int] = set()
     for tx in rows:
         pid = tx["portfolio_id"]
         base_ccy = base_ccys.get(pid)
@@ -85,13 +95,14 @@ def derive_cash_balances(db_path: str, portfolio_id: int | None = None) -> dict[
         price = tx["price"] or 0
         fee = tx["fee"] or 0
         if asset.split(":", 1)[-1].upper() == base_ccy.upper():
+            boundary_seen.add(pid)
             per_pid = balances.setdefault(pid, {})
             balance = per_pid.setdefault(asset, 0.0)
             if side == "BUY":
                 per_pid[asset] = balance + qty * price
             elif side == "SELL":
                 per_pid[asset] = balance - qty * price
-        elif pid in cash_keys:
+        elif pid in boundary_seen:
             cash_key = cash_keys[pid]
             per_pid = balances.setdefault(pid, {cash_key: 0.0})
             balance = per_pid[cash_key]
@@ -119,8 +130,11 @@ def compute_positions(
 
     # The base-ccy cash row's value is the DERIVED running balance from the
     # portfolio's transactions (see derive_cash_balances), not the frozen
-    # notional of its deposit lots. The row stays visible even at balance 0
-    # so risk-engine correctly reports 0 free cash rather than dropping it.
+    # notional of its deposit lots. Flows before the row first exists are
+    # not charged to it (booking the allocation first keeps the row equal
+    # to the simple sum over the whole stream). The row stays visible even
+    # at balance 0 so risk-engine correctly reports 0 free cash rather
+    # than dropping it.
     cash_balances = derive_cash_balances(db_path, portfolio_id)
     for pid, assets in cash_balances.items():
         for asset, balance in assets.items():
