@@ -16,7 +16,7 @@ Outputs a compact dict:
     }
 """
 
-from analysis.formatting import safe_round
+from analysis.formatting import round_price, safe_round
 from analysis.indicators import extract_ohlcv
 from analysis.skill_loader import load_skill
 
@@ -142,7 +142,7 @@ def analyze(candles, *, ticker, interval="4h", period="6mo", current_price: floa
     return {
         "ticker": ticker,
         "interval": interval,
-        "current_price": safe_round(price, 2),
+        "current_price": round_price(price),
         "supertrend": {
             "value": st_value,
             "direction": st_dir,

@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, safe_parse_args
+from analysis.formatting import format_price, print_header, safe_parse_args
 from analysis.output import (
     cache_run_result,
     emit_envelope_json,
@@ -104,7 +104,7 @@ def main():
     ob_marker = " " * 28 + "\u219170"
 
     print_header("RSI MOMENTUM")
-    print(f"  {ticker}  (price: {result.get('current_price', 0):,.2f})")
+    print(f"  {ticker}  (price: {format_price(result.get('current_price', 0))})")
     print(f"    RSI(14):   {result.get('rsi_14', 'N/A')}")
     if result.get("rsi_delta_7d") is not None:
         print(f"    7d change: {result['rsi_delta_7d']:+.2f} ({result.get('trend', 'N/A')})")

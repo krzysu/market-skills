@@ -209,6 +209,18 @@ class TestFibonacci:
         assert levels["1.272"] == pytest.approx(227.2, abs=0.1)
         assert levels["1.618"] == pytest.approx(261.8, abs=0.1)
 
+    def test_sub_cent_levels_not_collapsed_to_zero(self):
+        """Sub-cent swings: every level must be 6dp, not 0.0.
+
+        Discriminating: pre-fix ``compute_fib_levels`` rounded internally to
+        2dp, collapsing any level below $0.005 to 0.0.
+        """
+        levels = compute_fib_levels(0.0020, 0.0050)
+        for key, value in levels.items():
+            assert value != 0.0, f"fib level {key} collapsed to 0.0 by 2dp rounding"
+            assert value == round(value, 6)
+        assert levels["0.618"] == pytest.approx(0.003146, abs=1e-9)
+
 
 class TestCrossover:
     def test_golden_cross(self):
@@ -277,6 +289,16 @@ class TestClusterLevels:
 
     def test_empty(self):
         assert cluster_levels([]) == []
+
+    def test_sub_cent_cluster_price_not_collapsed_to_zero(self):
+        """Sub-cent levels: cluster price must be 6dp, not 0.0.
+
+        Discriminating: pre-fix the cluster mean was rounded to 2dp, which
+        collapses any value below $0.005 to 0.0.
+        """
+        clusters = cluster_levels([0.0043, 0.00431, 0.00432], tolerance_pct=5)
+        assert clusters[0]["price"] != 0.0, "sub-cent cluster price collapsed to 0.0 by 2dp rounding"
+        assert clusters[0]["price"] == round(0.00431, 6)
 
 
 class TestExtractOHLCV:

@@ -1,6 +1,6 @@
 """market-squeeze — L1 indicator: Bollinger Band / Keltner Channel squeeze momentum."""
 
-from analysis.formatting import safe_round
+from analysis.formatting import round_price, safe_round
 from analysis.indicators import classify_squeeze, compute_squeeze, extract_ohlcv, true_range
 
 
@@ -65,7 +65,7 @@ def analyze(candles, interval="1d", period="1y"):
     histogram = [safe_round(v, 4) if v is not None else None for v in mom_vals[-10:]]
 
     return {
-        "current_price": safe_round(current_price, 2),
+        "current_price": round_price(current_price),
         "squeeze_on": squeeze_on,
         "momentum": safe_round(momentum, 4) if momentum is not None else None,
         "direction": direction,

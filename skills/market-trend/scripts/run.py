@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, safe_parse_args
+from analysis.formatting import format_price, print_header, safe_parse_args
 from analysis.output import (
     cache_run_result,
     emit_envelope_json,
@@ -95,7 +95,7 @@ def main():
 
     ind = result
     print_header("TREND STRUCTURE")
-    print(f"  {ticker}  (price: {ind.get('current_price', 0):,.2f})")
+    print(f"  {ticker}  (price: {format_price(ind.get('current_price', 0))})")
     print()
     print(f"    Alignment:     {ind.get('alignment', 'N/A')}  (price above {ind.get('price_above_emas', 0)}/4 EMAs)")
     emas = [
@@ -108,7 +108,7 @@ def main():
         if val is not None:
             pos = "\u25b2" if ind.get("current_price", 0) > val else "\u25bc"
             pct = (ind.get("current_price", 0) - val) / val * 100
-            print(f"      EMA {label}:  {val:>10,.2f}  ({pct:+.1f}%) {pos}")
+            print(f"      EMA {label}:  {format_price(val):>10}  ({pct:+.1f}%) {pos}")
     print()
     print(f"    HH Structure:  {ind.get('higher_high', 'N/A')}")
     print(f"    HL Structure:  {ind.get('higher_low', 'N/A')}")

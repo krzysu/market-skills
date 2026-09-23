@@ -4,7 +4,7 @@
 import sys
 
 from analysis.data import fetch_funding_rate, fetch_ohlc
-from analysis.formatting import print_header, safe_round
+from analysis.formatting import print_header, round_price, safe_round
 from analysis.indicators import (
     classify_ema_trend,
     classify_squeeze,
@@ -40,7 +40,7 @@ def _analyze_one(data, label):
     else:
         trend = "NEUTRAL"
     return {
-        "price": safe_round(price, 4),
+        "price": round_price(price),
         "ema21": safe_round(ema21, 4),
         "ema50": safe_round(ema50, 4),
         "rsi": safe_round(rsi, 1),
@@ -83,10 +83,17 @@ def analyze(ticker, source="ccxt:binance", *, interval="1d", period="6mo"):
     if not spot and not perp:
         return {"ticker": ticker, "error": "no data from provider", "interval": interval, "period": period}
 
-    # Basis
+    # Basis — derived from the UNROUNDED closes, never from the rounded `price`
+    # field. `price` is a magnitude-rounded DISPLAY value (2dp for anything >= $1);
+    # the basis is a difference of two nearly-equal prices, so rounding both sides
+    # to 2dp quantizes it to whole cents and silently zeroes it for the $1-$1000
+    # asset range. `extract_ohlcv` is already imported and both frames are known
+    # valid here (`_analyze_one` returned non-None, so each has >= 50 rows).
     if spot and perp:
-        basis_abs = perp["price"] - spot["price"]
-        basis_pct = ((perp["price"] / spot["price"]) - 1) * 100
+        spot_close = extract_ohlcv(spot_data)[3][-1]
+        perp_close = extract_ohlcv(perp_data)[3][-1]
+        basis_abs = perp_close - spot_close
+        basis_pct = ((perp_close / spot_close) - 1) * 100
         result["basis"] = {
             "absolute": safe_round(basis_abs, 4),
             "percent": safe_round(basis_pct, 4),

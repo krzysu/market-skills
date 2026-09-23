@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, safe_parse_args
+from analysis.formatting import format_price, print_header, safe_parse_args
 from analysis.output import (
     cache_run_result,
     emit_envelope_json,
@@ -63,6 +63,11 @@ def analyze(ticker, *, source=None, interval="1d", period="1y"):
     }
 
 
+def _typed_price(value):
+    """format_price for numbers; pass 'N/A' through untouched."""
+    return format_price(value) if isinstance(value, (int, float)) else value
+
+
 def _help_lines(ticker: str) -> list[str]:
     return [
         f"Run `market-fibonacci {ticker} --json` for retracement levels",
@@ -99,18 +104,18 @@ def main():
 
     ind = result
     print_header("SUPPORT & RESISTANCE")
-    print(f"  {ticker}  (price: {ind.get('current_price', 0):,.2f})")
+    print(f"  {ticker}  (price: {format_price(ind.get('current_price', 0))})")
     print()
     if ind.get("nearest_resistance") is not None:
         r_dist = ind.get("resistance_distance_pct", 0)
         r_touches = ind.get("resistance_touches", 0)
-        print(f"    Resistance: {ind['nearest_resistance']:>10,.2f}  ({r_dist:+.2f}%, {r_touches} touches)")
+        print(f"    Resistance: {_typed_price(ind['nearest_resistance']):>10}  ({r_dist:+.2f}%, {r_touches} touches)")
     else:
         print("    Resistance: None")
     if ind.get("nearest_support") is not None:
         s_dist = ind.get("support_distance_pct", 0)
         s_touches = ind.get("support_touches", 0)
-        print(f"    Support:    {ind['nearest_support']:>10,.2f}  ({s_dist:+.2f}%, {s_touches} touches)")
+        print(f"    Support:    {_typed_price(ind['nearest_support']):>10}  ({s_dist:+.2f}%, {s_touches} touches)")
     else:
         print("    Support:    None")
     print()

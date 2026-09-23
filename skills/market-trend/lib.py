@@ -1,6 +1,6 @@
 """market-trend — Trend structure analysis: EMA alignment, HH/HL, slope."""
 
-from analysis.formatting import safe_round
+from analysis.formatting import round_price, safe_round
 from analysis.indicators import (
     compute_ema,
     detect_crossover,
@@ -173,11 +173,11 @@ def analyze(candles, interval="1d", period="1y"):
         zone = "neutral"
 
     return {
-        "current_price": safe_round(current_price, 2),
-        "ema_21": safe_round(ema_21, 2) if ema_21 else None,
-        "ema_50": safe_round(ema_50, 2) if ema_50 else None,
-        "ema_100": safe_round(ema_100, 2) if ema_100 else None,
-        "ema_200": safe_round(ema_200, 2) if ema_200 else None,
+        "current_price": round_price(current_price),
+        "ema_21": round_price(ema_21) if ema_21 else None,
+        "ema_50": round_price(ema_50) if ema_50 else None,
+        "ema_100": round_price(ema_100) if ema_100 else None,
+        "ema_200": round_price(ema_200) if ema_200 else None,
         "alignment": alignment,
         "price_above_emas": above_count,
         "higher_high": higher_high,

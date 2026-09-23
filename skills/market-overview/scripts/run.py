@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from analysis.bars import closed_bars
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, safe_round
+from analysis.formatting import format_price, print_header, round_price, safe_round
 from analysis.indicators import (
     classify_ema_trend,
     classify_squeeze,
@@ -93,7 +93,7 @@ def _analyze_one(ticker, source=None, interval=DEFAULT_INTERVAL, period=DEFAULT_
 
         return {
             "ticker": ticker,
-            "price": safe_round(price, 2),
+            "price": round_price(price),
             "trend": trend,
             "rsi": safe_round(rsi),
             "squeeze": squee_signal,
@@ -209,7 +209,7 @@ def main():
         print(f"  {'-' * 10} {'-' * 10} {'-' * 16} {'-' * 6} {'-' * 16} {'-' * 6} {'-' * 10}")
         for r in results:
             print(
-                f"  {r['ticker']:<10} {r['price']:>10,.2f} {r['trend']:<16} {r['rsi']:>6} {r['squeeze']:<16} {r['unified_score']:>6.0f} {r['action']}"
+                f"  {r['ticker']:<10} {format_price(r['price']):>10} {r['trend']:<16} {r['rsi']:>6} {r['squeeze']:<16} {r['unified_score']:>6.0f} {r['action']}"
             )
     else:
         print("  No tickers matched the filter.")

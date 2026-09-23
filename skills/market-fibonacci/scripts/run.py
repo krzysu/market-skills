@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, safe_parse_args
+from analysis.formatting import format_price, print_header, safe_parse_args
 from analysis.output import (
     cache_run_result,
     emit_envelope_json,
@@ -59,6 +59,11 @@ def analyze(ticker, *, source=None, interval="1d", period="1y"):
     }
 
 
+def _typed_price(value):
+    """format_price for numbers; pass non-numeric placeholders (e.g. 'N/A') through."""
+    return format_price(value) if isinstance(value, (int, float)) else value
+
+
 def _help_lines(ticker: str) -> list[str]:
     return [
         f"Run `market-s-r {ticker} --json` for S/R cluster context",
@@ -95,10 +100,10 @@ def main():
 
     ind = result
     print_header("FIBONACCI LEVELS")
-    print(f"  {ticker}  (price: {ind.get('current_price', 0):,.2f})")
+    print(f"  {ticker}  (price: {format_price(ind.get('current_price', 0))})")
     print()
-    print(f"    Swing High:  {ind.get('swing_high', 'N/A'):>10,.2f}")
-    print(f"    Swing Low:   {ind.get('swing_low', 'N/A'):>10,.2f}")
+    print(f"    Swing High:  {_typed_price(ind.get('swing_high', 'N/A')):>10}")
+    print(f"    Swing Low:   {_typed_price(ind.get('swing_low', 'N/A')):>10}")
     print(f"    Position:    {ind.get('current_position', 'N/A')}")
     print()
     print("    Fibonacci Levels:")
@@ -108,7 +113,7 @@ def main():
             marker = "  \u2190 support"
         elif ind.get("nearest_fib_resistance") and val == ind["nearest_fib_resistance"]:
             marker = "  \u2190 resistance"
-        print(f"      {key:>5}:  {val:>10,.2f}{marker}")
+        print(f"      {key:>5}:  {format_price(val):>10}{marker}")
     print()
     if ind.get("nearest_fib_distance_pct") is not None:
         print(f"    Distance to nearest fib level: {ind['nearest_fib_distance_pct']:.2f}%")

@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, safe_parse_args
+from analysis.formatting import format_price, print_header, safe_parse_args
 from analysis.output import (
     cache_run_result,
     emit_envelope_json,
@@ -51,6 +51,11 @@ def analyze(ticker, *, source=None, interval="1d", period="1y"):
     }
 
 
+def _typed_price(value):
+    """format_price for numbers; pass 'N/A' through untouched."""
+    return format_price(value) if isinstance(value, (int, float)) else value
+
+
 def _help_lines(ticker: str) -> list[str]:
     return [
         f"Run `market-breakout {ticker} --json` to see volume-confirmed breakouts",
@@ -86,7 +91,7 @@ def main():
 
     ind = result
     print_header("VOLUME ANALYSIS")
-    print(f"  {ticker}  (price: {ind.get('current_price', 'N/A'):>10,.2f})")
+    print(f"  {ticker}  (price: {_typed_price(ind.get('current_price', 'N/A')):>10})")
     print()
     print(
         f"    Volume:         {ind.get('current_volume', 'N/A'):>12,.0f}  (SMA20: {ind.get('sma_volume_20', 'N/A'):>10,.0f})"

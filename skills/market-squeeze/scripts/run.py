@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, safe_parse_args
+from analysis.formatting import format_price, print_header, safe_parse_args
 from analysis.output import (
     cache_run_result,
     emit_envelope_json,
@@ -86,7 +86,7 @@ def main():
 
     ind = result
     print_header("SQUEEZE MOMENTUM")
-    print(f"  {ticker}  (price: {ind.get('current_price', 0):,.2f})")
+    print(f"  {ticker}  (price: {format_price(ind.get('current_price', 0))})")
     print(f"    Squeeze:    {'ON \u2014 compression' if ind.get('squeeze_on') else 'OFF \u2014 released'}")
     print(f"    Momentum:   {ind.get('momentum', 'N/A')} ({ind.get('direction', 'N/A')})")
     print(f"    Signal:     {ind.get('signal', 'N/A')}")

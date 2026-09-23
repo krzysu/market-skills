@@ -14,6 +14,16 @@ def safe_round(val, ndigits=2):
     return round(val, ndigits)
 
 
+def _price_ndigits(value):
+    """Decimal places for a price at ``value`` under the magnitude bands (see round_price)."""
+    av = abs(value)
+    if av < 0.01:
+        return 6
+    if av < 1:
+        return 4
+    return 2
+
+
 def round_price(value, ndigits=None):
     """Round a price to a precision matching its magnitude.
 
@@ -36,12 +46,23 @@ def round_price(value, ndigits=None):
         return None
     if ndigits is not None:
         return round(value, ndigits)
-    av = abs(value)
-    if av < 0.01:
-        return round(value, 6)
-    if av < 1:
-        return round(value, 4)
-    return round(value, 2)
+    return round(value, _price_ndigits(value))
+
+
+def format_price(value):
+    """Format a price for fixed-width display under the round_price magnitude bands.
+
+    Sub-0.01 renders 6 dp and sub-$1 renders 4 dp so sub-cent assets show
+    non-zero digits (a plain ``,.2f`` would print ``0.00``); the >= $1 band
+    keeps the 2 dp + thousands-separator layout. Returns a ``str`` (``""`` for
+    ``None``), so the CLI table can right-pad it like any other field.
+    """
+    if value is None:
+        return ""
+    nd = _price_ndigits(value)
+    if nd == 2:
+        return f"{round(value, nd):,.2f}"
+    return f"{round(value, nd):.{nd}f}"
 
 
 def emit_json(data):

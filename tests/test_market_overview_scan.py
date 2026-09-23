@@ -153,3 +153,40 @@ def test_analyze_one_price_is_forming_bar_close_and_indicators_are_closed_bar(mo
     assert seen["volumes"][-1] == 1_000_000
     assert 999.99 not in seen["closes"]
     assert 5_000_000 not in seen["volumes"]
+
+
+def _sub_cent_series(n_closed=240, base=0.0043):
+    """Sub-cent uptrend of ``n_closed`` closed 4h bars plus a trailing forming bar.
+
+    Shaped like the real fetch: ``[ts, open, high, low, close, volume]``. The
+    forming bar's close (0.004364) differs from the last closed close (0.0043)
+    so the reported ``price`` field discriminates between the two paths.
+    """
+    last_closed_ts = FIXED_NOW - 3600 - FOUR_H  # closes 1h ago
+    candles = []
+    for i in range(n_closed):
+        close = base + i * 0.000002  # gentle drift, stays under $0.01
+        ts = last_closed_ts - (n_closed - 1 - i) * FOUR_H
+        candles.append([ts, close - 0.0000005, close + 0.000001, close - 0.000001, close, 1_000_000])
+    candles.append([FIXED_NOW - 3600, 0.0043, 0.0044, 0.0043, 0.004364, 5_000_000])  # ~1h elapsed: forming
+    return candles
+
+
+def test_analyze_one_sub_cent_price_is_not_collapsed_to_zero(monkeypatch):
+    """Sub-cent asset: ``price`` must report the real value at 6dp, not 0.0.
+
+    Discriminating: pre-fix ``price`` was ``safe_round(price, 2)`` which rounds
+    any value below $0.005 to 0.0.
+    """
+    import analysis.bars as bars_mod
+
+    run = _load_run()
+    raw = _sub_cent_series()
+    monkeypatch.setattr(run, "fetch_ohlc", lambda ticker, **kwargs: [row[:] for row in raw])
+    monkeypatch.setattr(bars_mod, "now_epoch", lambda: FIXED_NOW)
+
+    result = run._analyze_one("SUBX")
+
+    assert result["price"] != 0.0, "sub-cent price collapsed to 0.0 by 2dp rounding"
+    assert result["price"] == round(raw[-1][4], 6)
+    assert result["price"] == 0.004364

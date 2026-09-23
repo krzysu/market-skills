@@ -1,6 +1,6 @@
 """market-s-r — Support and Resistance from swing point clustering."""
 
-from analysis.formatting import safe_round
+from analysis.formatting import round_price, safe_round
 from analysis.indicators import (
     cluster_levels,
     extract_ohlcv,
@@ -79,9 +79,9 @@ def analyze(candles, interval="1d", period="1y"):
     on_level = any(abs(current_price - level) / current_price * 100 < 0.1 for level in all_swing_levels)
 
     return {
-        "current_price": safe_round(current_price, 2),
-        "nearest_support": safe_round(nearest_s, 2) if nearest_s else None,
-        "nearest_resistance": safe_round(nearest_r, 2) if nearest_r else None,
+        "current_price": round_price(current_price),
+        "nearest_support": round_price(nearest_s) if nearest_s else None,
+        "nearest_resistance": round_price(nearest_r) if nearest_r else None,
         "support_distance_pct": safe_round(support_dist_pct, 2) if support_dist_pct is not None else None,
         "resistance_distance_pct": safe_round(resistance_dist_pct, 2) if resistance_dist_pct is not None else None,
         "support_touches": support_touches,

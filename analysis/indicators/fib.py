@@ -1,5 +1,7 @@
 """Fibonacci retracement and extension level functions."""
 
+from analysis.formatting import round_price
+
 
 def compute_fib_levels(swing_low, swing_high, fib_levels=None, fib_extensions=None):
     """Compute Fibonacci retracement and extension levels."""
@@ -11,8 +13,8 @@ def compute_fib_levels(swing_low, swing_high, fib_levels=None, fib_extensions=No
     levels = {}
     for fib in fib_levels:
         price = swing_high - diff * fib
-        levels[str(fib)] = round(price, 2)
+        levels[str(fib)] = round_price(price)
     for fib in fib_extensions:
         price = swing_high + diff * (fib - 1)
-        levels[str(fib)] = round(price, 2)
+        levels[str(fib)] = round_price(price)
     return levels

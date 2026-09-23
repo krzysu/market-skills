@@ -1,6 +1,6 @@
 """market-volume — Volume analysis: ratio, OBV trend, regime classification."""
 
-from analysis.formatting import safe_round
+from analysis.formatting import round_price, safe_round
 from analysis.indicators import (
     compute_obv_trend,
     compute_sma,
@@ -48,7 +48,7 @@ def analyze(candles, interval="1d", period="1y"):
     obv_divergence = detect_obv_divergence(closes, volumes, swing_window=14, lookback=28)
 
     return {
-        "current_price": safe_round(current_price, 2),
+        "current_price": round_price(current_price),
         "current_volume": safe_round(current_volume, 0),
         "sma_volume_20": safe_round(sma_vol, 0) if sma_vol else None,
         "volume_ratio": safe_round(volume_ratio, 2) if volume_ratio else None,

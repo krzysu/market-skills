@@ -1,6 +1,6 @@
 """market-ema — L1 indicator: EMA filter and trend structure analysis."""
 
-from analysis.formatting import safe_round
+from analysis.formatting import round_price, safe_round
 from analysis.indicators import compute_ema, detect_crossover, ema_slope_pct, extract_ohlcv
 
 
@@ -57,11 +57,11 @@ def analyze(candles, interval="1d", period="1y"):
         score = -1
 
     return {
-        "current_price": safe_round(current_price, 2),
-        "ema_21": safe_round(ema_21, 2) if ema_21 else None,
-        "ema_50": safe_round(ema_50, 2) if ema_50 else None,
-        "ema_100": safe_round(ema_100, 2) if ema_100 else None,
-        "ema_200": safe_round(ema_200, 2) if ema_200 else None,
+        "current_price": round_price(current_price),
+        "ema_21": round_price(ema_21) if ema_21 else None,
+        "ema_50": round_price(ema_50) if ema_50 else None,
+        "ema_100": round_price(ema_100) if ema_100 else None,
+        "ema_200": round_price(ema_200) if ema_200 else None,
         "alignment": alignment,
         "price_above_emas": above_count,
         "slope_21_pct": safe_round(slope_21, 3) if slope_21 is not None else None,

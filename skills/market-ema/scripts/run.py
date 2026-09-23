@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 
 from analysis.data import fetch_ohlc
-from analysis.formatting import print_header, safe_parse_args
+from analysis.formatting import format_price, print_header, safe_parse_args
 from analysis.output import (
     cache_run_result,
     emit_envelope_json,
@@ -93,7 +93,7 @@ def main():
 
     ind = result
     print_header("EMA TREND STRUCTURE")
-    print(f"  {ticker}  (price: {ind.get('current_price', 0):,.2f})")
+    print(f"  {ticker}  (price: {format_price(ind.get('current_price', 0))})")
     print()
     labels = [
         ("EMA 21", ind.get("ema_21")),
@@ -105,7 +105,7 @@ def main():
         if val:
             pos = "\u25b2" if ind.get("current_price", 0) > val else "\u25bc"
             pct = (ind.get("current_price", 0) - val) / val * 100
-            print(f"    {label}:  {val:,.2f}  ({pct:+.1f}%) {pos}")
+            print(f"    {label}:  {format_price(val)}  ({pct:+.1f}%) {pos}")
     print()
     print(f"    Alignment:  {ind.get('alignment', 'N/A')} (price above {ind.get('price_above_emas', 0)}/4 EMAs)")
     if ind.get("slope_21_pct") is not None:

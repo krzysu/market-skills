@@ -1,5 +1,7 @@
 """Swing detection and support/resistance functions."""
 
+from analysis.formatting import round_price
+
 
 def find_swing_highs(highs, window=3):
     """Find local price maxima."""
@@ -86,7 +88,7 @@ def cluster_levels(levels, tolerance_pct=1.5):
             current = [price]
     clusters.append(current)
 
-    return [{"price": round(sum(c) / len(c), 2), "touches": len(c)} for c in clusters]
+    return [{"price": round_price(sum(c) / len(c)), "touches": len(c)} for c in clusters]
 
 
 def find_sr_levels(candles, current_price, window=3):

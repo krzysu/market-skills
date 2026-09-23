@@ -1,6 +1,6 @@
 """market-fibonacci — Fibonacci retracement and extension levels."""
 
-from analysis.formatting import safe_round
+from analysis.formatting import round_price, safe_round
 from analysis.indicators import compute_fib_levels, extract_ohlcv, find_swing_high, find_swing_low
 
 
@@ -71,12 +71,12 @@ def analyze(candles, interval="1d", period="1y"):
         nearest_fib_distance_pct = safe_round(((nearest_fib_resistance - current_price) / current_price) * 100, 2)
 
     return {
-        "swing_high": safe_round(swing_high_price, 2),
-        "swing_low": safe_round(swing_low_price, 2),
+        "swing_high": round_price(swing_high_price),
+        "swing_low": round_price(swing_low_price),
         "current_position": current_position,
-        "fib_levels": {k: safe_round(v, 2) for k, v in fib_levels.items()},
-        "nearest_fib_support": safe_round(nearest_fib_support, 2) if nearest_fib_support else None,
-        "nearest_fib_resistance": safe_round(nearest_fib_resistance, 2) if nearest_fib_resistance else None,
+        "fib_levels": {k: round_price(v) for k, v in fib_levels.items()},
+        "nearest_fib_support": round_price(nearest_fib_support) if nearest_fib_support else None,
+        "nearest_fib_resistance": round_price(nearest_fib_resistance) if nearest_fib_resistance else None,
         "nearest_fib_distance_pct": nearest_fib_distance_pct,
-        "current_price": safe_round(current_price, 2),
+        "current_price": round_price(current_price),
     }

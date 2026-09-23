@@ -1,6 +1,6 @@
 """market-rsi — L1 indicator: RSI momentum oscillator."""
 
-from analysis.formatting import safe_round
+from analysis.formatting import round_price, safe_round
 from analysis.indicators import compute_rsi, extract_ohlcv
 
 
@@ -49,7 +49,7 @@ def analyze(candles, interval="1d", period="1y"):
         trend = None
 
     return {
-        "current_price": safe_round(current_price, 2),
+        "current_price": round_price(current_price),
         "rsi_14": safe_round(rsi),
         "rsi_7d_ago": safe_round(rsi_prev) if rsi_prev else None,
         "rsi_delta_7d": rsi_delta,

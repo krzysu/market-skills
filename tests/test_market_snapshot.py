@@ -274,6 +274,63 @@ def _load_snapshot_run():
     return mod
 
 
+def _make_sub_cent_candles(n=120, base=0.0035):
+    """Sub-cent candle series ``[ts, open, high, low, close, volume]``.
+
+    Gentle drift keeps every close below $0.01 so the whole series exercises
+    the sub-cent band (6dp under round_price).
+    """
+    out = []
+    price = base
+    for i in range(n):
+        open_p = price
+        close_p = price + 0.000004  # deterministic gentle uptrend
+        high_p = close_p + 0.000002
+        low_p = open_p - 0.000002
+        price = close_p
+        out.append([i * 86400, open_p, high_p, low_p, close_p, 200_000])
+    return out
+
+
+class TestSubCentPrice:
+    def test_sub_cent_current_price_not_collapsed_to_zero(self, monkeypatch):
+        """Sub-cent asset: ``current_price`` must be 6dp non-zero, not 0.0.
+
+        Discriminating: pre-fix ``current_price`` was ``safe_round(price, 2)``
+        which rounds any value below $0.005 to 0.0.
+        """
+        _canned_skills(monkeypatch)
+        mod = _load_snapshot_lib()
+        candles = _make_sub_cent_candles(n=120, base=0.0035)
+        last_close = candles[-1][4]
+        result = mod.analyze(candles, ticker="SUBX", interval="4h", period="6mo")
+
+        assert result["current_price"] != 0.0, "sub-cent price collapsed to 0.0 by 2dp rounding"
+        assert result["current_price"] == round(last_close, 6)
+        assert result["current_price"] == 0.00398
+
+    def test_sub_cent_caller_supplied_current_price_not_collapsed(self, monkeypatch):
+        _canned_skills(monkeypatch)
+        mod = _load_snapshot_lib()
+        candles = _make_sub_cent_candles(n=120, base=0.0035)
+        result = mod.analyze(candles, ticker="SUBX", interval="4h", period="6mo", current_price=0.004364)
+        assert result["current_price"] != 0.0
+        assert result["current_price"] == round(0.004364, 6)
+        assert result["current_price"] == 0.004364
+
+    def test_sub_dollar_band_gets_4dp(self, monkeypatch):
+        """Sub-$1 but above 1 cent: 4dp band, never collapsed to 0.0."""
+        _canned_skills(monkeypatch)
+        mod = _load_snapshot_lib()
+        candles = []
+        for i in range(120):
+            price = 0.30 + i * 0.001  # stays in [0.30, 0.42]
+            candles.append([i * 86400, price - 0.0005, price + 0.001, price - 0.001, price, 200_000])
+        result = mod.analyze(candles, ticker="SUBX", interval="4h", period="6mo")
+        last_close = candles[-1][4]
+        assert result["current_price"] == round(last_close, 4)
+
+
 class TestRunPassesFormingBarClose:
     """Script level: the caller fetches the raw series, trims it for the lib's
     indicator inputs, and passes the forming bar's close as ``current_price``."""
