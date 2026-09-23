@@ -25,9 +25,26 @@ def list_portfolios(db_path: str) -> list[dict]:
 
 
 def get_portfolio(db_path: str, id_or_name: int | str) -> dict | None:
+    """Resolve one portfolio by numeric id first, then by exact name.
+
+    The single shared id-or-name rule every portfolio-addressing verb
+    uses: an ``int`` (or a digit-only string such as ``"2"``) is looked
+    up by id, and a digit-only string matching no id falls back to a
+    name lookup (a portfolio legitimately named ``"2"`` still resolves).
+    A digit-only token that cannot be bound as an id (too large for a
+    SQLite INTEGER, or a non-decimal digit character such as ``"²"``)
+    misses the id lookup softly and takes the same name fallback. Any
+    other string is an exact, case-sensitive name lookup. Returns
+    ``None`` when nothing matches.
+    """
     conn = get_db(db_path)
-    if isinstance(id_or_name, int):
-        row = conn.execute("SELECT * FROM portfolios WHERE id = ?", (id_or_name,)).fetchone()
+    if isinstance(id_or_name, int) or (isinstance(id_or_name, str) and id_or_name.isdigit()):
+        try:
+            row = conn.execute("SELECT * FROM portfolios WHERE id = ?", (int(id_or_name),)).fetchone()
+        except (ValueError, OverflowError):
+            row = None
+        if row is None and isinstance(id_or_name, str):
+            row = conn.execute("SELECT * FROM portfolios WHERE name = ?", (id_or_name,)).fetchone()
     else:
         row = conn.execute("SELECT * FROM portfolios WHERE name = ?", (id_or_name,)).fetchone()
     conn.close()

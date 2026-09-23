@@ -53,34 +53,21 @@ def _parse_price_overrides(raw: list[str] | None) -> dict[str, float]:
 
 
 def _resolve_portfolio_id(raw: str | int | None, db_path: str) -> int | None:
-    """Resolve ``--portfolio`` argument to a portfolio id.
+    """Resolve a ``--portfolio`` argument to a portfolio id.
 
-    Accepts either an integer id (``"2"`` or ``2``) or a portfolio name
-    (``"defi"``, case-sensitive — matches what ``portfolio show
-    id_or_name`` does). Returns ``None`` when no portfolio matches, so
-    callers can render a friendly error instead of a stack trace.
-
-    Lookup precedence: numeric ids first (so ``"2"`` resolves to id 2
-    even if a portfolio is also named ``"2"``), then by name. This
-    mirrors how ``portfolio show <id_or_name>`` resolves.
+    Delegates to ``portfolio.db.get_portfolio`` — the single shared
+    id-or-name rule every portfolio-addressing verb uses: a digit-only
+    token resolves as an id when such an id exists, then falls back to
+    the exact, case-sensitive name; any other string is a name lookup.
+    ``portfolio show`` / ``rename`` / ``delete`` resolve through the
+    same function, so all verbs behave identically. Returns ``None``
+    when no portfolio matches, so callers can render a friendly error
+    instead of a stack trace.
     """
     if raw is None:
         return None
-    # Try numeric id first — parse "2" as int, look up. Falls through
-    # to name lookup only when the string isn't a clean integer or no
-    # row matched.
-    if isinstance(raw, str) and raw.isdigit():
-        pf = get_portfolio(db_path, int(raw))
-        if pf:
-            return int(pf["id"])
-    elif isinstance(raw, int):
-        pf = get_portfolio(db_path, raw)
-        if pf:
-            return int(pf["id"])
     pf = get_portfolio(db_path, raw)
-    if not pf:
-        return None
-    return int(pf["id"])
+    return int(pf["id"]) if pf else None
 
 
 # ───────────────────────────────────────────────────────────────── subcommands
@@ -119,7 +106,7 @@ def cmd_portfolio_show(args):
     pf = get_portfolio(args.db, args.id_or_name)
     if not pf:
         print(f"No portfolio matching '{args.id_or_name}'", file=sys.stderr)
-        return
+        sys.exit(1)
     if args.json:
         print(json.dumps(pf, indent=2))
         return
@@ -128,25 +115,31 @@ def cmd_portfolio_show(args):
 
 
 def cmd_portfolio_rename(args):
-    if rename_portfolio(args.db, args.id, args.name):
+    pf = get_portfolio(args.db, args.id_or_name)
+    if not pf:
+        print(f"No portfolio matching '{args.id_or_name}'", file=sys.stderr)
+        sys.exit(1)
+    pid = int(pf["id"])
+    if rename_portfolio(args.db, pid, args.name):
         if not args.json:
-            print(f"Renamed portfolio {args.id} to '{args.name}'")
+            print(f"Renamed portfolio {pid} to '{args.name}'")
 
 
 def cmd_portfolio_delete(args):
+    pf = get_portfolio(args.db, args.id_or_name)
+    if not pf:
+        print(f"No portfolio matching '{args.id_or_name}'", file=sys.stderr)
+        sys.exit(1)
+    pid = int(pf["id"])
     if not args.yes:
-        pf = get_portfolio(args.db, args.id)
-        if not pf:
-            print(f"Portfolio {args.id} not found", file=sys.stderr)
-            sys.exit(1)
-        tx_count = len(list_transactions(args.db, portfolio_id=args.id))
+        tx_count = len(list_transactions(args.db, portfolio_id=pid))
         resp = input(f"Permanently delete portfolio '{pf['name']}' and its {tx_count} transactions? [y/N] ")
         if resp.lower() != "y":
             print("Cancelled.")
             return
-    if delete_portfolio(args.db, args.id):
+    if delete_portfolio(args.db, pid):
         if not args.json:
-            print(f"Deleted portfolio {args.id} (all transactions removed)")
+            print(f"Deleted portfolio {pid} (all transactions removed)")
 
 
 def cmd_add(args):
@@ -665,12 +658,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_portfolio_show)
 
     p = pf_sub.add_parser("rename", help="Rename a portfolio", parents=[shared])
-    p.add_argument("id", type=int)
+    p.add_argument("id_or_name")
     p.add_argument("name")
     p.set_defaults(func=cmd_portfolio_rename)
 
     p = pf_sub.add_parser("delete", help="Permanently delete a portfolio and its transactions", parents=[shared])
-    p.add_argument("id", type=int)
+    p.add_argument("id_or_name")
     p.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     p.set_defaults(func=cmd_portfolio_delete)
 

@@ -15,6 +15,7 @@ hardcoded user-home path.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -147,3 +148,131 @@ def test_no_host_specific_portfolio_paths_in_code_or_docs():
         "Use $MARKET_SKILLS_PORTFOLIO_DB and raise on unset:\n"
         + "\n".join(f"  {p.relative_to(REPO_ROOT)}:{n}: {line}" for p, n, line in offenders)
     )
+
+
+# ───────────────────────────── portfolio id-or-name CLI resolution ──────────
+
+
+def _run_cli(db_path: Path, *argv: str) -> subprocess.CompletedProcess:
+    """Drive the REAL portfolio-mgmt CLI against a scratch DB."""
+    return subprocess.run(
+        [sys.executable, "skills/portfolio-mgmt/scripts/run.py", *argv],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=REPO_ROOT,
+        env={**os.environ, "MARKET_SKILLS_PORTFOLIO_DB": str(db_path)},
+    )
+
+
+@pytest.fixture
+def cli_db(tmp_path):
+    """Initialized DB holding one synthetic portfolio (``alpha``).
+
+    Returns ``(db_path, id_as_str)`` — the id comes from the CLI's own
+    ``portfolio create --json`` output, never a hardcoded value.
+    """
+    from portfolio.db import init_db
+
+    db = tmp_path / "p.db"
+    init_db(str(db))
+    created = _run_cli(db, "portfolio", "create", "--json", "--name", "alpha")
+    assert created.returncode == 0, created.stderr
+    return db, str(json.loads(created.stdout)["id"])
+
+
+class TestPortfolioIdOrNameCli:
+    """``portfolio show`` / ``rename`` / ``delete`` must resolve the same
+    id-or-name rule as the ``--portfolio`` flag — a digit-only token as an
+    id when such an id exists, else the exact name — and a miss must exit
+    non-zero, never as a silent success. Synthetic portfolios only.
+
+    Pre-fix, (a) ``show <id>`` printed ``No portfolio matching`` with exit 0,
+    and (b)/(c) ``rename`` / ``delete`` by name died in argparse with
+    ``invalid int value`` (exit 2) — each test below fails on that shape.
+    Two further tests pin the fail-soft id conversion: a digit token that
+    cannot be a SQLite id (too large, or non-decimal like ``²``) must miss
+    with the friendly stderr line and exit 1, never a traceback.
+    """
+
+    def test_show_by_numeric_id(self, cli_db):
+        db, pid = cli_db
+        proc = _run_cli(db, "portfolio", "show", pid)
+        assert proc.returncode == 0, proc.stderr
+        assert "alpha" in proc.stdout
+
+    def test_show_by_name(self, cli_db):
+        db, _pid = cli_db
+        proc = _run_cli(db, "portfolio", "show", "alpha")
+        assert proc.returncode == 0, proc.stderr
+        assert "alpha" in proc.stdout
+
+    def test_show_unknown_exits_nonzero_with_no_stdout(self, cli_db):
+        db, _pid = cli_db
+        proc = _run_cli(db, "portfolio", "show", "nosuch")
+        assert proc.returncode == 1
+        assert proc.stdout == ""
+        assert "No portfolio matching 'nosuch'" in proc.stderr
+
+    def test_show_oversized_digit_token_misses_softly(self, cli_db):
+        db, _pid = cli_db
+        token = "99999999999999999999"
+        proc = _run_cli(db, "portfolio", "show", token)
+        assert proc.returncode == 1
+        assert proc.stdout == ""
+        assert f"No portfolio matching '{token}'" in proc.stderr
+        assert "Traceback" not in proc.stdout
+        assert "Traceback" not in proc.stderr
+
+    def test_show_non_decimal_digit_token_misses_softly(self, cli_db):
+        db, _pid = cli_db
+        proc = _run_cli(db, "portfolio", "show", "²")
+        assert proc.returncode == 1
+        assert proc.stdout == ""
+        assert "No portfolio matching '²'" in proc.stderr
+        assert "Traceback" not in proc.stdout
+        assert "Traceback" not in proc.stderr
+
+    def test_delete_by_name(self, cli_db):
+        db, _pid = cli_db
+        proc = _run_cli(db, "portfolio", "delete", "alpha", "--yes")
+        assert proc.returncode == 0, proc.stderr
+        assert "invalid int value" not in proc.stderr
+        listing = _run_cli(db, "portfolio", "list", "--json")
+        assert json.loads(listing.stdout) == []
+
+    def test_rename_by_name(self, cli_db):
+        db, pid = cli_db
+        proc = _run_cli(db, "portfolio", "rename", "alpha", "beta")
+        assert proc.returncode == 0, proc.stderr
+        assert "invalid int value" not in proc.stderr
+        shown = _run_cli(db, "portfolio", "show", pid)
+        assert "beta" in shown.stdout
+
+    def test_delete_by_numeric_id(self, cli_db):
+        db, pid = cli_db
+        proc = _run_cli(db, "portfolio", "delete", pid, "--yes")
+        assert proc.returncode == 0, proc.stderr
+        listing = _run_cli(db, "portfolio", "list", "--json")
+        assert json.loads(listing.stdout) == []
+
+    def test_rename_by_numeric_id(self, cli_db):
+        db, pid = cli_db
+        proc = _run_cli(db, "portfolio", "rename", pid, "beta")
+        assert proc.returncode == 0, proc.stderr
+        shown = _run_cli(db, "portfolio", "show", pid)
+        assert "beta" in shown.stdout
+
+    def test_delete_unknown_exits_nonzero_with_no_stdout(self, cli_db):
+        db, _pid = cli_db
+        proc = _run_cli(db, "portfolio", "delete", "nosuch", "--yes")
+        assert proc.returncode == 1
+        assert proc.stdout == ""
+        assert "No portfolio matching 'nosuch'" in proc.stderr
+
+    def test_rename_unknown_exits_nonzero_with_no_stdout(self, cli_db):
+        db, _pid = cli_db
+        proc = _run_cli(db, "portfolio", "rename", "nosuch", "beta")
+        assert proc.returncode == 1
+        assert proc.stdout == ""
+        assert "No portfolio matching 'nosuch'" in proc.stderr

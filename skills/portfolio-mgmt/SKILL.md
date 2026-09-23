@@ -80,7 +80,7 @@ add --portfolio <NAME> \
 
 The `--notes` JSON should at minimum include `order_id` plus the entry/stop/TP ladder for every trade with a level plan — this makes `pnl` queries answer "did this TP fire?" in one read.
 
-**`--portfolio` accepts name OR integer ID on every subcommand.** `add`, `positions`, `pnl`, `view`, `lots`, `allocation`, `performance`, `replay`, `reconcile`, `export`, and `list` all resolve the argument via `portfolio get_portfolio(id_or_name)` — numeric IDs first, then by name. Use whichever is handier:
+**Portfolio references accept name OR integer ID — everywhere.** Any argument that addresses a portfolio (the `--portfolio` flag on every subcommand that takes one, and the `portfolio show` / `portfolio rename` / `portfolio delete` positionals) resolves through the single shared rule in `portfolio.db.get_portfolio(id_or_name)`: a digit-only token resolves as an id when such an id exists, then falls back to the exact (case-sensitive) name; any other string is a name lookup. Use whichever is handier:
 
 ```bash
 add --portfolio defi --asset=hl:LIT --side buy --qty 100 --price 0.085      # by name
@@ -96,8 +96,8 @@ init                                          # Create database ($MARKET_SKILLS_
 portfolio create --name X [--base-ccy EUR]    # Create a portfolio
 portfolio list                                # List all portfolios
 portfolio show <id|name>                      # Show one portfolio
-portfolio rename <id> <new-name>              # Rename
-portfolio delete <id> [--yes]                   # Permanently delete (prompts unless --yes)
+portfolio rename <id|name> <new-name>         # Rename
+portfolio delete <id|name> [--yes]            # Permanently delete (prompts unless --yes)
 
 add --portfolio X --asset=kraken:BTCUSD --side buy --qty 0.01 --price 45000
 add --notes '{"fng": 12, "rsi": 38}'           # Free text or JSON, @file for reading from path
