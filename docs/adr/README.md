@@ -42,6 +42,7 @@ ADRs are append-only. To reverse a decision, write a new ADR with
 | [0006](./0006-minimum-trades-guard.md) | Minimum-trades guard for backtest conviction floors | accepted | 2026-09-17 |
 | [0007](./0007-as-of-last-closed-bar.md) | As-of-last-closed-bar for OHLC consumers | accepted | 2026-09-18 |
 | [0008](./0008-venue-side-stop-fill-detection.md) | Venue-side stop-fill detection in the watchdog | accepted | 2026-09-21 |
+| [0009](./0009-venue-fill-state-lifetime-bound.md) | Venue-fill candidates live within the watch state's lifetime | accepted | 2026-09-23 |
 
 ## Template
 

@@ -12,10 +12,13 @@ the formatter context, invoking the formatter, and printing the result.
 With ``--venue-stops`` the tick also reads the venue's closed-order
 history (read-only) and reports venue-side stop fills — a resting stop
 the venue executed never passes through the execution skill, so this is
-the only notification the exit gets. A detected closure sets a
-``position_closed`` marker in per-watch state: that watch's
-levels/signals are no longer evaluated. ``--status`` stays read-only
-and never reads the venue.
+the only notification the exit gets. Detection is bounded by the watch
+state's lifetime (``watch_state_created_at`` persisted in per-watch
+state): a fill that closed before the state was created is never a
+candidate, so a recreated watch cannot re-report a previous lifetime's
+fills. A detected closure sets a ``position_closed`` marker in per-watch
+state: that watch's levels/signals are no longer evaluated. ``--status``
+stays read-only and never reads the venue.
 
 Exit codes:
   0 — normal tick (silent or alerts printed); also when every enabled watch had a
@@ -683,6 +686,15 @@ def _process_watch(
     position, the levels/signals blocks are skipped for this tick (a closed
     position is not level-evaluated) and the ``position_closed`` marker sticks
     across subsequent ticks.
+
+    Venue detection is additionally bounded by the watch state's lifetime:
+    ``watch_state_created_at`` is resolved here (persisted value first, then
+    the pre-key ``_updated_at`` fallback, else this tick's ``now``), passed
+    into ``evaluate_venue_stop_fills`` and frozen into every returned state —
+    so a fill that closed before the state existed never fires a fresh
+    report. Without the bound, recreating a watch (swing-scan re-add,
+    manual re-add, state-file reset) would start with an empty dedupe
+    ledger and re-report every historical stop fill on the pair.
     """
     name = watch["name"]
     monitor = watch["monitor_provider"]
@@ -731,6 +743,13 @@ def _process_watch(
     raw_state = prev_state or {}
     venue_stop_fills_state = raw_state.get("venue_stop_fills", {})
     position_closed_state = raw_state.get("position_closed")
+    # Anchor of this watch state's lifetime, used by the venue-stop detector's
+    # time bound: a fill that closed before the state existed belongs to a
+    # previous watch lifetime and is never reported. The persisted
+    # ``watch_state_created_at`` wins (frozen at the first tick that resolved
+    # it); ``_updated_at`` covers state files written before the key existed;
+    # a brand-new watch (no state file) anchors on this tick's ``now``.
+    watch_state_created_at = raw_state.get("watch_state_created_at") or raw_state.get("_updated_at") or now.isoformat()
 
     if position_closed_state:
         # Position already closed venue-side: no venue re-detection and no
@@ -742,6 +761,7 @@ def _process_watch(
             "signals": signals_state,
             "venue_stop_fills": venue_stop_fills_state,
             "position_closed": position_closed_state,
+            "watch_state_created_at": watch_state_created_at,
         }
         if dry_run:
             print(f"[DRY-RUN] [{name}] @ {monitor} price={price} position closed venue-side, skipping evaluation")
@@ -752,6 +772,7 @@ def _process_watch(
         venue_state = {
             "venue_stop_fills": venue_stop_fills_state,
             "position_closed": position_closed_state,
+            "watch_state_created_at": watch_state_created_at,
         }
         venue_events, new_venue_state = _pw_lib.evaluate_venue_stop_fills(
             watch, venue_closed_orders, venue_state, now=now
@@ -807,6 +828,7 @@ def _process_watch(
         "signals": signals_state,
         "venue_stop_fills": venue_stop_fills_state,
         "position_closed": position_closed_state,
+        "watch_state_created_at": watch_state_created_at,
     }
 
     if dry_run:

@@ -455,7 +455,7 @@ class TestProviderMismatchWarning:
             patch.object(run, "_state_is_stale", return_value=False),
             patch.object(run, "_build_ctx", return_value={}),
         ):
-            run._process_watch(watch, "/fake/config.json", dt.datetime.now(dt.UTC).timestamp())
+            run._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC), config_path="/fake/config.json")
 
         err = capsys.readouterr().err
         assert "[WARN]" in err
@@ -471,7 +471,7 @@ class TestProviderMismatchWarning:
             patch.object(run, "_state_is_stale", return_value=False),
             patch.object(run, "_build_ctx", return_value={}),
         ):
-            run._process_watch(watch, "/fake/config.json", dt.datetime.now(dt.UTC).timestamp())
+            run._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC), config_path="/fake/config.json")
 
         err = capsys.readouterr().err
         assert "[WARN]" not in err
@@ -486,7 +486,7 @@ class TestProviderMismatchWarning:
             patch.object(run, "_state_is_stale", return_value=False),
             patch.object(run, "_build_ctx", return_value={}),
         ):
-            run._process_watch(watch, "/fake/config.json", dt.datetime.now(dt.UTC).timestamp())
+            run._process_watch(watch, dry_run=False, now=dt.datetime.now(dt.UTC), config_path="/fake/config.json")
 
         err = capsys.readouterr().err
         assert "[WARN]" not in err

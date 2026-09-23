@@ -315,9 +315,21 @@ def _fmt_realised_pnl(event: dict, ctx: dict) -> str:
 
 
 def _format_venue_stop_fill(event: dict, ctx: dict) -> str:
-    """Compact one-liner for a venue-side stop fill."""
+    """Compact one-liner for a venue-side stop fill.
+
+    Three-way closure label: ``POSITION CLOSED`` when the fill covers the
+    held ``position_size``, ``partial exit`` when the size is known and the
+    fill leaves part of it, and ``exit size unknown`` when the watch carries
+    no ``position_size`` (closure cannot be determined) — never a "partial
+    exit" claim the event cannot support.
+    """
     name = _ctx_name(ctx)
-    closure = "POSITION CLOSED" if event.get("closed_position") else "partial exit"
+    if event.get("closed_position"):
+        closure = "POSITION CLOSED"
+    elif event.get("position_size") is None:
+        closure = "exit size unknown"
+    else:
+        closure = "partial exit"
     segment = _fmt_fill_segment(event, ctx)
     return f"🔴 VENUE STOP FILL ({closure}) — {name}: {segment}. P&L {_fmt_realised_pnl(event, ctx)}."
 
@@ -332,18 +344,28 @@ def format_as_default_venue_stop_fill(event: dict, ctx: dict) -> str:
     than the monitor's (the pair match is quote-insensitive) — the cross-quote
     fill is rendered in its own quote, not with the monitor's currency symbol.
 
-    The headline is conditional on ``closed_position``: a partial fill keeps
-    the position monitored, so the render must never claim the position is
-    closed when ``closed_position`` is false.
+    The headline and the continuation line are a three-way split on
+    ``closed_position`` / ``position_size``:
+
+    - ``closed_position`` true → the position is reported closed and no
+      longer monitored.
+    - ``closed_position`` false with no ``position_size`` on the event → the
+      held position size is unknown, so whether the whole position exited
+      cannot be determined; the render says exactly that and that monitoring
+      continues — it never asserts the position is open or calls it a
+      partial exit.
+    - ``closed_position`` false with a known ``position_size`` → a partial
+      exit; the position is still open and monitoring continues.
     """
     name = _ctx_name(ctx)
     fee = event.get("fee")
 
-    headline = (
-        f"🔴 POSITION CLOSED BY VENUE STOP — {name}."
-        if event.get("closed_position")
-        else f"🔴 VENUE STOP FILL (partial exit) — {name}."
-    )
+    if event.get("closed_position"):
+        headline = f"🔴 POSITION CLOSED BY VENUE STOP — {name}."
+    elif event.get("position_size") is None:
+        headline = f"🔴 VENUE STOP FILL — {name}."
+    else:
+        headline = f"🔴 VENUE STOP FILL (partial exit) — {name}."
     lines: list[str] = [
         headline,
         f"  Venue-side fill (no execution-skill call): {_fmt_fill_segment(event, ctx)}.",
@@ -367,6 +389,11 @@ def format_as_default_venue_stop_fill(event: dict, ctx: dict) -> str:
             "  Position closed and no longer monitored. The exit is NOT in the "
             "ledger yet — record it with `portfolio-mgmt add --side sell` so "
             "sync-open-positions prunes the held entry."
+        )
+    elif event.get("position_size") is None:
+        lines.append(
+            "  Held position size unknown (no position_size on the watch) — "
+            "whether the whole position exited cannot be determined; monitoring continues."
         )
     else:
         lines.append("  Partial exit — position still open; monitoring continues.")

@@ -44,6 +44,10 @@ Per-watch state keys added by the venue-stop detector:
   position_closed  — closure record dict (order_id, closed_at, fill_price,
                      filled_volume, reported_at), or absent/None while the
                      position is still open
+  watch_state_created_at — ISO-8601 timestamp anchoring this watch state's
+                     lifetime; stop fills that closed before it (minus a
+                     small grace) belong to a previous watch lifetime and
+                     are never reported
 """
 
 import datetime as _dt
@@ -63,6 +67,14 @@ The executed quantity is the venue's number and ``position_size`` is the
 ledger-derived number; venue/ledger rounding and a fee taken in the base asset
 make a full exit fill slightly smaller than the held size. Anything below 99%
 of the held size is a partial exit and must NOT stop monitoring."""
+
+VENUE_FILL_FRESHNESS_GRACE_SECONDS = 3600.0
+"""Grace window for the watch-state-lifetime bound on venue stop fills.
+
+One 30-minute monitor cadence plus 30 minutes of grace: a fill that landed
+just before the watch's first tick (or whose tick had a failed venue read)
+is still reported, while a multi-day-old fill — one belonging to a previous
+watch lifetime — is not."""
 
 _LEGACY_CODES = {"XBT": "BTC", "XDG": "DOGE"}
 _QUOTE_SUFFIXES = ("USDT", "USDC", "USD", "EUR", "GBP", "JPY")
@@ -419,10 +431,23 @@ def evaluate_venue_stop_fills(
     executed volume on the watch's base asset (see ``venue_pair_matches``).
     Manual ``market`` / ``limit`` sells are deliberately not reported.
 
-    Events are emitted even when the caller's state is stale (>24h). Staleness
-    exists to stop *level* alerts re-firing; a venue fill is reported once ever
-    (exact ``order_id`` dedupe), so suppressing it would silently lose the
-    report.
+    Two-part reporting contract:
+
+    (a) Within one watch-state lifetime an order id is reported once ever
+        (exact ``order_id`` dedupe via the ``venue_stop_fills`` ledger).
+    (b) A fill that closed before the watch state existed is never a
+        candidate for it: the state's ``watch_state_created_at`` (ISO-8601,
+        minus ``VENUE_FILL_FRESHNESS_GRACE_SECONDS``) sets the cutoff, and a
+        datable ``closed_at`` older than that cutoff is skipped — it belongs
+        to a previous watch lifetime (watch recreated by a re-add or
+        state-file reset). An order whose ``closed_at`` is ``None`` cannot
+        be dated and is not filtered; the order-id ledger still dedupes it.
+        When ``watch_state_created_at`` is absent or unparseable no time
+        bound applies.
+
+    Events are still emitted when the caller's state is stale (>24h).
+    Staleness exists to stop *level* alerts re-firing; suppressing a venue
+    fill would silently lose the report.
 
     Once a closure is recorded (``position_closed`` set in ``prev_state``), the
     function returns no events and carries both state keys forward unchanged —
@@ -433,7 +458,24 @@ def evaluate_venue_stop_fills(
 
     prior_closed = state.get("position_closed")
     if prior_closed:
-        return [], {"venue_stop_fills": seen, "position_closed": prior_closed}
+        new_state = {
+            "venue_stop_fills": seen,
+            "position_closed": prior_closed,
+        }
+        if state.get("watch_state_created_at") is not None:
+            new_state["watch_state_created_at"] = state["watch_state_created_at"]
+        return [], new_state
+
+    cutoff: float | None = None
+    created_raw = state.get("watch_state_created_at")
+    if created_raw:
+        try:
+            created_dt = _dt.datetime.fromisoformat(str(created_raw))
+            if created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=_dt.UTC)
+            cutoff = created_dt.timestamp() - VENUE_FILL_FRESHNESS_GRACE_SECONDS
+        except (ValueError, TypeError):
+            cutoff = None
 
     name = watch.get("name", "?")
     monitor = watch.get("monitor_provider", "")
@@ -461,6 +503,13 @@ def evaluate_venue_stop_fills(
         if not venue_pair_matches(monitor, order.get("pair") or ""):
             continue
         if order_id in seen:
+            continue
+
+        closed_at = order.get("closed_at")
+        if cutoff is not None and closed_at is not None and float(closed_at) <= cutoff:
+            # A fill that closed before this watch state existed belongs to a
+            # previous watch lifetime: skip it without ledgering it or setting
+            # the closure marker, so it can never re-surface on a later tick.
             continue
 
         fill_price = order.get("fill_price")
@@ -509,7 +558,7 @@ def evaluate_venue_stop_fills(
                 "realised_pnl": realised_pnl,
                 "partial": partial,
                 "closed_position": closed_position,
-                "closed_at": order.get("closed_at"),
+                "closed_at": closed_at,
                 "triggered_at": ts,
             }
         )
@@ -524,13 +573,15 @@ def evaluate_venue_stop_fills(
         if closed_position and closed_record is None:
             closed_record = {
                 "order_id": order_id,
-                "closed_at": order.get("closed_at"),
+                "closed_at": closed_at,
                 "fill_price": fill_price,
                 "filled_volume": filled_volume,
                 "reported_at": ts,
             }
 
     new_state = {"venue_stop_fills": seen, "position_closed": closed_record}
+    if state.get("watch_state_created_at") is not None:
+        new_state["watch_state_created_at"] = state["watch_state_created_at"]
     return events, new_state
 
 
