@@ -296,6 +296,7 @@ State fields per watch:
 - `last_signal_alert_at` — per `(strategy, direction)` last alert timestamp (cooldown)
 - `venue_stop_fills` — per order-id dedupe ledger of already-reported venue stop fills (`--venue-stops`)
 - `position_closed` — closure record (order id, fill price, filled volume, timestamps) set when a venue stop fill covers the held size; stops level/signal evaluation for that watch (`--venue-stops`). The marker is keyed on the watch name alone, never cleared by re-enabling or re-adding the watch, and never ages out — clearing it is a manual, marker-only edit (remove just the `position_closed` key; never delete the state file for re-entry — see "Re-enter a closed position").
+- `watch_state_created_at` — ISO-8601 anchor of this watch state's lifetime, resolved on the first tick (persisted value, else `data/watches.json` state's `_updated_at`, else that tick's timestamp) and frozen thereafter (`--venue-stops`). The venue-stop detector ignores fills whose close time is at or before this anchor minus a one-cadence-plus-grace window, so a recreated watch cannot re-report a previous lifetime's fills.
 
 Stale state (>24h old) is treated as fresh on the first tick — no alerts fire, state is rewritten. The venue keys are exempt: the `venue_stop_fills` dedupe ledger and the `position_closed` marker survive staleness, so an already-reported stop fill never re-fires and a closed watch stays closed.
 
@@ -313,7 +314,7 @@ Stale state (>24h old) is treated as fresh on the first tick — no alerts fire,
 
 **Re-enter a closed position:**
 1. Buy on the exchange
-2. If the watch was closed venue-side (a `position_closed` marker in its state file — `--status` shows `closed venue-side`), clear the marker ONLY: edit the state file and delete the `position_closed` key. **Never delete the state file to re-enter.** It also holds the `venue_stop_fills` dedupe ledger, and the venue-stop detector has no time bound: the previous stop fill is usually still inside the fetched closed-orders page, so with the ledger wiped the next `--venue-stops` tick re-reports it as a fresh `POSITION CLOSED BY VENUE STOP` — with P&L computed against the NEW `entry_price` — and, when the old fill's volume covers ≥99% of the new `position_size`, immediately re-marks the freshly re-entered position closed and silently stops monitoring it again (only `--status` reveals this). The `--no-venue-stops` flag and the per-watch `venue_stops: false` switch are not re-entry tools either: they turn detection off entirely instead of retaining the ledger. The marker is keyed on the watch name alone and never clears itself: flipping `enabled` back to true or re-adding the watch does not reset it, and it never ages out (every tick rewrites `_updated_at`, so staleness never applies). Without this step the re-entered position gets no venue detection, no level evaluation and no signal evaluation.
+2. If the watch was closed venue-side (a `position_closed` marker in its state file — `--status` shows `closed venue-side`), clear the marker ONLY: edit the state file and delete the `position_closed` key. **Never delete the state file to re-enter.** It also holds the `venue_stop_fills` dedupe ledger — the within-lifetime dedupe and the home of the closure marker — so deleting it would both wipe the marker and lose the ledger. (The detector now also has a watch-state-lifetime time bound, `watch_state_created_at` minus a one-cadence-plus-grace grace, so a fill that closed before the current state was created is not a candidate — but that bound is not a reason to delete the file: the ledger is still what keeps an already-reported fill from being re-reported within the new lifetime, and resetting the file resets that protection.) The previous stop fill is usually still inside the fetched closed-orders page, so with the ledger wiped the next `--venue-stops` tick re-reports it as a fresh `POSITION CLOSED BY VENUE STOP` — with P&L computed against the NEW `entry_price` — and, when the old fill's volume covers ≥99% of the new `position_size`, immediately re-marks the freshly re-entered position closed and silently stops monitoring it again (only `--status` reveals this). The `--no-venue-stops` flag and the per-watch `venue_stops: false` switch are not re-entry tools either: they turn detection off entirely instead of retaining the ledger. The marker is keyed on the watch name alone and never clears itself: flipping `enabled` back to true or re-adding the watch does not reset it, and it never ages out (every tick rewrites `_updated_at`, so staleness never applies). Without this step the re-entered position gets no venue detection, no level evaluation and no signal evaluation.
 3. Edit `watches.json`: flip `enabled: true`, update fills if needed
 4. Done
 
@@ -441,7 +442,10 @@ the scheduled tick) the watchdog closes that gap on its own tick:
   burst larger than that page between two ticks can push a fill out of view;
   (c) a tick whose price fetch fails (the existing early-return) or whose
   venue read fails (a `[WARN]` on stderr, that tick only) reports nothing;
-  (d) Kraken spot only, sell-side exits only.
+  (d) Kraken spot only, sell-side exits only; (e) fills whose close time is
+  at or before the watch state's creation anchor (`watch_state_created_at`
+  minus a one-cadence-plus-grace window) are never candidates — a fill older
+  than that bound that was never reported is lost, not re-reported.
 
 ## Where the held file comes from
 

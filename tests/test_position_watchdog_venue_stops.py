@@ -17,6 +17,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -32,6 +33,7 @@ _spec.loader.exec_module(_pw_lib)
 
 evaluate_venue_stop_fills = _pw_lib.evaluate_venue_stop_fills
 venue_pair_matches = _pw_lib.venue_pair_matches
+VENUE_FILL_FRESHNESS_GRACE_SECONDS = _pw_lib.VENUE_FILL_FRESHNESS_GRACE_SECONDS
 
 _fmt_spec = importlib.util.spec_from_file_location("position_watchdog_venue_fmt", _FMT_PATH)
 _pw_fmt = importlib.util.module_from_spec(_fmt_spec)
@@ -63,8 +65,13 @@ def _venue_fill(
     cost="80.01",
     fee="0.80",
     status="closed",
-    closetm=1789000000.0,
+    # Default models a fill that has just closed and is reported by the next
+    # tick. A fixed old epoch would trip the new watch-state-lifetime bound in
+    # the end-to-end fixtures (fresh state dir + recent ``now``). Lib-level
+    # tests pass explicit state with no creation key, so they are unaffected.
+    closetm=None,
 ):
+    ts = closetm if closetm is not None else time.time()
     return {
         "order_id": order_id,
         "pair": pair,
@@ -76,8 +83,8 @@ def _venue_fill(
         "cost": float(cost) if cost is not None else None,
         "fee": float(fee),
         "status": status,
-        "opened_at": 1788996400.0,
-        "closed_at": closetm,
+        "opened_at": ts - 3600.0,
+        "closed_at": ts,
         "trigger_price": 49.71,
         "limit_price": None,
         "cl_ord_id": None,
@@ -235,7 +242,120 @@ def test_partial_fill_reported_once_and_monitoring_continues():
     assert state2["position_closed"] is None
 
 
-# ───────────────────────────────────────────────────── lib: dedupe + stickiness
+# ───────────────────────────────────────────── lib: state-lifetime time bound
+
+
+def test_fill_closed_before_watch_state_creation_is_suppressed():
+    """A watch whose state was created fresh this morning must not report a
+    stop fill that closed three days earlier — the false-alarm shape from
+    2026-09-23 (swing-scan recreated the watch, empty ledger, no time
+    window, the 2026-09-20 fill re-reported)."""
+    state = {
+        "watch_state_created_at": NOW.isoformat(),
+        "venue_stop_fills": {},
+        "position_closed": None,
+    }
+    old_fill = _venue_fill(closetm=NOW.timestamp() - 3 * 24 * 3600)
+    events, new_state = evaluate_venue_stop_fills(WATCH, [old_fill], state, now=NOW)
+    assert events == []
+    assert new_state["venue_stop_fills"] == {}
+    assert new_state["position_closed"] is None
+    # The creation anchor is carried forward so the suppression is
+    # deterministic on every later tick.
+    assert new_state["watch_state_created_at"] == NOW.isoformat()
+
+
+def test_fill_closed_after_creation_is_reported_and_ledgered():
+    state = {
+        "watch_state_created_at": NOW.isoformat(),
+        "venue_stop_fills": {},
+        "position_closed": None,
+    }
+    fresh_fill = _venue_fill(closetm=NOW.timestamp() + 3600)
+    events, new_state = evaluate_venue_stop_fills(WATCH, [fresh_fill], state, now=NOW)
+    ids = [e["order_id"] for e in events]
+    assert ids == ["OCLOSED-1"]
+    assert "OCLOSED-1" in new_state["venue_stop_fills"]
+    # Within-lifetime closure still marks the position closed.
+    assert new_state["position_closed"]["order_id"] == "OCLOSED-1"
+
+
+def test_grace_boundary_exactly_at_cutoff_is_suppressed_and_one_second_later_reported():
+    state = {
+        "watch_state_created_at": NOW.isoformat(),
+        "venue_stop_fills": {},
+        "position_closed": None,
+    }
+    boundary = NOW.timestamp() - VENUE_FILL_FRESHNESS_GRACE_SECONDS
+    # Exactly at the cutoff (creation minus the grace): suppressed.
+    at_cutoff = _venue_fill(order_id="OAT", closetm=boundary)
+    events, _ = evaluate_venue_stop_fills(WATCH, [at_cutoff], state, now=NOW)
+    assert events == []
+
+    # One second later than that boundary: within the grace, reported.
+    just_inside = _venue_fill(order_id="OINSIDE", closetm=boundary + 1.0)
+    events2, state2 = evaluate_venue_stop_fills(WATCH, [just_inside], state, now=NOW)
+    assert [e["order_id"] for e in events2] == ["OINSIDE"]
+    assert "OINSIDE" in state2["venue_stop_fills"]
+
+
+def test_no_creation_key_still_reports_old_fill_backwards_compatible():
+    """Pre-fix state files have no ``watch_state_created_at`` key: no time
+    bound applies and the fill remains reportable (the order-id ledger
+    dedupes it on later ticks)."""
+    state = {"venue_stop_fills": {}, "position_closed": None}
+    old_fill = _venue_fill(closetm=NOW.timestamp() - 3 * 24 * 3600)
+    events, new_state = evaluate_venue_stop_fills(WATCH, [old_fill], state, now=NOW)
+    assert [e["order_id"] for e in events] == ["OCLOSED-1"]
+    assert "OCLOSED-1" in new_state["venue_stop_fills"]
+
+
+def test_undatable_fill_without_closed_at_bypasses_the_bound():
+    """An order with ``closed_at=None`` cannot be dated: it is NOT filtered,
+    the order-id ledger is its dedupe."""
+    state = {
+        "watch_state_created_at": NOW.isoformat(),
+        "venue_stop_fills": {},
+        "position_closed": None,
+    }
+    undated = _venue_fill(order_id="ONODATE")
+    undated["closed_at"] = None
+    events, new_state = evaluate_venue_stop_fills(WATCH, [undated], state, now=NOW)
+    assert [e["order_id"] for e in events] == ["ONODATE"]
+    assert "ONODATE" in new_state["venue_stop_fills"]
+
+
+def test_unparseable_creation_key_disables_the_bound():
+    state = {
+        "watch_state_created_at": "not-a-timestamp",
+        "venue_stop_fills": {},
+        "position_closed": None,
+    }
+    old_fill = _venue_fill(closetm=NOW.timestamp() - 3 * 24 * 3600)
+    events, _ = evaluate_venue_stop_fills(WATCH, [old_fill], state, now=NOW)
+    assert [e["order_id"] for e in events] == ["OCLOSED-1"]
+
+
+def test_carried_creation_key_survives_prior_closure_early_return():
+    """The returned state carries ``watch_state_created_at`` through both the
+    prior-closure early return and the normal return, so run.py can persist
+    it unchanged."""
+    created = NOW.isoformat()
+    state = {
+        "watch_state_created_at": created,
+        "venue_stop_fills": {"O1": {"reported_at": created, "closed_position": True}},
+        "position_closed": {"order_id": "O1"},
+    }
+    _, new_state = evaluate_venue_stop_fills(WATCH, [_venue_fill(order_id="O9")], state, now=NOW)
+    assert new_state["watch_state_created_at"] == created
+    assert new_state["position_closed"]["order_id"] == "O1"
+
+    state2 = {"watch_state_created_at": created, "venue_stop_fills": {}, "position_closed": None}
+    _, new_state2 = evaluate_venue_stop_fills(WATCH, [_venue_fill()], state2, now=NOW)
+    assert new_state2["watch_state_created_at"] == created
+
+
+# ──────────────────────────────────────────────────────── lib: dedupe + stickiness
 
 
 def test_dedupe_across_ticks_new_order_id_reported():
@@ -323,6 +443,29 @@ def test_formatter_partial_fill_says_monitoring_continues():
     assert "POSITION CLOSED" not in rendered
     # A partial render must not tell the reader to record/reconcile a full exit.
     assert "portfolio-mgmt add --side sell" not in rendered
+
+
+def test_formatter_unknown_position_size_never_claims_still_open():
+    """The 2026-09-23 event's second defect: a watch with no ``position_size``
+    has ``closed_position`` False by construction, so the old render printed
+    "Partial exit — position still open" without any basis. The render must
+    say the held size is unknown instead."""
+    watch = {k: v for k, v in WATCH.items() if k != "position_size"}
+    event = evaluate_venue_stop_fills(watch, [_venue_fill()], None, now=NOW)[0][0]
+    assert event["position_size"] is None
+    assert event["closed_position"] is False
+
+    rendered = _pw_fmt.format_as_default_venue_stop_fill(event, _CTX)
+    assert "still open" not in rendered
+    assert "partial exit" not in rendered
+    assert "POSITION CLOSED" not in rendered
+    assert "unknown" in rendered
+    assert "monitoring continues" in rendered
+
+    compact = _pw_fmt._format_venue_stop_fill(event, _CTX)
+    assert "partial exit" not in compact
+    assert "exit size unknown" in compact
+    assert "\n" not in compact
 
 
 def test_formatter_cost_basis_unknown_when_no_pnl():
@@ -737,6 +880,111 @@ class TestReentryRequiresClearingTheMarker:
         assert run_mod.main() == 0
         out2 = capsys.readouterr().out
         assert "STOP BREACHED" in out2, out2
+
+
+class TestWatchStateLifetimeBound:
+    """The 2026-09-23 false alarm: swing-scan recreated a watch that same
+    morning, the fresh state started with an empty ``venue_stop_fills``
+    ledger, the venue read has no time window, and a three-day-old stop fill
+    (already reported once under the previous watch state) was re-reported
+    as a live event. The detector is now bounded by the watch state's
+    lifetime anchor, persisted as ``watch_state_created_at``."""
+
+    def _no_signals_config(self, tmp_path):
+        # WATCH has levels only; price 55.0 stays above the stop so level
+        # evaluation has nothing to add.
+        return _write_config(tmp_path, WATCH)
+
+    def _patch_tick(self, monkeypatch, run_mod, closetm, price=55.0):
+        monkeypatch.setattr(run_mod, "_current_price", lambda *_a, **_kw: price)
+        monkeypatch.setattr(run_mod, "_read_venue_closed_orders", lambda: [_venue_fill(closetm=closetm)])
+
+    def _run(self, monkeypatch, tmp_path, run_mod, cfg):
+        monkeypatch.setattr(
+            sys, "argv", ["run.py", "--config", str(cfg), "--state-dir", str(tmp_path), "--venue-stops"]
+        )
+        return run_mod.main()
+
+    def test_fresh_watch_does_not_report_multi_day_old_fill_and_second_tick_stays_silent(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """Acceptance 1+2: a watch whose state has no ledger does not report a
+        fill that closed days before the state existed — and the suppression
+        is deterministic, not a one-shot self-heal."""
+        run_mod = _load_run_mod("position_watchdog_venue_bound_fresh")
+        cfg = self._no_signals_config(tmp_path)
+        now_epoch = dt.datetime.now(dt.UTC).timestamp()
+        self._patch_tick(monkeypatch, run_mod, closetm=now_epoch - 3 * 24 * 3600)
+
+        assert self._run(monkeypatch, tmp_path, run_mod, cfg) == 0
+        assert capsys.readouterr().out == ""
+
+        state = json.loads((tmp_path / "<TICKER>_state.json").read_text())
+        assert state["position_closed"] is None
+        assert state["venue_stop_fills"] == {}
+        assert "watch_state_created_at" in state
+
+        # Second tick, same old fill on the venue page: still silent.
+        assert self._run(monkeypatch, tmp_path, run_mod, cfg) == 0
+        assert capsys.readouterr().out == ""
+
+    def test_seeded_old_creation_anchor_reports_within_lifetime_fill(self, monkeypatch, tmp_path, capsys):
+        """The bound never suppresses a within-lifetime fill: a state file
+        created ten days ago anchors far enough back, so a three-day-old
+        fill is reported and the position is marked closed."""
+        run_mod = _load_run_mod("position_watchdog_venue_bound_seeded")
+        cfg = self._no_signals_config(tmp_path)
+        created = dt.datetime.now(dt.UTC) - dt.timedelta(days=10)
+        (tmp_path / "<TICKER>_state.json").write_text(
+            json.dumps(
+                {
+                    "name": "<TICKER>",
+                    "_updated_at": dt.datetime.now(dt.UTC).isoformat(),
+                    "watch_state_created_at": created.isoformat(),
+                    "levels": {},
+                    "signals": {},
+                    "venue_stop_fills": {},
+                }
+            )
+        )
+        self._patch_tick(monkeypatch, run_mod, closetm=dt.datetime.now(dt.UTC).timestamp() - 3 * 24 * 3600)
+
+        assert self._run(monkeypatch, tmp_path, run_mod, cfg) == 0
+        out = capsys.readouterr().out
+        assert "VENUE STOP" in out, out
+
+        state = json.loads((tmp_path / "<TICKER>_state.json").read_text())
+        assert state["position_closed"]["order_id"] == "OCLOSED-1"
+        assert state["venue_stop_fills"]["OCLOSED-1"]["closed_position"] is True
+        # The persisted anchor is frozen — the tick must not advance it.
+        assert state["watch_state_created_at"] == created.isoformat()
+
+    def test_fill_landed_just_before_creation_is_reported_within_the_grace(self, monkeypatch, tmp_path, capsys):
+        """The grace covers a fill that landed just before the watch's first
+        tick (or before its venue read succeeded): ten minutes before the
+        anchor is inside one cadence plus grace, so it is still reported."""
+        run_mod = _load_run_mod("position_watchdog_venue_bound_grace")
+        cfg = self._no_signals_config(tmp_path)
+        (tmp_path / "<TICKER>_state.json").write_text(
+            json.dumps(
+                {
+                    "name": "<TICKER>",
+                    "_updated_at": dt.datetime.now(dt.UTC).isoformat(),
+                    "watch_state_created_at": dt.datetime.now(dt.UTC).isoformat(),
+                    "levels": {},
+                    "signals": {},
+                    "venue_stop_fills": {},
+                }
+            )
+        )
+        self._patch_tick(monkeypatch, run_mod, closetm=dt.datetime.now(dt.UTC).timestamp() - 600)
+
+        assert self._run(monkeypatch, tmp_path, run_mod, cfg) == 0
+        out = capsys.readouterr().out
+        assert "VENUE STOP" in out, out
+
+        state = json.loads((tmp_path / "<TICKER>_state.json").read_text())
+        assert state["position_closed"]["order_id"] == "OCLOSED-1"
 
 
 class TestVenueStopsValidation:
