@@ -32,7 +32,9 @@ from pathlib import Path
 
 from analysis.registry import l3_strategies
 from analysis.skill_loader import load_lib_for_script
-from analysis.watchlist import WatchlistUnavailableError
+from analysis.watchlist import WatchlistUnavailableError, load_raw
+from analysis.watchlist_format import _bare_aliases
+from analysis.watchlist_format import resolve as _resolve_watchlist_alias
 
 _lib = load_lib_for_script(__file__)
 
@@ -566,6 +568,45 @@ def _write_fitness_matrix(current: dict, state: dict, out_dir: Path) -> None:
         print(f"  \u2192 fitness matrix written ({cells} cells across {len(intervals_sorted)} intervals)", flush=True)
 
 
+def _state_ticker_candidates(monitor_provider: str) -> list[str]:
+    """Alias candidates for a watch's monitor_provider, in resolution order.
+
+    The full ``provider:SYMBOL`` form first (exact registry hit), then the
+    bare tail, then the quote-stripped base — the same alias set the
+    watchlist registry resolves user input by. Built in explicit order (the
+    tail is seeded before the sorted alias remainder) so the result is
+    deterministic run-to-run, never the alias set's hash-randomized order.
+    """
+    provider = monitor_provider.strip()
+    if not provider:
+        return []
+    tail = provider.partition(":")[2] if ":" in provider else provider
+    candidates = [provider]
+    if tail:
+        if tail != provider:
+            candidates.append(tail.lower())
+        candidates.extend(alias for alias in sorted(_bare_aliases(tail)) if alias not in candidates)
+    return candidates
+
+
+def _resolve_state_ticker(data: dict, monitor_provider: str) -> str | None:
+    """Map a watch's monitor_provider onto the watchlist notation the state uses.
+
+    'kraken:ETHEUR' -> 'ETHUSD'   (alias/quote resolution through the registry)
+    'hl:LIT'        -> 'hl:LIT'   (already canonical)
+    None when nothing in the watchlist matches.
+    """
+    for candidate in _state_ticker_candidates(monitor_provider):
+        try:
+            resolved = _resolve_watchlist_alias(data, candidate)
+        except ValueError:
+            # Ambiguous alias: a miss for this candidate, try the next one.
+            continue
+        if resolved is not None:
+            return resolved
+    return None
+
+
 def _write_watchdog_regime(current: dict, state: dict, out_dir: Path) -> None:
     open_positions_path = os.environ.get(_lib.ENV_OPEN_POSITIONS_PATH)
     if not open_positions_path:
@@ -577,19 +618,27 @@ def _write_watchdog_regime(current: dict, state: dict, out_dir: Path) -> None:
     except (FileNotFoundError, json.JSONDecodeError):
         positions = {"watches": []}
 
+    # The measurement state is keyed by the raw watchlist dict key (see
+    # _read_active_tickers), so the watch's monitor pair must be resolved
+    # onto that notation — deriving it with split(":")[-1] yields keys the
+    # state never contains (dropped provider prefix, quote mismatch).
+    # load_raw is fail-loud; main() has already verified the registry.
+    watchlist_data = load_raw()
+
     regime: dict = {"positions": {}}
     for watch in positions.get("watches", []):
         name = watch.get("name", "")
         if not watch.get("enabled"):
             continue
+        provider = watch.get("monitor_provider", "")
+        state_ticker = _resolve_state_ticker(watchlist_data, provider)
         for sig in watch.get("signals", []):
             for strat_name in sig.get("strategies", []):
-                provider = watch.get("monitor_provider", "")
-                ticker = provider.split(":")[-1] if ":" in provider else provider
-                match_candidates = [
-                    f"1d\u00d7strategy-{strat_name}\u00d7{ticker}",
-                    f"4h\u00d7strategy-{strat_name}\u00d7{ticker}",
-                ]
+                match_candidates = (
+                    [f"{iv}\u00d7strategy-{strat_name}\u00d7{state_ticker}" for iv in ("1d", "4h")]
+                    if state_ticker
+                    else []
+                )
                 info = {}
                 for mc in match_candidates:
                     i = current.get(mc)
@@ -618,9 +667,16 @@ def _write_watchdog_regime(current: dict, state: dict, out_dir: Path) -> None:
                     if status == "negative"
                     else "monitor"
                 )
+                if state_ticker is None or (not info and not base):
+                    tried = match_candidates if state_ticker else _state_ticker_candidates(provider)
+                    print(
+                        f"[WARN] watchdog regime: no measured pair for watch {name!r} strategy {strat_name!r} "
+                        f"(monitor_provider={provider!r}, tried {tried}) \u2014 status will be 'unknown'",
+                        flush=True,
+                    )
                 regime["positions"].setdefault(name, {})
                 regime["positions"][name][strat_name] = {
-                    "ticker": ticker,
+                    "ticker": state_ticker or provider,
                     "sharpe_now": sharpe_now,
                     "sharpe_7n": sharpe_7n,
                     "regime_status": status,
