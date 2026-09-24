@@ -19,7 +19,7 @@ from analysis.output import (
     truncate,
 )
 from analysis.skill_loader import load_lib_for_script
-from analysis.watchlist import metadata_for
+from analysis.watchlist import WatchlistUnavailableError, metadata_for
 
 
 def _parse_argv(argv):
@@ -256,6 +256,9 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except WatchlistUnavailableError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
     except ValueError as e:
         print(parse_cli_error(e), file=sys.stderr)
         sys.exit(2)

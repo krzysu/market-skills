@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from analysis.risk import RiskContext  # noqa: E402
 from analysis.risk._common import _positive_number  # noqa: E402
+from analysis.watchlist import WatchlistUnavailableError  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.dirname(HERE)
@@ -242,7 +243,7 @@ def build_context(args: argparse.Namespace) -> RiskContext:
                 tier_key = str(meta.get("tier")) if meta.get("tier") is not None else None
                 if tier_key:
                     ctx.tier_exposure[tier_key] = ctx.tier_exposure.get(tier_key, 0.0) + pos["market_value"]
-        except (ImportError, OSError) as e:
+        except (ImportError, OSError, WatchlistUnavailableError) as e:
             print(f"warning: watchlist load failed: {e}", file=sys.stderr)
 
     # Total value = sum of position market values + cash.

@@ -23,6 +23,7 @@ import sys
 
 from analysis.output import emit_envelope_json, empty_state, print_envelope
 from analysis.watchlist import (
+    WatchlistUnavailableError,
     all_tickers,
     basket,
     by_category,
@@ -219,7 +220,23 @@ def main() -> int:
     # for consistency: any tool that points at a market-watchlist file uses --watchlist)
     if getattr(args, "watchlist", None):
         args.config = args.watchlist
-    return args.func(args)
+    try:
+        return args.func(args)
+    except WatchlistUnavailableError as e:
+        # A missing/unreadable/empty registry is fatal, never a traceback.
+        if args.json:
+            print_envelope(
+                empty_state(
+                    errors=[str(e)],
+                    help=[
+                        "Copy skills/market-watchlist/examples/watchlist.example.json and point "
+                        "MARKET_SKILLS_WATCHLIST_PATH at it",
+                    ],
+                )
+            )
+        else:
+            print(f"error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

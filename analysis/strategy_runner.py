@@ -26,7 +26,7 @@ from analysis.output import (
     truncate,
 )
 from analysis.skill_loader import load_lib_for_script
-from analysis.watchlist import metadata_for
+from analysis.watchlist import WatchlistUnavailableError, metadata_for
 
 NARRATIVE_LIMIT = 160
 IDEA_FIELDS_LIMIT = 80
@@ -148,14 +148,19 @@ def run_strategy_cli(strategy_title: str, script_file: str) -> None:
     if maybe_render_home_view(script_file, ticker, json_mode):
         return
     override = _parse_asset_class(filtered_argv)
-    result = _strategy_analyze(
-        script_file,
-        ticker,
-        source=source,
-        interval=interval,
-        period=period,
-        asset_class=override,
-    )
+    try:
+        result = _strategy_analyze(
+            script_file,
+            ticker,
+            source=source,
+            interval=interval,
+            period=period,
+            asset_class=override,
+        )
+    except WatchlistUnavailableError as e:
+        # Broken registry behind metadata enrichment — clean fatal, not a traceback.
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
     cache_run_result(script_file, result)
 
     if json_mode:

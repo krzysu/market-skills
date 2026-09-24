@@ -12,6 +12,7 @@ Library entry points (all in `analysis.watchlist`):
 """
 
 from analysis.watchlist import (
+    WatchlistUnavailableError,
     all_tickers,
     basket,
     by_category,
@@ -28,6 +29,7 @@ from analysis.watchlist import (
 )
 
 __all__ = [
+    "WatchlistUnavailableError",
     "all_tickers",
     "basket",
     "by_category",

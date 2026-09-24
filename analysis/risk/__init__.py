@@ -237,10 +237,9 @@ def load_policy_overrides(path: str | os.PathLike | None = None) -> dict:
     """Load and validate ``policies.yaml``.
 
     Returns the parsed mapping, or ``{}`` if the resolved path is missing or
-    unreadable (matching ``analysis.watchlist.load_raw`` semantics — config is
-    optional, missing means "use class defaults"). Raises ``ValueError`` on
-    malformed YAML or unknown top-level keys so the caller can surface a clean
-    error to the operator.
+    unreadable (config is optional, missing means "use class defaults").
+    Raises ``ValueError`` on malformed YAML or unknown top-level keys so the
+    caller can surface a clean error to the operator.
 
     Schema (top-level keys, all optional):
 

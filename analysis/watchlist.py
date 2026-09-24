@@ -7,6 +7,11 @@ for skill convention compatibility.
 Default location: `skills/market-watchlist/data/watchlist.json`, overridable via:
     - MARKET_SKILLS_WATCHLIST_PATH env var
     - explicit `path=` argument to every function
+
+Fail-loud contract: every accessor funnels through `load_raw`, which raises
+`WatchlistUnavailableError` when the resolved file is missing, unreadable,
+malformed, or resolves to zero baskets / zero tickers. A broken registry
+must never silently collapse downstream batches and artifacts to zero.
 """
 
 from __future__ import annotations
@@ -42,6 +47,24 @@ from analysis.watchlist_format import (
 )
 
 
+class WatchlistUnavailableError(RuntimeError):
+    """The watchlist registry is missing, unreadable, malformed, or empty.
+
+    Raised by every accessor in this module. An empty watchlist is never a
+    legitimate steady state: it silently collapses every downstream batch,
+    fitness matrix, and conviction floor to zero while callers report
+    success.
+    """
+
+
+def _unavailable(detail: str, p: Path) -> WatchlistUnavailableError:
+    return WatchlistUnavailableError(
+        f"watchlist unavailable ({detail}): {p}. Set MARKET_SKILLS_WATCHLIST_PATH to a "
+        f"non-empty watchlist.json; when the env var is unset the resolver falls back "
+        f"to the in-repo default data file."
+    )
+
+
 def default_path() -> Path:
     """Resolve the default watchlist file path.
 
@@ -62,12 +85,30 @@ def _resolve_path(path: str | os.PathLike | None) -> Path:
 
 
 def load_raw(path: str | os.PathLike | None = None) -> dict:
-    """Read the raw `{baskets: {...}}` dict. Returns {} if file missing."""
+    """Read the raw `{baskets: {...}}` dict — the single fail-loud choke point.
+
+    Raises `WatchlistUnavailableError` when the resolved file does not
+    exist, is unreadable or not valid JSON, its root is not a JSON object,
+    or it parses to zero baskets / zero tickers across all baskets. Every
+    other accessor in this module calls this, so they inherit the behaviour.
+    """
     p = _resolve_path(path)
     if not p.exists():
-        return {}
-    with open(p) as f:
-        return json.load(f)
+        raise _unavailable("file not found", p)
+    try:
+        with open(p) as f:
+            data = json.load(f)
+    except (OSError, ValueError) as exc:
+        raise _unavailable("unreadable or invalid JSON", p) from exc
+    if not isinstance(data, dict):
+        raise _unavailable(f"root must be a JSON object, got {type(data).__name__}", p)
+    baskets = data.get("baskets")
+    if not isinstance(baskets, dict) or not baskets:
+        raise _unavailable("zero baskets", p)
+    n_tickers = sum(len(v) for v in baskets.values() if isinstance(v, dict))
+    if n_tickers == 0:
+        raise _unavailable("zero tickers across all baskets", p)
+    return data
 
 
 def save_raw(data: dict, path: str | os.PathLike | None = None) -> None:
@@ -130,6 +171,7 @@ def expand_tickers(items: list[str], path: str | os.PathLike | None = None) -> l
 
 
 __all__ = [
+    "WatchlistUnavailableError",
     "all_tickers",
     "basket",
     "by_category",
