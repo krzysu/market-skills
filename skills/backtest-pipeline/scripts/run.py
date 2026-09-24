@@ -406,6 +406,52 @@ def _withheld_low_trades(current: dict, min_trades: int) -> list[dict]:
     return out
 
 
+# ── Partial-degradation write guard (bead market-skills-ofs) ───────
+#
+# Every grid-derived artifact goes through _write_artifact: when one
+# artifact's computed payload is empty while the on-disk file holds
+# non-empty content from a previous good run, the previous file is kept
+# and a warning is printed instead of silently destroying last good data.
+
+# watchdog_regime_state.json is deliberately NOT in the emptiness table:
+# its payload is derived from the open-positions file named by
+# ENV_OPEN_POSITIONS_PATH, not from the pair grid, so a degraded grid can
+# never empty it — and an empty positions map is a legitimate steady state
+# (no enabled watches / closed positions), so guarding it would keep a
+# stale file and warn on a healthy run.
+
+
+def _is_empty_artifact(name: str, payload) -> bool:
+    """Explicit, per-artifact emptiness — never a blanket truthiness check."""
+    if name == "conviction_thresholds_private.json":
+        # GLOBAL_MIN_CONVICTION_TO_EMIT is always 1; the per-strategy gate
+        # table is the only signal that anything was measured.
+        return not payload["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"]
+    if name == "fitness_matrix.json":
+        return not payload["intervals"]
+    if name == "swing_scan_skip_list.json":
+        # An empty skip list with populated keep_tickers is the legitimate
+        # steady state — the artifact is empty only when ALL THREE lists
+        # are empty.
+        return not payload["skip_tickers"] and not payload["no_trade_tickers"] and not payload["keep_tickers"]
+    if name == "regime_health_brief.md":
+        # ``payload`` is a counts dict built in _write_regime_health_brief:
+        # the brief is empty only when none of its tables has a body row.
+        return not any(payload.get(key) for key in ("strategy_rows", "ranking_rows", "skipped_rows", "no_trade_rows"))
+    return False
+
+
+def _write_artifact(path: Path, name: str, payload, text: str) -> bool:
+    """Write ``text`` to ``path`` unless the payload is empty and the file on
+    disk is a non-empty artefact worth keeping. Returns True when the file
+    was written."""
+    if _is_empty_artifact(name, payload) and path.exists() and path.read_text().strip():
+        print(f"  [WARN] {name}: computed payload is empty; keeping the previous file at {path}", flush=True)
+        return False
+    path.write_text(text)
+    return True
+
+
 def _write_conviction_thresholds(current: dict, state: dict, out_dir: Path) -> None:
     min_trades = _resolve_min_trades()
     withheld = _withheld_low_trades(current, min_trades)
@@ -456,11 +502,13 @@ def _write_conviction_thresholds(current: dict, state: dict, out_dir: Path) -> N
         if floor < existing:
             ticker_entry[interval] = floor
 
-    path = out_dir / "conviction_thresholds_private.json"
-    path.write_text(json.dumps(thresholds, indent=2))
-    n_strategies = len(thresholds["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"])
-    n_tickers = sum(len(v) for v in thresholds["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"].values())
-    print(f"  \u2192 conviction thresholds written ({n_strategies} strategies, {n_tickers} tickers)", flush=True)
+    name = "conviction_thresholds_private.json"
+    path = out_dir / name
+    text = json.dumps(thresholds, indent=2)
+    if _write_artifact(path, name, thresholds, text):
+        n_strategies = len(thresholds["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"])
+        n_tickers = sum(len(v) for v in thresholds["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"].values())
+        print(f"  \u2192 conviction thresholds written ({n_strategies} strategies, {n_tickers} tickers)", flush=True)
 
 
 def _write_fitness_matrix(current: dict, state: dict, out_dir: Path) -> None:
@@ -510,10 +558,12 @@ def _write_fitness_matrix(current: dict, state: dict, out_dir: Path) -> None:
     _, validate_err = _lib.validate_fitness_matrix(payload)
     if validate_err:
         print(f"  [WARN] fitness matrix validation failed: {validate_err}", flush=True)
-    path = out_dir / "fitness_matrix.json"
-    path.write_text(json.dumps(payload, indent=2))
-    cells = sum(len(m["tickers"]) * len(m["strategies"]) for m in matrix_data.values())
-    print(f"  \u2192 fitness matrix written ({cells} cells across {len(intervals_sorted)} intervals)", flush=True)
+    name = "fitness_matrix.json"
+    path = out_dir / name
+    text = json.dumps(payload, indent=2)
+    if _write_artifact(path, name, payload, text):
+        cells = sum(len(m["tickers"]) * len(m["strategies"]) for m in matrix_data.values())
+        print(f"  \u2192 fitness matrix written ({cells} cells across {len(intervals_sorted)} intervals)", flush=True)
 
 
 def _write_watchdog_regime(current: dict, state: dict, out_dir: Path) -> None:
@@ -647,12 +697,14 @@ def _write_swing_scan_skip(current: dict, state: dict, out_dir: Path) -> None:
     _, validate_err = _lib.validate_swing_scan_skip(payload)
     if validate_err:
         print(f"  [WARN] swing scan skip validation failed: {validate_err}", flush=True)
-    path = out_dir / "swing_scan_skip_list.json"
-    path.write_text(json.dumps(payload, indent=2))
-    print(
-        f"  \u2192 swing scan skip list written ({len(negative)} skip, {len(no_trades)} no-trade, {len(keep)} keep)",
-        flush=True,
-    )
+    name = "swing_scan_skip_list.json"
+    path = out_dir / name
+    text = json.dumps(payload, indent=2)
+    if _write_artifact(path, name, payload, text):
+        print(
+            f"  \u2192 swing scan skip list written ({len(negative)} skip, {len(no_trades)} no-trade, {len(keep)} keep)",
+            flush=True,
+        )
 
 
 def _write_regime_health_brief(current: dict, state: dict, out_dir: Path) -> None:
@@ -734,9 +786,18 @@ def _write_regime_health_brief(current: dict, state: dict, out_dir: Path) -> Non
     _, validate_err = _lib.validate_regime_brief(text)
     if validate_err:
         print(f"  [WARN] regime brief validation failed: {validate_err}", flush=True)
-    path = out_dir / "regime_health_brief.md"
-    path.write_text(text)
-    print("  \u2192 regime health brief written", flush=True)
+    # Counts of the brief's table body rows, fed to the emptiness guard:
+    # the brief is degraded only when none of its three tables has a row.
+    brief_counts = {
+        "strategy_rows": len(strat_agg),
+        "ranking_rows": len(pairs),
+        "skipped_rows": len(negative),
+        "no_trade_rows": len(no_trades),
+    }
+    name = "regime_health_brief.md"
+    path = out_dir / name
+    if _write_artifact(path, name, brief_counts, text):
+        print("  \u2192 regime health brief written", flush=True)
 
 
 # ═══════════════════════════════════════════════════════════════════

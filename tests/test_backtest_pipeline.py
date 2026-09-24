@@ -14,6 +14,8 @@ import json
 import os
 import sys
 
+import pytest
+
 from analysis.skill_loader import load_skill
 
 _lib = load_skill("backtest-pipeline")
@@ -1216,3 +1218,192 @@ class TestRegimeHealthBriefPartition:
         assert "kraken:NEG" in text
         assert "1 tickers produce no trade signals" in text
         assert "kraken:BLIND" in text
+
+
+# ── partial-degradation guard (bead market-skills-ofs) ----------
+
+
+_DEGRADED_CURRENT = {
+    "1d\u00d7strategy-a\u00d7kraken:BTCUSD": {
+        "strategy": "strategy-a",
+        "ticker": "kraken:BTCUSD",
+        "strategy_sharpe": None,
+        "trades": 0,
+        "insufficient_data": True,
+    },
+}
+
+
+def _seeded_artifact(name: str) -> str:
+    """Realistic populated content for each artifact file name."""
+    if name == "conviction_thresholds_private.json":
+        return json.dumps(
+            {
+                "GLOBAL_MIN_CONVICTION_TO_EMIT": 1,
+                "MIN_CONVICTION_TO_EMIT_BY_STRATEGY": {"strategy-a": {"kraken:BTCUSD": {"1d": 1}}},
+            },
+            indent=2,
+        )
+    if name == "fitness_matrix.json":
+        return json.dumps(_VALID_FITNESS_MATRIX, indent=2)
+    if name == "swing_scan_skip_list.json":
+        return json.dumps(_VALID_SWING_SCAN, indent=2)
+    if name == "regime_health_brief.md":
+        return (
+            "\n".join(
+                [
+                    "## \U0001f52c Backtest Regime Health (nightly)",
+                    "",
+                    "### Strategy Health (avg Sharpe across all tickers)",
+                    "| Strategy | Avg Sharpe | # Tickers | Verdict |",
+                    "|----------|-----------|-----------|---------|",
+                    "| strategy-a | +0.50 | 1 | \U0001f7e2 healthy |",
+                    "",
+                    "### \U0001f7e2 Top 5 by Sharpe",
+                    "| Pair | Sharpe | Trades |",
+                    "|------|--------|--------|",
+                    "| 1d\u00d7strategy-a\u00d7kraken:BTCUSD | +1.00 | 5 |",
+                    "",
+                    "### \U0001f534 Bottom 5 by Sharpe",
+                    "",
+                ]
+            )
+            + "\n"
+        )
+    raise ValueError(f"unknown artifact name: {name}")
+
+
+# artifact file name -> the module-level writer that produces it
+_GRID_WRITERS = {
+    "conviction_thresholds_private.json": "_write_conviction_thresholds",
+    "fitness_matrix.json": "_write_fitness_matrix",
+    "swing_scan_skip_list.json": "_write_swing_scan_skip",
+    "regime_health_brief.md": "_write_regime_health_brief",
+}
+
+
+class TestPartialDegradationGuard:
+    """A non-empty pair grid whose entries all degrade to insufficient_data
+    must never replace a non-empty on-disk artifact with an empty payload.
+
+    Pre-fix (bead market-skills-ofs): each grid-derived writer did an
+    unconditional ``path.write_text(...)``, so a partially-degraded run
+    still destroyed the previous good file. Tests drive the real writer
+    functions (not the guard helpers) so a pre-fix regression surfaces as
+    the actual overwrite."""
+
+    @staticmethod
+    def _call_writer(run_mod, name, current, out_dir):
+        if name == "conviction_thresholds_private.json":
+            run_mod._write_conviction_thresholds(current, {"baseline": {}}, out_dir)
+        elif name == "fitness_matrix.json":
+            run_mod._write_fitness_matrix(current, {"baseline": {}}, out_dir)
+        elif name == "swing_scan_skip_list.json":
+            run_mod._write_swing_scan_skip(current, {"baseline": {}}, out_dir)
+        elif name == "regime_health_brief.md":
+            run_mod._write_regime_health_brief(current, {"baseline": {}}, out_dir)
+        else:
+            raise ValueError(f"unknown artifact name: {name}")
+
+    @pytest.mark.parametrize("artifact_name", sorted(_GRID_WRITERS))
+    def test_degraded_payload_keeps_previous_file(self, monkeypatch, tmp_path, capsys, artifact_name):
+        monkeypatch.delenv(_lib.ENV_MIN_TRADES, raising=False)
+        run_mod = _load_run_mod("bp_degraded_keeps")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        seeded = _seeded_artifact(artifact_name)
+        path = out_dir / artifact_name
+        path.write_text(seeded)
+
+        capsys.readouterr()
+        self._call_writer(run_mod, artifact_name, _DEGRADED_CURRENT, out_dir)
+        captured = capsys.readouterr()
+
+        assert path.read_text() == seeded
+        assert "[WARN]" in captured.out
+        assert artifact_name in captured.out
+        assert "empty" in captured.out
+        assert "written" not in captured.out
+
+    @pytest.mark.parametrize("artifact_name", sorted(_GRID_WRITERS))
+    def test_degraded_payload_with_no_previous_file_is_written(self, monkeypatch, tmp_path, capsys, artifact_name):
+        """Only what is actually on disk is preserved: with no previous file,
+        the empty payload IS written and no [WARN] is printed."""
+        monkeypatch.delenv(_lib.ENV_MIN_TRADES, raising=False)
+        run_mod = _load_run_mod("bp_degraded_fresh")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        capsys.readouterr()
+        self._call_writer(run_mod, artifact_name, _DEGRADED_CURRENT, out_dir)
+        captured = capsys.readouterr()
+
+        assert (out_dir / artifact_name).exists()
+        assert "[WARN]" not in captured.out
+        assert "written" in captured.out
+
+    def test_legitimately_empty_skip_list_is_written(self, monkeypatch, tmp_path, capsys):
+        """An empty skip list with populated keep_tickers is the legitimate
+        steady state — the emptiness predicate must NOT treat it as degraded,
+        so the file is replaced and no [WARN] is printed."""
+        monkeypatch.delenv(_lib.ENV_MIN_TRADES, raising=False)
+        run_mod = _load_run_mod("bp_skip_legit_empty")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        seeded = _seeded_artifact("swing_scan_skip_list.json")
+        path = out_dir / "swing_scan_skip_list.json"
+        path.write_text(seeded)
+
+        current = {
+            "1d\u00d7strategy-a\u00d7kraken:BTCUSD": {
+                "strategy": "strategy-a",
+                "ticker": "kraken:BTCUSD",
+                "strategy_sharpe": 1.0,
+                "trades": 5,
+                "insufficient_data": False,
+            },
+        }
+
+        capsys.readouterr()
+        run_mod._write_swing_scan_skip(current, {"baseline": {}}, out_dir)
+        captured = capsys.readouterr()
+
+        payload = json.loads(path.read_text())
+        assert payload["skip_tickers"] == []
+        assert payload["no_trade_tickers"] == []
+        assert payload["keep_tickers"] == ["kraken:BTCUSD"]
+        assert "[WARN]" not in captured.out
+
+    def test_empty_pair_grid_preserves_seeded_artifacts(self, monkeypatch, tmp_path, capsys):
+        """The kwu empty-grid path, strengthened: a pre-existing populated set
+        of artifacts must survive byte-identical when the grid resolves empty,
+        and no runs.jsonl may be appended."""
+        run_mod = _load_run_mod("bp_empty_grid_preserves")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        state_file = out_dir / "backtest-pipeline-state.json"
+        state_before = json.dumps({"first_run": False, "baseline": {}, "last_run_ts": None})
+        state_file.write_text(state_before)
+
+        artifact_names = [*sorted(_GRID_WRITERS), "watchdog_regime_state.json"]
+        seeded_bytes = {}
+        for name in artifact_names:
+            content = _seeded_artifact(name) if name in _GRID_WRITERS else json.dumps(_VALID_WATCHDOG, indent=2)
+            (out_dir / name).write_text(content)
+            seeded_bytes[name] = content
+
+        TestEmptyPairGridFailLoud._setup(monkeypatch, run_mod, out_dir, state_file)
+        monkeypatch.setattr(run_mod, "measured_strategies", lambda: ["strategy-trend-follow"])
+        monkeypatch.setattr(run_mod, "_read_active_tickers", lambda baskets=None: [])
+
+        rc = run_mod.main()
+        captured = capsys.readouterr()
+
+        assert rc != 0
+        assert "FATAL" in captured.err
+        for name in artifact_names:
+            assert (out_dir / name).read_text() == seeded_bytes[name], name
+        assert not (out_dir / "runs.jsonl").exists()
+        assert state_file.read_text() == state_before
