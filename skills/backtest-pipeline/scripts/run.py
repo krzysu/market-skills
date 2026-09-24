@@ -32,6 +32,7 @@ from pathlib import Path
 
 from analysis.registry import l3_strategies
 from analysis.skill_loader import load_lib_for_script
+from analysis.watchlist import WatchlistUnavailableError
 
 _lib = load_lib_for_script(__file__)
 
@@ -761,10 +762,26 @@ def main() -> int:
 
     state = _load_state(state_file)
     is_first_run = state.get("first_run", True)
-    ticker_pairs = _read_active_tickers(baskets=args.baskets)
+    try:
+        ticker_pairs = _read_active_tickers(baskets=args.baskets)
+    except WatchlistUnavailableError as e:
+        print(f"FATAL: {e}", file=sys.stderr)
+        return 1
 
     strategies = measured_strategies()
     intervals = BACKTEST_INTERVALS
+
+    # Fail loud BEFORE any artifact is written, any run record is appended,
+    # or the rolling-baseline state is mutated: a zero-pair night must not
+    # overwrite the last good artifacts or look like a success to the cron.
+    if not strategies or not ticker_pairs:
+        print(
+            f"FATAL: empty pair grid — {len(strategies)} strategies x {len(ticker_pairs)} tickers x "
+            f"{len(intervals)} intervals = 0 measurable pairs. Check MARKET_SKILLS_WATCHLIST_PATH "
+            f"(watchlist resolution produced no tickers).",
+            file=sys.stderr,
+        )
+        return 1
 
     if UNMEASURABLE_STRATEGIES:
         n = len(UNMEASURABLE_STRATEGIES)

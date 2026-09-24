@@ -21,12 +21,14 @@ import sys
 from analysis.output import (
     cache_run_result,
     emit_envelope_json,
+    empty_state,
     maybe_render_home_view,
     parse_axi_flags,
     print_envelope,
     resolve_fields,
 )
 from analysis.skill_loader import load_lib_for_script
+from analysis.watchlist import WatchlistUnavailableError
 
 _lib = load_lib_for_script(__file__)
 analyze = _lib.analyze
@@ -114,7 +116,15 @@ def main():
         if maybe_render_home_view(__file__, None, json_mode):
             return
 
-    result = analyze(basket=basket, window_days=window_days, benchmark=benchmark)
+    try:
+        result = analyze(basket=basket, window_days=window_days, benchmark=benchmark)
+    except WatchlistUnavailableError as e:
+        # Broken registry, not a missing basket — loud non-zero, never a traceback.
+        if json_mode:
+            print_envelope(empty_state(errors=[str(e)], help=_help_lines()))
+        else:
+            print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if _is_empty_state(result):
         if json_mode:

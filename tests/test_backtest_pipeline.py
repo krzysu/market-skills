@@ -867,6 +867,113 @@ class TestMeasuredStrategy:
             assert isinstance(reason, str) and reason.strip(), f"{name} has an empty reason"
 
 
+# ── fail-loud empty pair grid (bead market-skills-kwu) ────────────
+
+
+class TestEmptyPairGridFailLoud:
+    """A zero-pair night must exit non-zero with a FATAL line on stderr,
+    BEFORE the run record is appended, any of the five output files is
+    written, or the rolling-baseline state file is mutated.
+
+    Pre-fix (bead market-skills-kwu): an empty watchlist resolved 0
+    tickers, the pipeline computed 0 pairs, wrote empty artifacts,
+    appended a ``results 0 / errors []`` record, and exited 0 — so the
+    cron reported ``ok`` while every downstream consumer saw empty edge
+    artifacts. Writers are deliberately NOT patched here: if the guard
+    fails to fire, the real writers append ``runs.jsonl`` and write the
+    five output files into ``out_dir``, and the no-artifacts assertion
+    fails."""
+
+    _OUTPUT_FILES = [
+        "conviction_thresholds_private.json",
+        "fitness_matrix.json",
+        "watchdog_regime_state.json",
+        "swing_scan_skip_list.json",
+        "regime_health_brief.md",
+        "runs.jsonl",
+    ]
+
+    @staticmethod
+    def _setup(monkeypatch, run_mod, out_dir, state_file):
+        monkeypatch.setattr(run_mod, "_resolve_out_dir", lambda: out_dir)
+        monkeypatch.setattr(run_mod, "_resolve_state_file", lambda _d: state_file)
+        monkeypatch.setattr(run_mod, "_parse_args", lambda: argparse.Namespace(baskets=None))
+        monkeypatch.setattr(run_mod, "BACKTEST_INTERVALS", [("1d", "1y", 100, 500)])
+
+    def test_empty_ticker_list_fatal(self, monkeypatch, tmp_path, capsys):
+        run_mod = _load_run_mod("bp_empty_tickers")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        state_file = out_dir / "backtest-pipeline-state.json"
+        state_before = json.dumps({"first_run": False, "baseline": {}, "last_run_ts": None})
+        state_file.write_text(state_before)
+
+        self._setup(monkeypatch, run_mod, out_dir, state_file)
+        monkeypatch.setattr(run_mod, "measured_strategies", lambda: ["strategy-trend-follow"])
+        monkeypatch.setattr(run_mod, "_read_active_tickers", lambda baskets=None: [])
+
+        rc = run_mod.main()
+        captured = capsys.readouterr()
+
+        assert rc != 0
+        assert "FATAL" in captured.err
+        assert "MARKET_SKILLS_WATCHLIST_PATH" in captured.err
+        assert "0" in captured.err
+        # Nothing written: no output file, no run record, no state mutation.
+        leftovers = [p.name for p in out_dir.iterdir() if p.name != "backtest-pipeline-state.json"]
+        assert leftovers == []
+        assert state_file.read_text() == state_before
+
+    def test_watchlist_error_causes_fatal_not_traceback(self, monkeypatch, tmp_path, capsys):
+        run_mod = _load_run_mod("bp_watchlist_fatal")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        state_file = out_dir / "backtest-pipeline-state.json"
+        state_before = json.dumps({"first_run": False, "baseline": {}, "last_run_ts": None})
+        state_file.write_text(state_before)
+
+        self._setup(monkeypatch, run_mod, out_dir, state_file)
+        monkeypatch.setattr(run_mod, "measured_strategies", lambda: ["strategy-trend-follow"])
+
+        def boom(baskets=None):
+            raise run_mod.WatchlistUnavailableError("watchlist unavailable (file not found): /tmp/nowhere.json")
+
+        monkeypatch.setattr(run_mod, "_read_active_tickers", boom)
+
+        rc = run_mod.main()
+        captured = capsys.readouterr()
+
+        assert rc != 0
+        assert "FATAL" in captured.err
+        assert "watchlist unavailable" in captured.err
+        # No traceback escaped into stderr.
+        assert "Traceback" not in captured.err
+        leftovers = [p.name for p in out_dir.iterdir() if p.name != "backtest-pipeline-state.json"]
+        assert leftovers == []
+        assert state_file.read_text() == state_before
+
+    def test_empty_measured_strategies_fatal(self, monkeypatch, tmp_path, capsys):
+        run_mod = _load_run_mod("bp_empty_strategies")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        state_file = out_dir / "backtest-pipeline-state.json"
+        state_before = json.dumps({"first_run": False, "baseline": {}, "last_run_ts": None})
+        state_file.write_text(state_before)
+
+        self._setup(monkeypatch, run_mod, out_dir, state_file)
+        monkeypatch.setattr(run_mod, "measured_strategies", lambda: [])
+        monkeypatch.setattr(run_mod, "_read_active_tickers", lambda baskets=None: [("BTCUSD", "kraken:BTCUSD")])
+
+        rc = run_mod.main()
+        captured = capsys.readouterr()
+
+        assert rc != 0
+        assert "FATAL" in captured.err
+        leftovers = [p.name for p in out_dir.iterdir() if p.name != "backtest-pipeline-state.json"]
+        assert leftovers == []
+        assert state_file.read_text() == state_before
+
+
 # ── conviction-gate self-pollution isolation (bead market-skills-0rk) ──
 
 

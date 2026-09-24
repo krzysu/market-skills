@@ -1,8 +1,11 @@
 """Tests for analysis/watchlist — I/O + library functions."""
 
+import json
+
 import pytest
 
 from analysis import watchlist as wl_mod
+from analysis.watchlist import WatchlistUnavailableError
 
 
 @pytest.fixture
@@ -30,8 +33,10 @@ SAMPLE = {
 }
 
 
-def test_load_raw_missing(tmp_watchlist_path):
-    assert wl_mod.load_raw() == {}
+def test_load_raw_missing_raises(tmp_watchlist_path):
+    """Bead market-skills-kwu: a missing watchlist file is fatal, never {}."""
+    with pytest.raises(WatchlistUnavailableError):
+        wl_mod.load_raw()
 
 
 def test_save_load_round_trip(tmp_watchlist_path):
@@ -147,3 +152,93 @@ def test_default_path_points_to_skill_data_dir():
 def test_atomic_write(tmp_watchlist_path):
     wl_mod.save_raw(SAMPLE)
     assert not tmp_watchlist_path.with_suffix(tmp_watchlist_path.suffix + ".tmp").exists()
+
+
+# ── fail-loud registry contract (bead market-skills-kwu) ──────────
+
+
+class TestWatchlistUnavailable:
+    """A missing, unreadable, malformed, or empty watchlist must raise —
+    an empty result silently collapses every downstream batch/artifact
+    to zero while callers report success."""
+
+    def test_missing_file_at_explicit_path_raises(self, tmp_path):
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.load_raw(tmp_path / "nope.json")
+
+    def test_missing_file_at_env_path_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(tmp_path / "nope.json"))
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.all_tickers()
+
+    def test_env_unset_and_default_absent_raises_with_env_var_named(self, tmp_path, monkeypatch):
+        """env unset + default file absent → raise; the message names
+        MARKET_SKILLS_WATCHLIST_PATH and states the in-repo fallback."""
+        monkeypatch.delenv("MARKET_SKILLS_WATCHLIST_PATH", raising=False)
+        monkeypatch.setattr(wl_mod, "default_path", lambda: tmp_path / "default" / "watchlist.json")
+        with pytest.raises(WatchlistUnavailableError) as excinfo:
+            wl_mod.categories()
+        msg = str(excinfo.value)
+        assert "MARKET_SKILLS_WATCHLIST_PATH" in msg
+        assert "falls back" in msg
+        assert str(tmp_path / "default" / "watchlist.json") in msg
+
+    def test_invalid_json_raises(self, tmp_path, monkeypatch):
+        p = tmp_path / "watchlist.json"
+        p.write_text("{not json")
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(p))
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.load_raw()
+
+    def test_non_utf8_file_raises(self, tmp_path, monkeypatch):
+        """A non-UTF-8/corrupt registry makes json.load raise UnicodeDecodeError
+        (a ValueError, not json.JSONDecodeError) — it must surface as
+        WatchlistUnavailableError, not a raw traceback through the caller."""
+        p = tmp_path / "watchlist.json"
+        p.write_bytes(b"\xff\xfe\x00\x00\xff")
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(p))
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.load_raw()
+
+    def test_non_object_root_raises(self, tmp_path, monkeypatch):
+        p = tmp_path / "watchlist.json"
+        p.write_text(json.dumps(["not", "an", "object"]))
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(p))
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.load_raw()
+
+    def test_zero_baskets_raises(self, tmp_path, monkeypatch):
+        p = tmp_path / "watchlist.json"
+        p.write_text(json.dumps({"baskets": {}}))
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(p))
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.load_raw()
+
+    def test_basket_with_zero_tickers_raises(self, tmp_path, monkeypatch):
+        p = tmp_path / "watchlist.json"
+        p.write_text(json.dumps({"baskets": {"empty_basket": {}}}))
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(p))
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.load_raw()
+
+    def test_accessors_inherit_the_raise(self, tmp_path, monkeypatch):
+        """Every accessor funnels through load_raw, so they all raise."""
+        p = tmp_path / "watchlist.json"
+        p.write_text(json.dumps({"baskets": {}}))
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(p))
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.all_tickers()
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.categories()
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.by_category("crypto_majors")
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.basket("crypto_majors")
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.metadata_for("BTCUSD")
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.provider_for("BTCUSD")
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.resolve("btc")
+        with pytest.raises(WatchlistUnavailableError):
+            wl_mod.expand_tickers(["btc"])

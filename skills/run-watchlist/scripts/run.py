@@ -27,6 +27,7 @@ from analysis.notes import load_active
 from analysis.output import cache_run_result, maybe_render_home_view
 from analysis.skill_loader import load_lib_for_script
 from analysis.watchlist import (
+    WatchlistUnavailableError,
     all_tickers,
     by_category,
     expand_tickers,
@@ -98,7 +99,11 @@ def main():
     include_l3 = not args.l2_only
     include_notes = not args.no_notes
 
-    tickers, scope_label = _resolve_tickers(args, wl_path)
+    try:
+        tickers, scope_label = _resolve_tickers(args, wl_path)
+    except WatchlistUnavailableError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
     if not tickers:
         print("error: resolved ticker list is empty", file=sys.stderr)
         sys.exit(1)

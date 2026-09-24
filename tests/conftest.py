@@ -1,6 +1,7 @@
 """Global test configuration."""
 
 import importlib
+import json
 
 import pytest
 
@@ -72,3 +73,41 @@ def _hermetic_conviction_gate(monkeypatch):
     ct.GLOBAL_MIN_CONVICTION_TO_EMIT = saved_global
     ct.MIN_CONVICTION_TO_EMIT_BY_STRATEGY.clear()
     ct.MIN_CONVICTION_TO_EMIT_BY_STRATEGY.update(saved_table)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_watchlist(monkeypatch, tmp_path):
+    """Make watchlist resolution hermetic against the ambient machine.
+
+    ``analysis.watchlist.load_raw`` is fail-loud (bead market-skills-kwu):
+    a missing, unreadable, or empty watchlist raises
+    ``WatchlistUnavailableError``. The data file is gitignored per-user
+    data, so without this fixture every watchlist-reading test would
+    depend on whether the operator's ``skills/market-watchlist/data/``
+    exists on the machine running the suite.
+
+    Like ``_hermetic_conviction_gate``, this is unconditional: every test
+    gets ``MARKET_SKILLS_WATCHLIST_PATH`` pointing at a per-test minimal
+    registry, never at the operator's ambient value (a stale or profile
+    export must not leak private data — or
+    ``WatchlistUnavailableError`` — into the suite).
+
+    Tests that need their own file, or the missing/empty-registry paths,
+    simply ``monkeypatch.setenv``/``monkeypatch.delenv`` the var themselves:
+    the test-level monkeypatch is registered after this fixture, so it wins,
+    and both are undone in reverse order at teardown (no manual snapshot).
+    """
+    path = tmp_path / "hermetic-watchlist.json"
+    path.write_text(
+        json.dumps(
+            {
+                "baskets": {
+                    "smoke": {
+                        "BTCUSD": {"source": "kraken", "tier": 1},
+                        "ETHUSD": {"source": "kraken", "tier": 2},
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(path))

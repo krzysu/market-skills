@@ -66,7 +66,7 @@ from analysis.data import fetch_ohlc
 from analysis.output import emit_envelope_json, parse_axi_flags, resolve_fields
 from analysis.registry import l3_strategies
 from analysis.skill_loader import load_skill
-from analysis.watchlist import by_category
+from analysis.watchlist import WatchlistUnavailableError, by_category
 
 # Per-interval backtest config: (period, warmup, periods_per_year).
 #   1d  -> 2y lookback, 200-bar warmup, 365 periods/year (daily bars, 24/7 crypto).
@@ -136,8 +136,10 @@ def _default_tickers() -> list[str]:
     """T1 + T2 tickers from the watchlist (``tier_1`` + ``tier_2`` baskets).
 
     Dedupes while preserving insertion order (tier_1 first, then tier_2).
-    Returns ``[]`` when the watchlist file or those baskets are absent - the
-    caller is expected to pass ``--tickers`` explicitly in that case.
+    Returns ``[]`` when those baskets are absent — the caller is expected
+    to pass ``--tickers`` explicitly in that case. Raises
+    ``WatchlistUnavailableError`` when the registry file itself is missing,
+    unreadable, or empty; the caller surfaces that as a fatal error.
     """
     seen: set[str] = set()
     out: list[str] = []
@@ -670,7 +672,11 @@ def main() -> None:
         # Fresh grid: opt-in via --fresh (or --tickers/--strategies), or the
         # automatic fallback when the nightly artifacts are missing/unreadable.
         strategies = args.strategies if args.strategies else l3_strategies()
-        tickers = args.tickers if args.tickers is not None else _default_tickers()
+        try:
+            tickers = args.tickers if args.tickers is not None else _default_tickers()
+        except WatchlistUnavailableError as e:
+            print(f"error: {e}", file=sys.stderr)
+            sys.exit(1)
 
         bt_lib = load_skill("backtest-engine")
         if bt_lib is None:

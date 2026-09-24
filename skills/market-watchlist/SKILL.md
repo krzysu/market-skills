@@ -54,6 +54,8 @@ Default: `skills/market-watchlist/data/watchlist.json`. Override via:
 - `--config PATH` on every subcommand
 - `MARKET_SKILLS_WATCHLIST_PATH` env var (absolute path)
 
+Fail-loud: a missing, unreadable, malformed, or empty registry (zero baskets / zero tickers) raises `WatchlistUnavailableError` from every accessor and exits every consumer non-zero. An empty registry must never silently collapse downstream batches to zero. When the env var is unset the resolver falls back to the in-repo default data file.
+
 ## Schema
 
 ```json

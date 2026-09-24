@@ -28,6 +28,7 @@ from analysis.output import (
     resolve_fields,
 )
 from analysis.skill_loader import load_lib_for_script
+from analysis.watchlist import WatchlistUnavailableError
 
 
 def main() -> int:
@@ -72,6 +73,9 @@ def main() -> int:
             source=args.source,
             watchlist_path=args.watchlist,
         )
+    except WatchlistUnavailableError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     except ValueError as e:
         print(parse_cli_error(e), file=sys.stderr)
         return 2

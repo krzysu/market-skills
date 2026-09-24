@@ -237,10 +237,10 @@ def _bare_in_watchlist(bare: str, known_tickers: set[str], watchlist_path: str |
     if bare in known_tickers:
         return True
     try:
-        from analysis.watchlist import resolve
+        from analysis.watchlist import WatchlistUnavailableError, resolve
 
         return resolve(bare, path=watchlist_path) is not None
-    except (ImportError, ValueError):
+    except (ImportError, ValueError, WatchlistUnavailableError):
         return False
 
 
@@ -936,10 +936,10 @@ def main() -> int:
     known_tickers: set[str] | None = None
     if args.watchlist:
         try:
-            from analysis.watchlist import all_tickers
+            from analysis.watchlist import WatchlistUnavailableError, all_tickers
 
             known_tickers = set(all_tickers(path=args.watchlist))
-        except (ImportError, OSError) as e:
+        except (ImportError, OSError, WatchlistUnavailableError) as e:
             print(f"[WARN] could not load watchlist {args.watchlist}: {e}", file=sys.stderr)
             known_tickers = None
 
