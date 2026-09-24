@@ -41,7 +41,7 @@ _FAKE_PAYLOAD = {
     "window_days": 7,
     "effective_window_days": 7,
     "benchmark": "BTCUSD",
-    "basket": "crypto_alts",
+    "basket": "tier_1",
     "members": 3,
     "pct_beating": 66.7,
     "btc_return_pct": 8.0,
@@ -156,7 +156,7 @@ class TestBreadthCliEmptyState:
         "data": None,
         "count": 0,
         "errors": ["basket 'nope' not found or empty in watchlist"],
-        "help": ["available baskets: crypto_alts"],
+        "help": ["available baskets: tier_1"],
     }
 
     def test_json_empty_state_shape(self, capsys, monkeypatch, tmp_path):
@@ -178,7 +178,7 @@ class TestBreadthCliEmptyState:
         assert rc in (0, None)
         captured = capsys.readouterr()
         assert "nope" in captured.err
-        assert "available baskets: crypto_alts" in captured.out
+        assert "available baskets: tier_1" in captured.out
 
 
 class TestBreadthCliTextMode:
@@ -226,4 +226,41 @@ class TestBreadthCliHomeView:
         assert env["data"] is None
         assert env["count"] == 0
         assert "nope" in " ".join(env["errors"])
-        assert env["help"] == ["available baskets: crypto_alts"]
+        assert env["help"] == ["available baskets: tier_1"]
+
+
+class TestBreadthCliBasketArgument:
+    def test_no_basket_flag_passes_none_to_analyze(self, capsys, monkeypatch, tmp_path):
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        mod = _load_mod()
+        captured: dict = {}
+
+        def _capture(**kw):
+            captured.update(kw)
+            return dict(_FAKE_PAYLOAD)
+
+        monkeypatch.setattr(mod, "analyze", _capture)
+        rc = _run_cli(mod, "--json")
+        assert rc in (0, None)
+        assert "basket" in captured
+        assert captured["basket"] is None
+
+    def test_explicit_basket_is_passed_through(self, capsys, monkeypatch, tmp_path):
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        mod = _load_mod()
+        captured: dict = {}
+
+        def _capture(**kw):
+            captured.update(kw)
+            return dict(_FAKE_PAYLOAD)
+
+        monkeypatch.setattr(mod, "analyze", _capture)
+        rc = _run_cli(mod, "--json", "--basket=tier_2")
+        assert rc in (0, None)
+        assert captured["basket"] == "tier_2"
+
+    def test_empty_basket_value_exits_2(self, capsys, monkeypatch):
+        mod = _load_mod()
+        rc = _run_cli(mod, "--json", "--basket=")
+        assert rc == 2
+        assert "--basket" in capsys.readouterr().err

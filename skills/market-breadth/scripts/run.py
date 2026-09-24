@@ -4,9 +4,12 @@
 Ticker-agnostic rotation read: resolves a `market-watchlist` basket, fetches
 daily candles per member plus the benchmark (default BTC), and reports what
 share of members outperformed the benchmark over a rolling N-day window.
+With no `--basket` given, the default is `tier_1`, falling back to the first
+non-empty watchlist basket (substitution disclosed in `errors[]`).
 
 Usage:
-    # JSON to stdout (AXI envelope)
+    # JSON to stdout (AXI envelope); the basket defaults to tier_1, falling
+    # back to the first non-empty watchlist basket when tier_1 is absent
     uv run skills/market-breadth/scripts/run.py --json
 
     # Human-readable summary
@@ -38,7 +41,7 @@ DEFAULT_FIELDS = ["basket", "window_days", "members", "pct_beating", "regime", "
 
 def _parse_argv(argv):
     json_mode = False
-    basket = "crypto_alts"
+    basket = None
     window_days = 7
     benchmark = "btc"
     for arg in argv:
@@ -46,6 +49,9 @@ def _parse_argv(argv):
             json_mode = True
         elif arg.startswith("--basket="):
             basket = arg.split("=", 1)[1]
+            if not basket:
+                print("error: --basket expects a non-empty basket name", file=sys.stderr)
+                sys.exit(2)
         elif arg.startswith("--window-days="):
             raw = arg.split("=", 1)[1]
             try:

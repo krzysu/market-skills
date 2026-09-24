@@ -30,12 +30,12 @@ def _watchlist_file(tmp_path, data):
 
 WATCHLIST = {
     "baskets": {
-        "crypto_alts": {
+        "tier_1": {
             "AAAUSD": {"tier": 1, "source": "kraken"},
             "BBBUSD": {"tier": 2, "source": "kraken"},
             "BTCUSD": {"source": "kraken", "label": "BTC"},
         },
-        "crypto_majors": {
+        "tier_2": {
             "BTCUSD": {"source": "kraken"},
             "ETHUSD": {"source": "kraken"},
         },
@@ -47,6 +47,7 @@ FAKE_CANDLES = {
     "BTCUSD": _series(100, 101, 102, 103, 104, 105, 106, 108),
     "AAAUSD": _series(100, 100, 100, 100, 100, 100, 100, 120),  # +20.00%
     "BBBUSD": _series(100, 100, 100, 100, 100, 100, 100, 110),  # +10.00%
+    "ETHUSD": _series(100, 100, 100, 100, 100, 100, 100, 105),  # +5.00%
 }
 
 
@@ -281,9 +282,9 @@ class TestAnalyzeEndToEnd:
     def test_success_benchmark_excluded_and_payload_shape(self, monkeypatch):
         calls: list[tuple] = []
         self._patch_fetch(monkeypatch, FAKE_CANDLES, calls)
-        result = analyze(basket="crypto_alts", window_days=7, benchmark="btc")
+        result = analyze(basket="tier_1", window_days=7, benchmark="btc")
         assert result["benchmark"] == "BTCUSD"
-        assert result["basket"] == "crypto_alts"
+        assert result["basket"] == "tier_1"
         assert result["members"] == 2  # BTCUSD resolved as benchmark and excluded
         assert result["pct_beating"] == 100.0  # AAA +20% and BBB +10% both beat BTC +8%
         assert result["regime"] == "alt_rotation"
@@ -300,7 +301,7 @@ class TestAnalyzeEndToEnd:
             tmp_path,
             {
                 "baskets": {
-                    "crypto_alts": {
+                    "tier_1": {
                         "CCCUSD": {"source": "kraken"},
                         "BTCUSD": {"source": "kraken"},
                     }
@@ -316,7 +317,7 @@ class TestAnalyzeEndToEnd:
             },
             None,
         )
-        result = analyze(basket="crypto_alts", window_days=7, benchmark="btc")
+        result = analyze(basket="tier_1", window_days=7, benchmark="btc")
         assert result["members"] == 1
         assert result["leaders"] == [{"ticker": "CCCUSD", "return_pct": -2.0}]
         assert result["pct_beating"] == 0.0
@@ -329,22 +330,22 @@ class TestAnalyzeEndToEnd:
             return candles[ticker]
 
         monkeypatch.setattr(_lib, "fetch_ohlc", fake_fetch_ohlc)
-        result = analyze(basket="crypto_alts", window_days=7, benchmark="btc")
+        result = analyze(basket="tier_1", window_days=7, benchmark="btc")
         assert result["members"] == 1
         assert any("BBBUSD" in err and "FETCH FAILED" in err for err in result["errors"])
 
-    def test_missing_basket_returns_empty_state_not_exception(self, monkeypatch):
+    def test_explicit_missing_basket_still_returns_empty_state(self, monkeypatch):
         self._patch_fetch(monkeypatch, FAKE_CANDLES, None)
         result = analyze(basket="nope", window_days=7, benchmark="btc")
         assert result["data"] is None
         assert result["count"] == 0
         assert any("nope" in err for err in result["errors"])
         joined_help = " ".join(result["help"])
-        assert "crypto_alts" in joined_help and "crypto_majors" in joined_help
+        assert "tier_1" in joined_help and "tier_2" in joined_help
 
     def test_unresolvable_benchmark_returns_empty_state(self, monkeypatch):
         self._patch_fetch(monkeypatch, FAKE_CANDLES, None)
-        result = analyze(basket="crypto_alts", window_days=7, benchmark="zzz")
+        result = analyze(basket="tier_1", window_days=7, benchmark="zzz")
         assert result["data"] is None
         assert result["count"] == 0
         assert any("zzz" in err for err in result["errors"])
@@ -357,10 +358,70 @@ class TestAnalyzeEndToEnd:
             return candles[ticker]
 
         monkeypatch.setattr(_lib, "fetch_ohlc", fake_fetch_ohlc)
-        result = analyze(basket="crypto_alts", window_days=7, benchmark="btc")
+        result = analyze(basket="tier_1", window_days=7, benchmark="btc")
         assert result["data"] is None
         assert result["count"] == 0
         assert any("BTCUSD" in err and "benchmark" in err for err in result["errors"])
+
+    def test_no_basket_resolves_the_default_tier(self, monkeypatch):
+        self._patch_fetch(monkeypatch, FAKE_CANDLES, None)
+        result = analyze(window_days=7, benchmark="btc")
+        assert "count" not in result  # real reading, not an AXI empty state
+        assert "narrative" in result
+        assert result["basket"] == _lib.DEFAULT_BASKET
+        assert result["members"] > 0
+        assert result["errors"] == []
+
+    def test_no_basket_falls_back_to_the_first_non_empty_basket(self, monkeypatch, tmp_path):
+        alt_path = _watchlist_file(
+            tmp_path,
+            {
+                "baskets": {
+                    "crypto_majors": {
+                        "BTCUSD": {"source": "kraken"},
+                        "ETHUSD": {"source": "kraken"},
+                    },
+                    "tier_3": {
+                        "AAAUSD": {"source": "kraken"},
+                        "BTCUSD": {"source": "kraken"},
+                    },
+                }
+            },
+        )
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(alt_path))
+        self._patch_fetch(monkeypatch, FAKE_CANDLES, None)
+        result = analyze(window_days=7, benchmark="btc")
+        assert "count" not in result  # real reading, not an AXI empty state
+        assert "narrative" in result
+        assert result["basket"] == "crypto_majors"
+        assert result["members"] > 0
+        assert any(
+            f"[BREADTH BASKET DEFAULTED — preferred {_lib.DEFAULT_BASKET!r} not in watchlist; used 'crypto_majors']"
+            in err
+            for err in result["errors"]
+        )
+
+    def test_no_basket_skips_a_present_but_empty_default(self, monkeypatch, tmp_path):
+        alt_path = _watchlist_file(
+            tmp_path,
+            {
+                "baskets": {
+                    _lib.DEFAULT_BASKET: {},
+                    "tier_2": {
+                        "BTCUSD": {"source": "kraken"},
+                        "ETHUSD": {"source": "kraken"},
+                    },
+                }
+            },
+        )
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(alt_path))
+        self._patch_fetch(monkeypatch, FAKE_CANDLES, None)
+        result = analyze(window_days=7, benchmark="btc")
+        assert "count" not in result  # real reading, not an AXI empty state
+        assert "narrative" in result
+        assert result["basket"] == "tier_2"
+        assert result["members"] > 0
+        assert any("BREADTH BASKET DEFAULTED" in err for err in result["errors"])
 
 
 def test_loadable_via_skill_loader():
