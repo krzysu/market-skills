@@ -1407,3 +1407,165 @@ class TestPartialDegradationGuard:
             assert (out_dir / name).read_text() == seeded_bytes[name], name
         assert not (out_dir / "runs.jsonl").exists()
         assert state_file.read_text() == state_before
+
+
+# ── watchdog regime key resolution (bead market-skills-jqx) ───────
+
+
+class TestWatchdogRegimeKeyResolution:
+    """_write_watchdog_regime must resolve each watch's monitor_provider onto
+    the watchlist notation the measurement state is keyed by, and WARN when
+    it cannot (bead market-skills-jqx).
+
+    Pre-fix the lookup ticker came from `provider.split(":")[-1]`, which
+    misses in two distinct ways: a quote mismatch (watch `kraken:ETHEUR` vs
+    state key `ETHUSD`) and a dropped provider prefix (watch `hl:LIT` vs
+    state key `hl:LIT`). Both lookups failed silently, so every entry was
+    written with null Sharpes and regime_status "unknown" — the watchdog's
+    regime-negative alert suppression never fired, for any watch, ever.
+    """
+
+    @staticmethod
+    def _watch(name: str, monitor_provider: str, strategies: list[str]) -> dict:
+        return {
+            "name": name,
+            "enabled": True,
+            "monitor_provider": monitor_provider,
+            "signals": [{"strategies": strategies}],
+        }
+
+    @staticmethod
+    def _measured(strategy: str, provider_ticker: str, sharpe: float) -> dict:
+        return {
+            "strategy": strategy,
+            "ticker": provider_ticker,
+            "strategy_sharpe": sharpe,
+            "trades": 12,
+            "insufficient_data": False,
+        }
+
+    @staticmethod
+    def _baseline_slot(avg: float) -> dict:
+        return {"history": [], "avg_sharpe_7n": avg, "n_samples": 1}
+
+    @staticmethod
+    def _write_regime(run_mod, monkeypatch, tmp_path, watches, current, baseline) -> dict:
+        """Drive the REAL _write_watchdog_regime against tmp fixtures and
+        return the parsed watchdog_regime_state.json payload."""
+        positions_path = tmp_path / "open-positions.json"
+        positions_path.write_text(json.dumps({"watches": watches}))
+        monkeypatch.setenv(_lib.ENV_OPEN_POSITIONS_PATH, str(positions_path))
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        run_mod._write_watchdog_regime(current, {"baseline": baseline}, out_dir)
+        return json.loads((out_dir / "watchdog_regime_state.json").read_text())
+
+    def test_regime_resolves_eur_quoted_monitor_provider(self, monkeypatch, tmp_path):
+        """Watch `kraken:ETHEUR` must resolve onto the state's `ETHUSD` key
+        through the watchlist's alias/quote resolution. Pre-fix the lookup
+        used the bare tail `ETHEUR` — a key the state never contains — so
+        both Sharpes stayed null and the status stayed "unknown"."""
+        run_mod = _load_run_mod("bp_regime_eur_quote")
+        data = self._write_regime(
+            run_mod,
+            monkeypatch,
+            tmp_path,
+            [self._watch("ETH", "kraken:ETHEUR", ["trend-follow"])],
+            {
+                "1d\u00d7strategy-trend-follow\u00d7ETHUSD": self._measured(
+                    "strategy-trend-follow", "kraken:ETHUSD", 1.2
+                )
+            },
+            {"1d\u00d7strategy-trend-follow\u00d7ETHUSD": self._baseline_slot(0.6)},
+        )
+        entry = data["positions"]["ETH"]["trend-follow"]
+        assert entry["sharpe_now"] == 1.2
+        assert entry["sharpe_7n"] == 0.6
+        assert entry["regime_status"] != "unknown"
+        assert entry["ticker"] == "ETHUSD"
+
+    def test_regime_resolves_prefixed_provider(self, monkeypatch, tmp_path):
+        """Watch `hl:LIT` must resolve onto the state's raw watchlist key
+        `hl:LIT`. Pre-fix the lookup used the bare tail `LIT` — a key the
+        state never contains — so the entry stayed null/unknown."""
+        run_mod = _load_run_mod("bp_regime_prefixed")
+        watchlist_path = tmp_path / "watchlist.json"
+        watchlist_path.write_text(
+            json.dumps(
+                {
+                    "baskets": {
+                        "smoke": {
+                            "hl:LIT": {"source": "hyperliquid", "tier": 2},
+                        }
+                    }
+                }
+            )
+        )
+        monkeypatch.setenv("MARKET_SKILLS_WATCHLIST_PATH", str(watchlist_path))
+        data = self._write_regime(
+            run_mod,
+            monkeypatch,
+            tmp_path,
+            [self._watch("LIT", "hl:LIT", ["trend-follow"])],
+            {"1d\u00d7strategy-trend-follow\u00d7hl:LIT": self._measured("strategy-trend-follow", "hl:LIT", 0.9)},
+            {"1d\u00d7strategy-trend-follow\u00d7hl:LIT": self._baseline_slot(0.4)},
+        )
+        entry = data["positions"]["LIT"]["trend-follow"]
+        assert entry["sharpe_now"] == 0.9
+        assert entry["sharpe_7n"] == 0.4
+        assert entry["regime_status"] != "unknown"
+        assert entry["ticker"] == "hl:LIT"
+
+    def test_regime_unknown_is_warned_not_silent(self, monkeypatch, tmp_path, capsys):
+        """A watch whose monitor_provider matches nothing in the watchlist is
+        a configuration bug: the entry is still written as "unknown" (the
+        reader tolerates it) but the miss must be LOUD — a [WARN] naming the
+        watch, the strategy, the monitor_provider and the candidates tried."""
+        run_mod = _load_run_mod("bp_regime_warn")
+        watches = [self._watch("NOPE", "kraken:NOPEUSD", ["trend-follow"])]
+
+        capsys.readouterr()
+        data = self._write_regime(run_mod, monkeypatch, tmp_path, watches, {}, {})
+        captured = capsys.readouterr()
+
+        entry = data["positions"]["NOPE"]["trend-follow"]
+        assert entry["regime_status"] == "unknown"
+        assert entry["sharpe_now"] is None
+        assert entry["ticker"] == "kraken:NOPEUSD"
+
+        warns = [ln for ln in captured.out.splitlines() if "[WARN]" in ln and "watchdog regime" in ln]
+        assert len(warns) == 1
+        assert "'NOPE'" in warns[0]
+        assert "'trend-follow'" in warns[0]
+        assert "'kraken:NOPEUSD'" in warns[0]
+        assert "nopeusd" in warns[0]
+
+    def test_regime_status_derives_from_baseline_sign(self, monkeypatch, tmp_path):
+        """A negative 7-night baseline Sharpe must surface as regime_status
+        "negative" with a skip-adds recommendation; a positive one as
+        "positive" — reached through the resolved key, not the bare tail."""
+        run_mod = _load_run_mod("bp_regime_baseline_sign")
+        watches = [
+            self._watch("ETH", "kraken:ETHEUR", ["trend-follow"]),
+            self._watch("BTC", "kraken:BTCUSD", ["trend-follow"]),
+        ]
+        current = {
+            "1d\u00d7strategy-trend-follow\u00d7ETHUSD": self._measured("strategy-trend-follow", "kraken:ETHUSD", -0.2),
+            "1d\u00d7strategy-trend-follow\u00d7BTCUSD": self._measured("strategy-trend-follow", "kraken:BTCUSD", 1.1),
+        }
+        baseline = {
+            "1d\u00d7strategy-trend-follow\u00d7ETHUSD": self._baseline_slot(-0.7),
+            "1d\u00d7strategy-trend-follow\u00d7BTCUSD": self._baseline_slot(0.5),
+        }
+        data = self._write_regime(run_mod, monkeypatch, tmp_path, watches, current, baseline)
+
+        neg = data["positions"]["ETH"]["trend-follow"]
+        assert neg["regime_status"] == "negative"
+        assert "skip adds" in neg["recommendation"]
+        assert neg["sharpe_now"] == -0.2
+        assert neg["ticker"] == "ETHUSD"
+
+        pos = data["positions"]["BTC"]["trend-follow"]
+        assert pos["regime_status"] == "positive"
+        assert pos["sharpe_7n"] == 0.5
+        assert pos["ticker"] == "BTCUSD"
