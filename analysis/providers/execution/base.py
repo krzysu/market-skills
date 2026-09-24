@@ -130,7 +130,14 @@ class Intent(TypedDict):
     strategy: NotRequired[str]
     notes: NotRequired[dict[str, Any]]
 
-    extras: NotRequired[dict[str, Any]]  # venue-specific kwargs (e.g. position_value)
+    extras: NotRequired[dict[str, Any]]
+    """Provider kwargs, in two namespaces (ADR-0011, see
+    ``NON_VENUE_INTENT_EXTRAS`` below): keys the venue CLI accepts are the
+    VENUE-kwarg channel and are forwarded as ``--key value`` flags
+    (underscore -> dash); keys consumed INSIDE this repo by the risk layer
+    must be declared in ``NON_VENUE_INTENT_EXTRAS`` and are kept in the
+    Intent, never forwarded. A key that is neither a venue flag nor
+    declared there is rejected before any venue call."""
 
     decision_decoration: NotRequired[dict[str, Any] | None]
     """Optional decision-context augmentation contributed by the caller
@@ -144,6 +151,43 @@ class Intent(TypedDict):
     ``override_from_suggestion``, ``override_field``, ``override_reason``.
     Keys outside this set are passed through unchanged so future
     fields don't require a schema bump."""
+
+
+NON_VENUE_INTENT_EXTRAS: frozenset[str] = frozenset(
+    {
+        # analysis/risk/_common.py — spot market-order price hint; first
+        # extras entry in the resolve_intent_notional chain.
+        "reference_price",
+        # analysis/risk/_common.py — spot quote-ccy notional hint
+        # (converted to a unit price via volume).
+        "est_notional",
+        # analysis/risk/_common.py + analysis/risk/perps.py — quote-ccy
+        # notional (spot cost basis; perps funding-drag sizing).
+        "position_value",
+        # analysis/risk/perps.py — perps entry price consumed by the
+        # liquidation-distance and stop-distance policies.
+        "reference_entry",
+        # analysis/providers/execution/kraken_perps.py — pair -> futures
+        # symbol override for the perps bracket adapter.
+        "futures_symbol",
+    }
+)
+"""``Intent.extras`` keys consumed INSIDE this repo that must never be
+forwarded to a venue CLI.
+
+``Intent.extras`` carries two namespaces (ADR-0011):
+
+1. **Venue kwargs** — keys the venue's order CLI accepts as ``--key
+   value`` flags. A venue adapter forwards these (underscore -> dash).
+2. **In-repo risk-layer keys** — declared here; a venue adapter keeps
+   them in the Intent and never shells them out as flags.
+
+A key that is neither a venue flag nor declared here is rejected before
+any venue call (the kraken spot adapter raises
+``UnknownExtrasKeyError``). Adding a new risk-layer extras key REQUIRES
+declaring it in this set in the same change — otherwise every venue
+adapter treats it as unexecutable. Keep this file import-light: the
+consuming modules are named in comments only, never imported."""
 
 
 class FillConfirmation(TypedDict):
@@ -356,6 +400,7 @@ __all__ = [
     "ExecutionProvider",
     "FillConfirmation",
     "Intent",
+    "NON_VENUE_INTENT_EXTRAS",
     "get_execution_provider",
     "register_execution_provider",
     "registered_venues",

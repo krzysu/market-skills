@@ -111,7 +111,7 @@ to pass to this skill, copy the example below and edit the values.**
 | `conviction` | optional | int 1–5 | L3 conviction; persisted. |
 | `source_skills` | optional | list of strings | L2/L3 skills that produced this Intent; persisted. |
 | `notes` | optional | object | Free-form metadata persisted into portfolio-mgmt notes blob. |
-| `extras` | optional | object | Provider-specific kwargs forwarded as `--key value` to Kraken (underscore → dash). |
+| `extras` | optional | object | Two namespaces (see [`extras`: venue flags vs risk-layer keys](#extras-venue-flags-vs-risk-layer-keys)): keys the `kraken order buy\|sell` CLI accepts are forwarded as `--key value` (underscore → dash); keys consumed by the risk layer (`reference_price`, `est_notional`, `position_value`) stay in the Intent and are never forwarded; any other key is rejected before the venue call. |
 | `decision_decoration` | optional | object | Augments the auto-built `decision_context` (regime, macro signals, risk verdict, override). Forwarded to `analysis.decision.build_decision_context_from_idea()` and written to the `decisions` table. See the [decision_context auto-population](#decision_context-auto-population) section for the key list. |
 
 ### Example Intent
@@ -156,6 +156,72 @@ uv run skills/execution-kraken/scripts/run.py submit \
 ```
 
 > **LLM agent brain**: for the per-status workflow when this skill returns a `FillConfirmation`, see [`LLM-ORCHESTRATION.md`](../../../LLM-ORCHESTRATION.md) §3 — the canonical `status` vocabulary is the `status` bullet under "FillConfirmation shape" below. For idempotency rules on `intent_id` / `--cl-ord-id`, see §4.
+
+## `extras`: venue flags vs risk-layer keys
+
+`Intent.extras` carries two namespaces (decision record:
+[ADR-0011](../../docs/adr/0011-intent-extras-namespaces.md); the
+canonical key sets live in `analysis/providers/execution/base.py`):
+
+1. **Venue flags** — keys whose dash-spelling is in
+   `analysis/providers/execution/kraken_spot.py::KRAKEN_ORDER_FLAGS` (the
+   order-level allowlist derived from `kraken order buy --help` /
+   `kraken order sell --help`): `type`, `price`, `price2`, `displayvol`,
+   `trigger`, `leverage`, `reduce-only`, `timeinforce`, `start-time`,
+   `expire-time`, `userref`, `cl-ord-id`, `oflags`, `stptype`,
+   `close-ordertype`, `close-price`, `close-price2`, `deadline`,
+   `asset-class`. These are forwarded as `--key value` (underscore →
+   dash, so the underscore spelling works). Process/global CLI options
+   (`output`, `verbose`, `api-url`, `api-key`, `api-secret`,
+   `api-secret-stdin`, `api-secret-file`, `futures-url`, `otp`, `yes`)
+   and `validate` are excluded — they configure the CLI invocation, not
+   the order.
+2. **Risk-layer keys** — declared in
+   `analysis/providers/execution/base.py::NON_VENUE_INTENT_EXTRAS` and
+   consumed inside this repo, never forwarded to the venue:
+   - `reference_price` → risk-engine spot market-order price hint
+   - `est_notional` → risk-engine spot quote-ccy notional
+   - `position_value` → risk-engine spot + perps funding-drag notional
+   - `reference_entry` → perps liquidation-distance / stop-distance policies
+   - `futures_symbol` → perps pair → futures symbol override
+
+3. Anything else is rejected **before any venue call** with:
+
+   ```
+   error: extras key 'foo' is not a kraken order CLI flag and no in-repo
+   layer consumes it — refusing to forward it to the venue (venue-flag
+   extras: asset-class, cl-ord-id, close-ordertype, close-price,
+   close-price2, deadline, displayvol, expire-time, leverage, oflags,
+   price, price2, reduce-only, start-time, stptype, timeinforce,
+   trigger, type, userref; consumed in-repo and never forwarded:
+   est_notional, futures_symbol, position_value, reference_entry,
+   reference_price)
+   ```
+
+   (CLI: exit 2; provider: `status="error"` confirmation.)
+
+**Worked example** — a market Intent carrying the documented risk-engine
+price hint. `reference_price` stays in the Intent, is never forwarded,
+and the order validates and submits cleanly:
+
+```json
+{
+  "intent_id": "tf-bnb-1oa",
+  "venue": "kraken",
+  "pair": "BNBEUR",
+  "side": "buy",
+  "order_type": "market",
+  "volume": 0.29093,
+  "extras": { "reference_price": 687.43 }
+}
+```
+
+**Dry-run/live agreement**: the `--dry-run` branch and the live submit
+both build their argv from the same
+`analysis/providers/execution/kraken_spot.py::build_order_args`, so an
+intent that passes dry-run forwards exactly the same (allowlisted) venue
+flags at live time — a dry-run green light can never be followed by an
+extras-forwarding failure.
 
 ## FillConfirmation shape (output)
 
@@ -294,7 +360,11 @@ uv run skills/execution-kraken/scripts/run.py submit \
 
 - `0` — success (live submit returned, dry-run validated, read-only op succeeded)
 - `1` — venue error / CLI failure / cancel failed / **portfolio write failed after a venue fill** (venue and ledger disagree — record the fill manually before trusting cost basis; do not re-submit)
-- `2` — input validation failure (bad intent, missing args, REJECT status)
+- `2` — input validation failure (bad intent, missing args, REJECT status, or an `extras` key that is neither a `kraken order` venue flag nor a declared in-repo Intent key — rejected **before any venue call**)
+
+A live `submit --json` whose `confirmation.status` is `error` exits `1`
+(matching the human path) — a machine caller can rely on the exit code,
+not just the payload.
 
 ## Safety checklist before running live
 

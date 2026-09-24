@@ -17,6 +17,15 @@ Venue surface used:
     kraken open-orders                       (open orders)
     kraken query-orders <TXID>               (poll after submit)
 
+``Intent.extras`` namespaces (ADR-0011): extras keys are forwarded as
+``--key value`` flags ONLY when their dash-spelling is in
+``KRAKEN_ORDER_FLAGS`` (the order-level allowlist derived from
+``kraken order buy --help``). Keys declared in
+``analysis/providers/execution/base.py::NON_VENUE_INTENT_EXTRAS`` are
+consumed in-repo (risk layer) and stay in the Intent, never forwarded.
+Any other key raises ``UnknownExtrasKeyError`` before the venue is
+reached — the CLI is never handed an argument it would reject.
+
 Safety model
 ------------
 
@@ -49,10 +58,12 @@ import json
 import logging
 import subprocess
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
 from analysis.providers.execution.base import (
+    NON_VENUE_INTENT_EXTRAS,
     FillConfirmation,
     Intent,
     register_execution_provider,
@@ -181,6 +192,134 @@ def _to_kraken_pair(pair: str) -> str:
     return pair.replace("-", "").replace("/", "").upper()
 
 
+# Dash-spelled allowlist of ORDER-level options on ``kraken order buy`` /
+# ``kraken order sell`` (derived from their ``--help`` output — the real
+# CLI surface, not a guess). Excluded on purpose:
+#   - process/global options that configure the CLI invocation itself
+#     rather than the order: output, verbose, api-url, api-key,
+#     api-secret, api-secret-stdin, api-secret-file, futures-url, otp, yes;
+#   - validate — the dry-run guard rail; never an Intent kwarg.
+# ``Intent.extras`` keys outside this allowlist and outside
+# ``NON_VENUE_INTENT_EXTRAS`` (analysis/providers/execution/base.py) are
+# rejected by ``extras_to_cli_args`` before any venue call.
+KRAKEN_ORDER_FLAGS: frozenset[str] = frozenset(
+    {
+        "type",
+        "price",
+        "price2",
+        "displayvol",
+        "trigger",
+        "leverage",
+        "reduce-only",
+        "timeinforce",
+        "start-time",
+        "expire-time",
+        "userref",
+        "cl-ord-id",
+        "oflags",
+        "stptype",
+        "close-ordertype",
+        "close-price",
+        "close-price2",
+        "deadline",
+        "asset-class",
+    }
+)
+
+
+class UnknownExtrasKeyError(ValueError):
+    """An ``Intent.extras`` key is neither a kraken order CLI flag nor an
+    in-repo-declared key (``NON_VENUE_INTENT_EXTRAS``).
+
+    Raised by :func:`extras_to_cli_args` BEFORE any venue call: forwarding
+    an unknown key would shell out an argument the ``kraken`` CLI rejects
+    (rc=2, "unexpected argument") and the order would die at the CLI
+    boundary instead of the venue. The message names the offending key
+    and both layers of the boundary.
+    """
+
+
+def extras_to_cli_args(extras: Mapping[str, Any] | None) -> list[str]:
+    """Classify ``Intent.extras`` keys into venue CLI args vs in-repo keys.
+
+    Per key (iterating deterministically, sorted keys, so the argv is
+    stable):
+
+    - dash-spelled key in ``KRAKEN_ORDER_FLAGS`` — a venue kwarg: forwarded
+      as ``--<dash-key> <value>`` (underscore -> dash, so the documented
+      underscore spelling works);
+    - key declared in ``NON_VENUE_INTENT_EXTRAS`` (underscore- or
+      dash-spelled) — consumed in-repo by the risk layer: kept in the
+      Intent, appended to nothing;
+    - anything else — :class:`UnknownExtrasKeyError`, refusing to forward
+      it to the venue.
+
+    A non-mapping ``extras`` (e.g. a JSON list) raises ``ValueError``
+    naming the actual type BEFORE any iteration — same fail-loud
+    boundary as an undeclared key.
+    """
+    if extras is not None and not isinstance(extras, Mapping):
+        raise ValueError(f"extras must be a JSON object (mapping), got {type(extras).__name__}")
+    args: list[str] = []
+    for key in sorted(extras or {}):
+        value = extras[key]
+        dash = key.replace("_", "-")
+        if dash in KRAKEN_ORDER_FLAGS:
+            args += [f"--{dash}", str(value)]
+        elif key in NON_VENUE_INTENT_EXTRAS or dash.replace("-", "_") in NON_VENUE_INTENT_EXTRAS:
+            continue
+        else:
+            raise UnknownExtrasKeyError(
+                f"extras key {key!r} is not a kraken order CLI flag and no in-repo layer consumes it — "
+                "refusing to forward it to the venue "
+                f"(venue-flag extras: {', '.join(sorted(KRAKEN_ORDER_FLAGS))}; "
+                f"consumed in-repo and never forwarded: {', '.join(sorted(NON_VENUE_INTENT_EXTRAS))})"
+            )
+    return args
+
+
+def build_order_args(intent: Intent) -> list[str]:
+    """Single source of truth for the ``kraken order <side> ...`` argv.
+
+    Used by BOTH :meth:`KrakenExecutionProvider.place_order` and the
+    execution-skill CLI's ``--dry-run`` branch, so the two paths forward
+    exactly the same venue flags — an intent that passes dry-run cannot
+    fail on an extras-forwarding error at live submit time.
+
+    Raises ``ValueError`` for a non-market order without ``limit_price``
+    or for an undeclared extras key (``UnknownExtrasKeyError``) — the
+    caller decides how to surface it (provider: error confirmation; CLI:
+    exit 2 before any venue call).
+
+    Does NOT append the guard rails (``--validate``) or the output
+    selector (``-o json``) — callers add those.
+    """
+    order_type = intent["order_type"]
+    cmd = [
+        "order",
+        intent["side"],
+        _to_kraken_pair(intent["pair"]),
+        str(intent["volume"]),
+        "--type",
+        order_type,
+    ]
+    if order_type != "market":
+        lp = intent.get("limit_price")
+        if lp is None:
+            raise ValueError("limit_price required for non-market order")
+        cmd += ["--price", str(lp)]
+    if intent.get("stop_price") is not None:
+        cmd += ["--price2", str(intent["stop_price"])]
+    if intent.get("time_in_force"):
+        cmd += ["--timeinforce", intent["time_in_force"]]
+    if intent.get("deadline"):
+        cmd += ["--deadline", intent["deadline"]]
+    if intent.get("intent_id"):
+        cmd += ["--cl-ord-id", intent["intent_id"]]
+    cmd += extras_to_cli_args(intent.get("extras"))
+    return cmd
+
+
 def _run_kraken(args: list[str], timeout: float = 30.0) -> dict:
     """Run ``kraken <args> -o json`` and return the parsed JSON envelope.
 
@@ -253,32 +392,13 @@ class KrakenExecutionProvider:
                 f"order_type {order_type!r} not supported by Kraken CLI",
             )
 
-        cmd = [
-            "order",
-            intent["side"],
-            _to_kraken_pair(intent["pair"]),
-            str(intent["volume"]),
-            "--type",
-            order_type,
-        ]
-        if order_type != "market":
-            lp = intent.get("limit_price")
-            if lp is None:
-                return self._error_confirmation(intent, "limit_price required for non-market order")
-            cmd += ["--price", str(lp)]
-        if intent.get("stop_price") is not None:
-            cmd += ["--price2", str(intent["stop_price"])]
-        if intent.get("time_in_force"):
-            cmd += ["--timeinforce", intent["time_in_force"]]
-        if intent.get("deadline"):
-            cmd += ["--deadline", intent["deadline"]]
-        if intent.get("intent_id"):
-            cmd += ["--cl-ord-id", intent["intent_id"]]
-
-        # Provider-specific extras pass-through (e.g. --leverage, --oflags).
-        extras = intent.get("extras") or {}
-        for k, v in extras.items():
-            cmd += [f"--{k.replace('_', '-')}", str(v)]
+        try:
+            cmd = build_order_args(intent)
+        except ValueError as e:
+            # Covers UnknownExtrasKeyError (undeclared extras key) and the
+            # missing-limit_price case: refuse BEFORE any venue call and
+            # keep the FillConfirmation contract for library callers.
+            return self._error_confirmation(intent, str(e))
 
         try:
             submit_resp = _run_kraken(cmd, timeout=30)
@@ -562,4 +682,10 @@ class KrakenExecutionProvider:
 register_execution_provider(KrakenExecutionProvider())
 
 
-__all__ = ["KrakenExecutionProvider"]
+__all__ = [
+    "KRAKEN_ORDER_FLAGS",
+    "KrakenExecutionProvider",
+    "UnknownExtrasKeyError",
+    "build_order_args",
+    "extras_to_cli_args",
+]

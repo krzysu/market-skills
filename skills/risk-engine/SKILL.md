@@ -151,6 +151,15 @@ price — a market buy is never silently approved just because its cost is
 unknown. Perps intents skip this lookup (perps policies degrade to
 CONCERN on their own missing inputs).
 
+**The price-hint extras keys are risk-layer-only.** `reference_price`,
+`est_notional` and `position_value` are consumed by risk-engine and are
+NEVER forwarded to the venue: execution keeps them in the Intent and
+rejects any `extras` key that is neither a venue CLI flag nor declared in
+`analysis/providers/execution/base.py::NON_VENUE_INTENT_EXTRAS` (same
+rule, same key names, stated in `execution-kraken-spot` SKILL.md — the
+two halves of this contract must always agree; see
+[ADR-0011](../../docs/adr/0011-intent-extras-namespaces.md)).
+
 ## Configuration
 
 Risk-engine parameters (`max_position_pct`, `max_drawdown_pct`, `daily_budget`,

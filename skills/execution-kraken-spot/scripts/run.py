@@ -151,6 +151,20 @@ def cmd_submit(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
+    # Extras-namespace gate (ADR-0011): an extras key that is neither a
+    # kraken order flag nor declared in NON_VENUE_INTENT_EXTRAS must fail
+    # HERE, before the AFK gate, the confirm prompt, the dry-run
+    # subprocess, and any venue call — so --dry-run and the live path
+    # agree (both would otherwise die on the same argv error, or worse,
+    # dry-run would green-light an intent the live submit cannot execute).
+    try:
+        _execution_kraken.extras_to_cli_args(intent.get("extras"))
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        if args.json:
+            _emit_json({"intent": intent, "result": {"status": "rejected", "reason": str(e)}})
+        return 2
+
     if intent.get("status") == "REJECT":
         msg = f"refusing to execute REJECTED intent (reason: {intent.get('reject_reason', 'n/a')})"
         if args.json:
@@ -189,22 +203,10 @@ def cmd_submit(args: argparse.Namespace) -> int:
         try:
             import subprocess
 
-            cmd = ["kraken", "order", intent["side"]]
-            cmd += [
-                intent["pair"].replace("-", "").replace("/", "").upper(),
-                str(intent["volume"]),
-                "--type",
-                intent["order_type"],
-            ]
-            if intent["order_type"] != "market" and intent.get("limit_price") is not None:
-                cmd += ["--price", str(intent["limit_price"])]
-            if intent.get("stop_price") is not None:
-                cmd += ["--price2", str(intent["stop_price"])]
-            if intent.get("time_in_force"):
-                cmd += ["--timeinforce", intent["time_in_force"]]
-            if intent.get("intent_id"):
-                cmd += ["--cl-ord-id", intent["intent_id"]]
-            cmd += ["--validate", "-o", "json"]
+            # Same argv builder the live submit uses (build_order_args is
+            # the single source of truth), so dry-run forwards exactly the
+            # venue flags the live path would — extras included.
+            cmd = ["kraken", *_execution_kraken.build_order_args(intent), "--validate", "-o", "json"]
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             validate_resp = None
             if proc.returncode == 0 and proc.stdout.strip():
@@ -232,6 +234,11 @@ def cmd_submit(args: argparse.Namespace) -> int:
                     "stdout": proc.stdout.strip()[:500] or None,
                     "stderr": proc.stderr.strip() or None,
                 }
+        except ValueError as e:
+            # build_order_args raised on an intent the venue would reject
+            # anyway (missing limit_price): surface it as input validation.
+            print(f"error: {e}", file=sys.stderr)
+            return 2
         except FileNotFoundError:
             print("error: kraken CLI not found in PATH", file=sys.stderr)
             return 1
@@ -326,7 +333,10 @@ def cmd_submit(args: argparse.Namespace) -> int:
         if tx_id is not None:
             payload["portfolio_tx_id"] = tx_id
         _emit_json(payload)
-        return 0
+        # An error confirmation must be detectable from the exit code, not
+        # only from the payload — the human path and the SKILL.md exit-code
+        # table both treat status="error" as failure (rc 1).
+        return 1 if confirmation.get("status") == "error" else 0
 
     print(_lib.render_confirmation(confirmation))
     if tx_id is not None:
