@@ -13,6 +13,8 @@ Covers:
 import argparse
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
@@ -22,6 +24,7 @@ import pytest
 # Make sure provider auto-registration runs.
 from analysis.providers.execution import kraken_spot as _execution_kraken  # noqa: F401
 from analysis.providers.execution.base import (
+    NON_VENUE_INTENT_EXTRAS,
     ExecutionProvider,
     FillConfirmation,
     Intent,
@@ -2303,3 +2306,324 @@ class TestOpenPositionsSyncAfterFill:
         assert "sync_open_positions_after_fill," in src
         assert "if tx_id is not None:" in src
         assert "sync_open_positions_after_fill(args.db)" in src
+
+
+# ─────────────────────────────────────── Intent.extras namespaces
+#
+# Per-fix fixtures for market-skills-1oa: Intent.extras carries two
+# namespaces — venue CLI flags (forwarded as --key value) and in-repo
+# risk-layer keys (kept in the Intent, never forwarded). Pre-fix, the
+# execution provider forwarded EVERY extras key as --<key>, so a market
+# intent carrying the risk-engine-documented extras.reference_price died
+# at the CLI boundary ("unexpected argument '--reference-price' found")
+# before the venue was reached — and --dry-run green-lit the very same
+# intent because the dry-run branch never forwarded extras at all.
+
+
+class TestIntentExtrasNamespaces:
+    """market-skills-1oa — the extras namespace contract.
+
+    Pre-fix, the first test below forwarded --reference-price in the
+    submit argv (assertion failure), and the dry-run argv carried no
+    extras at all (dry-run/live disagreement).
+    """
+
+    @staticmethod
+    def _bead_intent(**overrides):
+        """The exact bead intent shape: market buy with the sanctioned
+        risk-engine price hint in extras.reference_price."""
+        intent = {
+            "intent_id": "tf-bnb-1oa",
+            "venue": "kraken",
+            "pair": "BNBEUR",
+            "side": "buy",
+            "order_type": "market",
+            "volume": 0.29093,
+            "extras": {"reference_price": 687.43},
+        }
+        intent.update(overrides)
+        return intent
+
+    @staticmethod
+    def _provider_runner(responses):
+        """Patch subprocess.run with a runner that records every argv and
+        pops the queued responses in order."""
+        captured: list[list[str]] = []
+
+        def runner(cmd, *args, **kwargs):
+            captured.append(cmd)
+            return responses.pop(0)
+
+        return captured, patch("subprocess.run", side_effect=runner)
+
+    # ── (a) THE pre-fix-failing fixture: the bead's exact extras shape
+
+    def test_bead_reference_price_intent_submits_without_forwarding(self):
+        """A market intent carrying extras.reference_price must reach the
+        venue and fill, with NO --reference-price in any argv; the key
+        stays on the input Intent."""
+        submit = {"txid": ["OBNB-1OA"], "descr": {"order": "buy 0.29093 BNBEUR @ market"}}
+        query = {
+            "OBNB-1OA": {
+                "status": "closed",
+                "vol_exec": "0.29093",
+                "cost": "199.98",
+                "fee": "0.80",
+                "fee_currency": "ZEUR",
+                "price": "687.8",
+                "descr": {"order": "buy 0.29093 BNBEUR @ market"},
+            }
+        }
+        intent = self._bead_intent()
+        captured, patcher = self._provider_runner([_kraken_resp(submit), _kraken_resp(query)])
+        with patcher:
+            provider = get_execution_provider("kraken")
+            fill = provider.place_order(intent, wait=True, timeout_s=2.0)
+
+        assert fill["status"] == "filled"
+        assert fill["order_id"] == "OBNB-1OA"
+        assert captured, "venue was never called"
+        for argv in captured:
+            assert "--reference-price" not in argv, f"key forwarded to the venue: {argv}"
+            assert "--reference_price" not in argv
+        assert intent["extras"]["reference_price"] == 687.43
+
+    # ── (b) undeclared key fails at the provider, before the venue
+
+    def test_undeclared_extras_key_rejected_before_venue_call(self):
+        """An extras key that is neither a venue flag nor declared in
+        NON_VENUE_INTENT_EXTRAS must produce an error confirmation naming
+        the key and the layer boundary — without any subprocess call."""
+        intent = self._bead_intent(extras={"foo": 1})
+        with patch("subprocess.run") as mock_run:
+            provider = get_execution_provider("kraken")
+            fill = provider.place_order(intent, wait=False)
+
+        assert fill["status"] == "error"
+        assert "'foo'" in fill["reason"]
+        assert "kraken order CLI flag" in fill["reason"]
+        assert "consumed in-repo" in fill["reason"]
+        assert mock_run.called is False
+
+    # ── (c) CLI gate: same rejection before any subprocess
+
+    def test_cli_gate_rejects_undeclared_key_before_subprocess(self, tmp_path, monkeypatch, capsys):
+        """The submit CLI must reject the undeclared key with rc 2 before
+        running anything — no dry-run subprocess, no venue call."""
+        p = tmp_path / "intent_foo.json"
+        p.write_text(json.dumps(self._bead_intent(extras={"foo": 1})))
+        with patch("subprocess.run") as mock_run:
+            rc = TestCLIArgparse()._run_cli("submit", "--intent", str(p), "--yes", "--json", monkeypatch=monkeypatch)
+
+        assert rc == 2
+        assert mock_run.called is False
+        captured = capsys.readouterr()
+        assert "'foo'" in captured.err
+        payload = json.loads(captured.out)
+        assert "'foo'" in payload["result"]["reason"]
+
+    def test_cli_gate_rejects_list_extras_before_subprocess(self, tmp_path, monkeypatch, capsys):
+        """A non-mapping ``extras`` (a JSON list) must be rejected with
+        rc 2 and the type-naming message before anything runs — no
+        dry-run subprocess, no venue call."""
+        p = tmp_path / "intent_list_extras.json"
+        p.write_text(json.dumps(self._bead_intent(extras=[1, 2])))
+        with patch("subprocess.run") as mock_run:
+            rc = TestCLIArgparse()._run_cli("submit", "--intent", str(p), "--yes", "--json", monkeypatch=monkeypatch)
+
+        assert rc == 2
+        assert mock_run.called is False
+        captured = capsys.readouterr()
+        assert "extras must be a JSON object (mapping), got list" in captured.err
+        payload = json.loads(captured.out)
+        assert payload["result"]["status"] == "rejected"
+        assert "got list" in payload["result"]["reason"]
+
+    def test_cli_gate_rejects_empty_list_extras_before_subprocess(self, tmp_path, monkeypatch, capsys):
+        """A falsy non-mapping ``extras`` (an empty JSON list) must be
+        rejected with rc 2 and the type-naming message before anything
+        runs — pre-fix the gate's ``or {}`` coerced ``[]`` to ``{}`` and
+        let it through."""
+        p = tmp_path / "intent_empty_list_extras.json"
+        p.write_text(json.dumps(self._bead_intent(extras=[])))
+        with patch("subprocess.run") as mock_run:
+            rc = TestCLIArgparse()._run_cli("submit", "--intent", str(p), "--yes", "--json", monkeypatch=monkeypatch)
+
+        assert rc == 2
+        assert mock_run.called is False
+        captured = capsys.readouterr()
+        assert "extras must be a JSON object (mapping), got list" in captured.err
+        payload = json.loads(captured.out)
+        assert payload["result"]["status"] == "rejected"
+        assert "got list" in payload["result"]["reason"]
+
+    # ── (d) dry-run and live forward exactly the same allowlisted flags
+
+    def test_dry_run_and_live_forward_the_same_venue_flags(self, tmp_path, monkeypatch):
+        """The dry-run argv must equal [kraken, *build_order_args(intent),
+        --validate, -o json]: venue flags forwarded, risk-layer key absent.
+        Pre-fix the dry-run argv carried no extras at all."""
+        intent = self._bead_intent(extras={"leverage": 2, "oflags": "post", "reference_price": 687.43})
+        p = tmp_path / "intent_mixed.json"
+        p.write_text(json.dumps(intent))
+        captured, patcher = self._provider_runner(
+            [_make_completed(stdout=json.dumps({"descr": {"order": "buy 0.29093 BNBEUR @ market"}}))]
+        )
+        with patcher:
+            rc = TestCLIArgparse()._run_cli(
+                "submit", "--intent", str(p), "--dry-run", "--json", monkeypatch=monkeypatch
+            )
+
+        assert rc == 0
+        assert captured, "no subprocess call captured"
+        expected = ["kraken", *_execution_kraken.build_order_args(intent), "--validate", "-o", "json"]
+        assert captured[0] == expected
+        argv = captured[0]
+        lev_idx = argv.index("--leverage")
+        assert argv[lev_idx + 1] == "2"
+        ofl_idx = argv.index("--oflags")
+        assert argv[ofl_idx + 1] == "post"
+        assert "--reference-price" not in argv
+        assert "--reference_price" not in argv
+
+    # ── (e) CLI end-to-end dry-run on the bead's exact intent file
+
+    def test_cli_dry_run_end_to_end_bead_intent(self, tmp_path, monkeypatch, capsys):
+        """The bead intent file dry-runs green (rc 0), keeps
+        extras.reference_price in the emitted intent, and the captured
+        argv carries no reference-price flag."""
+        p = tmp_path / "intent_bead.json"
+        p.write_text(json.dumps(self._bead_intent()))
+        captured, patcher = self._provider_runner(
+            [_make_completed(stdout=json.dumps({"descr": {"order": "buy 0.29093 BNBEUR @ market"}}))]
+        )
+        with patcher:
+            rc = TestCLIArgparse()._run_cli(
+                "submit", "--intent", str(p), "--dry-run", "--json", monkeypatch=monkeypatch
+            )
+
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["intent"]["extras"]["reference_price"] == 687.43
+        assert all("--reference-price" not in c and "--reference_price" not in c for c in captured)
+        assert payload["kraken_validate"]["descr"]["order"] == "buy 0.29093 BNBEUR @ market"
+
+    # ── (f) extras_to_cli_args unit behaviour
+
+    def test_extras_to_cli_args_maps_underscore_to_dash(self):
+        assert _execution_kraken.extras_to_cli_args({"cl_ord_id": "abc"}) == ["--cl-ord-id", "abc"]
+
+    def test_extras_to_cli_args_keeps_declared_in_repo_keys(self):
+        for key in ("reference_price", "est_notional", "position_value", "reference_entry", "futures_symbol"):
+            assert _execution_kraken.extras_to_cli_args({key: 1.5}) == []
+        # A dash-spelled variant normalises to the same in-repo key.
+        assert _execution_kraken.extras_to_cli_args({"reference-price": 687.43}) == []
+
+    def test_extras_to_cli_args_is_deterministic_sorted(self):
+        out = _execution_kraken.extras_to_cli_args({"userref": 9, "leverage": 2})
+        assert out == ["--leverage", "2", "--userref", "9"]
+
+    def test_extras_to_cli_args_empty_and_none(self):
+        assert _execution_kraken.extras_to_cli_args(None) == []
+        assert _execution_kraken.extras_to_cli_args({}) == []
+
+    def test_extras_to_cli_args_rejects_undeclared_key(self):
+        with pytest.raises(_execution_kraken.UnknownExtrasKeyError, match="'foo'"):
+            _execution_kraken.extras_to_cli_args({"foo": 1})
+
+    def test_extras_to_cli_args_rejects_non_mapping(self):
+        with pytest.raises(ValueError, match="extras must be a JSON object \\(mapping\\), got list"):
+            _execution_kraken.extras_to_cli_args([1, 2])
+
+    def test_extras_to_cli_args_rejects_empty_list(self):
+        """A falsy non-mapping ``extras`` hits the type guard too — the
+        call sites must not coerce it to ``{}`` before the function
+        sees it."""
+        with pytest.raises(ValueError, match="extras must be a JSON object \\(mapping\\), got list"):
+            _execution_kraken.extras_to_cli_args([])
+
+    def test_extras_to_cli_args_none_returns_empty_list(self):
+        """The call sites pass ``intent.get("extras")`` straight through
+        (no ``or {}``), so the ``None`` path must keep returning ``[]``."""
+        assert _execution_kraken.extras_to_cli_args(None) == []
+
+    # ── (g) rot guard: EVERY in-repo production reader of Intent.extras
+    #        reads only keys declared in NON_VENUE_INTENT_EXTRAS
+
+    _EXTRAS_READER_MODULES = (
+        "analysis/risk/_common.py",
+        "analysis/risk/perps.py",
+        "skills/risk-engine/lib.py",
+        "skills/execution-kraken-perps/scripts/run.py",
+        "skills/execution-kraken-perps/lib.py",
+        "analysis/providers/execution/kraken_perps.py",
+    )
+
+    def test_non_venue_extras_cover_every_in_repo_extras_read(self):
+        """Every extras key read by ANY in-repo production reader module
+        (each entry of _EXTRAS_READER_MODULES: the risk layer, the
+        risk-engine skill's price-hint resolver, the perps execution
+        skill's position-value cap / futures-symbol check / intent
+        summary, and the perps provider's symbol override) must be
+        declared in NON_VENUE_INTENT_EXTRAS — otherwise a new reader key
+        silently becomes an unexecutable venue flag again. Add a new
+        reader by appending one path to _EXTRAS_READER_MODULES."""
+        src = ""
+        for rel in self._EXTRAS_READER_MODULES:
+            with open(os.path.join(os.path.dirname(__file__), "..", rel)) as f:
+                src += f.read()
+        patterns = (
+            r'extras\.get\("([^"]+)"',
+            r'extras\["([^"]+)"\]',
+            r'get\("extras"\)\s*or\s*\{\}\)\.get\("([^"]+)"',
+            # skills/risk-engine/lib.py reads est_notional/position_value
+            # through one shared tuple: any(... extras.get(key) ... for
+            # key in ("est_notional", "position_value")).
+            r"extras\.get\(key\)\s*\)+\s*is not None for key in \(([^)]+)\)",
+        )
+        keys: set[str] = set()
+        for pattern in patterns:
+            for match in re.findall(pattern, src):
+                # The tuple spelling captures the whole group — pull the
+                # quoted keys back out of it.
+                inner = re.findall(r'"([^"]+)"', match)
+                keys |= set(inner) if inner else {match}
+        assert keys, "extractor matched nothing — the rot-guard regexes are stale"
+        assert {"reference_price", "est_notional", "position_value", "reference_entry"} <= keys
+        assert keys <= NON_VENUE_INTENT_EXTRAS
+
+    # ── (h) provenance guard: allowlist derived from the real CLI surface
+
+    @pytest.mark.skipif(shutil.which("kraken") is None, reason="kraken CLI not on PATH")
+    def test_kraken_order_flags_all_appear_in_cli_help(self):
+        proc = subprocess.run(["kraken", "order", "buy", "--help"], capture_output=True, text=True, timeout=15)
+        text = proc.stdout + proc.stderr
+        for flag in sorted(_execution_kraken.KRAKEN_ORDER_FLAGS):
+            assert f"--{flag}" in text, f"--{flag} missing from kraken order buy --help"
+
+    # ── (i) live --json error confirmation exits 1
+
+    def test_cli_live_json_error_confirmation_exits_1(self, tmp_path, monkeypatch, capsys):
+        """A live --json submit whose confirmation status is 'error' must
+        exit 1 (pre-fix it exited 0 — callers could not rely on the exit
+        code)."""
+        confirmation = {
+            "intent_id": "05x-cli-1",
+            "order_id": "",
+            "pair": "BTCUSD",
+            "side": "buy",
+            "order_type": "market",
+            "requested_volume": 0.01,
+            "filled_volume": 0.0,
+            "status": "error",
+            "reason": "venue exploded",
+            "timestamp": "2026-09-24T00:00:00+00:00",
+            "venue": "kraken",
+        }
+        rc, as_json, _db_path, _pid = TestMarketOrderLedgerAutoWrite()._run_cli(
+            "--json", monkeypatch=monkeypatch, tmp_path=tmp_path, confirmation=confirmation
+        )
+        assert as_json
+        assert rc == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["confirmation"]["status"] == "error"

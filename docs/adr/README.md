@@ -44,6 +44,7 @@ ADRs are append-only. To reverse a decision, write a new ADR with
 | [0008](./0008-venue-side-stop-fill-detection.md) | Venue-side stop-fill detection in the watchdog | accepted | 2026-09-21 |
 | [0009](./0009-venue-fill-state-lifetime-bound.md) | Venue-fill candidates live within the watch state's lifetime | accepted | 2026-09-23 |
 | [0010](./0010-cross-sectional-breadth-is-not-an-l2.md) | Cross-sectional breadth is not an L2 | accepted | 2026-09-23 |
+| [0011](./0011-intent-extras-namespaces.md) | Intent.extras carries two namespaces: venue flags and in-repo risk-layer keys | accepted | 2026-09-24 |
 
 ## Template
 
