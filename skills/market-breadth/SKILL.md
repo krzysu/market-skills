@@ -39,14 +39,16 @@ the skill is deliberately NOT registered in `analysis/registry.py`
 uv run skills/market-breadth/scripts/run.py --json
 ```
 
-Defaults: `--basket=crypto_alts`, `--window-days=7`, `--benchmark=btc`.
+Defaults: `--basket` is `tier_1` (falling back to the first non-empty watchlist
+basket when `tier_1` is absent — substitution disclosed in `errors[]`),
+`--window-days=7`, `--benchmark=btc`.
 
 ## Flags
 
 | Flag | Default | Notes |
 |------|---------|-------|
 | `--json` | human | Emit the AXI envelope to stdout. |
-| `--basket=NAME` | `crypto_alts` | Watchlist basket to measure. Missing/empty basket → AXI empty state, never raises. |
+| `--basket=NAME` | `tier_1`, falling back to the first non-empty watchlist basket (disclosed in `errors[]`) | Watchlist basket to measure. An explicit name is used verbatim: missing/empty explicit basket → AXI empty state, never raises. Empty value (`--basket=`) → usage error, exit 2. |
 | `--window-days=N` | `7` | Requested lookback in days. `<= 0` → usage error, exit 2. Longer than the shortest available history → truncated to the effective window, disclosed in `errors[]`. |
 | `--benchmark=ALIAS` | `btc` | Benchmark alias resolved through the watchlist; the resolved ticker is excluded from the member set. |
 | `--full` | off | Full payload instead of the default field projection. |
@@ -61,7 +63,7 @@ Defaults: `--basket=crypto_alts`, `--window-days=7`, `--benchmark=btc`.
     "window_days": 7,
     "effective_window_days": 7,
     "benchmark": "BTCUSD",
-    "basket": "crypto_alts",
+    "basket": "tier_1",
     "members": 19,
     "pct_beating": 63.2,
     "btc_return_pct": 10.53,
@@ -105,9 +107,17 @@ against.
 
 ## Edge cases
 
-- **Missing / empty basket** → AXI empty state (`data: null`, `count: 0`),
+- **No `--basket` given** → the default is `tier_1`; when it is absent from the
+  watchlist (or empty), the first non-empty basket in watchlist insertion order
+  is measured instead and `errors[]` carries
+  `[BREADTH BASKET DEFAULTED — preferred 'tier_1' not in watchlist; used '<basket>']`.
+  The payload's `basket` field is the name actually measured. When `tier_1` is
+  used as-is there is no diagnostic.
+- **Missing / empty explicit basket** (`--basket=<NAME>` given, name missing
+  or empty in the registry) → AXI empty state (`data: null`, `count: 0`),
   `errors[]` names the basket, `help[]` lists the available basket names.
-  Never raises at the CLI.
+  Never raises at the CLI; the explicit request is never substituted.
+- **`--basket=` (empty value)** → usage error, exit 2.
 - **Unresolvable or ambiguous benchmark alias** → empty state naming the alias.
 - **Window truncation** → one shared effective window:
   `min(window_days, shortest available history across every measured series

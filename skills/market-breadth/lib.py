@@ -32,6 +32,27 @@ _HISTORY_HELP = [
 
 _UNCALIBRATED_NOTE = "Regime bands (>=60 / <=40) are uncalibrated first guesses - trust pct_beating, not the label."
 
+DEFAULT_BASKET = "tier_1"
+
+
+def _resolve_default_basket(*, path: Any = None) -> tuple[str, str | None]:
+    """Resolve the basket to measure when the caller requested no basket.
+
+    Returns ``(name, note)``: the preferred ``DEFAULT_BASKET`` when it is
+    present and non-empty (``note`` is ``None`` — a clean run stays clean);
+    otherwise the first non-empty basket in watchlist insertion order with a
+    substitution disclosure. When the registry has no non-empty basket at
+    all, falls back to ``DEFAULT_BASKET`` so the caller's missing-basket
+    empty state fires with the available-basket help.
+    """
+    names = categories(path=path)
+    if DEFAULT_BASKET in names and by_category(DEFAULT_BASKET, path=path):
+        return DEFAULT_BASKET, None
+    for name in names:
+        if by_category(name, path=path):
+            return name, f"[BREADTH BASKET DEFAULTED — preferred {DEFAULT_BASKET!r} not in watchlist; used {name!r}]"
+    return DEFAULT_BASKET, None
+
 
 def _usable_closes(candles: list[list]) -> list[float]:
     """Numeric closes of a candle series, in order. Non-numeric / non-positive rows are skipped."""
@@ -178,23 +199,35 @@ def compute_breadth(
 
 def analyze(
     *,
-    basket: str = "crypto_alts",
+    basket: str | None = None,
     window_days: int = 7,
     benchmark: str = "btc",
     path: Any = None,
 ) -> dict:
     """Resolve the universe from the watchlist, fetch daily candles, compute breadth.
 
-    Returns the payload dict on success; the AXI empty-state envelope
-    (``data: None``, ``count: 0``) on a missing/empty basket, an unresolvable
-    benchmark alias, or insufficient history — never raises at the CLI
-    boundary for a missing basket.
+    ``basket=None`` means "no basket requested": ``DEFAULT_BASKET`` is used
+    when present and non-empty, otherwise the first non-empty basket in
+    watchlist insertion order (substitution disclosed in ``errors[]``).
+    An explicit ``basket`` name is used verbatim and never substituted —
+    a missing/empty explicit basket returns the AXI empty-state envelope
+    (``data: None``, ``count: 0``) naming the basket. The same empty state
+    fires for an unresolvable benchmark alias or insufficient history.
+    Never raises at the CLI boundary for a missing basket.
     """
+    if basket is None:
+        basket, note = _resolve_default_basket(path=path)
+    else:
+        note = None
+
     member_tickers = by_category(basket, path=path)
     if not member_tickers:
         names = categories(path=path)
+        errors = [f"basket {basket!r} not found or empty in watchlist"]
+        if note is not None:
+            errors.append(note)
         return empty_state(
-            errors=[f"basket {basket!r} not found or empty in watchlist"],
+            errors=errors,
             help=[
                 f"available baskets: {', '.join(names)}" if names else "watchlist has no baskets yet",
                 "Run `uv run skills/market-watchlist/scripts/run.py list` to inspect the registry",
@@ -245,6 +278,8 @@ def analyze(
 
     result["benchmark"] = bench_ticker
     result["basket"] = basket
+    if note is not None:
+        result["errors"] = [*result["errors"], note]
     result["narrative"] = _narrative(
         window_days=result["window_days"],
         effective=result["effective_window_days"],
