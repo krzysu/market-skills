@@ -69,9 +69,34 @@ def _primary_symbol(ctx: dict) -> str:
     return _symbol_for(ctx.get("primary_quote", "EUR"))
 
 
+def _decimals_for(value: float) -> int:
+    """Decimal places for an amount, chosen by magnitude.
+
+    Bands: ``0`` or ``abs(v) >= 1`` → 2 dp; ``>= 0.01`` → 4; ``>= 0.0001``
+    → 6; ``>= 0.000001`` → 8; smaller non-zero → 10. Fixed notation only
+    (never scientific). Invariant: a positive value never renders as an
+    all-zero figure — ``0.003455`` must not print as ``0.00``.
+    """
+    a = abs(value)
+    if a == 0 or a >= 1:
+        return 2
+    if a >= 0.01:
+        return 4
+    if a >= 0.0001:
+        return 6
+    if a >= 0.000001:
+        return 8
+    return 10
+
+
+def _fmt_amount(value: float, ctx: dict) -> str:
+    """Render an amount in the monitor's quote, e.g. ``$48.00`` or ``€0.003455``."""
+    return f"{_primary_symbol(ctx)}{value:.{_decimals_for(value)}f}"
+
+
 def _fmt_price(price: float, ctx: dict) -> str:
     """Render a single price in the monitor's quote (e.g. ``$48.00``)."""
-    return f"{_primary_symbol(ctx)}{price:.2f}"
+    return _fmt_amount(price, ctx)
 
 
 def _fmt_live(price: float, ctx: dict) -> str:
@@ -81,7 +106,7 @@ def _fmt_live(price: float, ctx: dict) -> str:
     displays (``$X / €Y``) should fork the formatter or post-process the
     rendered strings.
     """
-    return f"{_primary_symbol(ctx)}{price:.2f}"
+    return _fmt_amount(price, ctx)
 
 
 def _fmt_pct(pct: float) -> str:
@@ -91,10 +116,15 @@ def _fmt_pct(pct: float) -> str:
 
 
 def _fmt_tp_qty(size, exit_pct, name) -> str:
-    """Render a TP quantity like ``"0.55 HYPE"`` (empty string if inputs missing)."""
+    """Render a bare TP quantity like ``"0.5478 HYPE"`` (empty string if inputs missing).
+
+    Shares ``_decimals_for`` with the price renderers so a sub-unit slice
+    (``0.004 BTC``) never collapses to ``0.00`` — no currency symbol here.
+    """
     if size is None or exit_pct is None:
         return ""
-    return f"{size * exit_pct / 100:.2f} {name}"
+    qty = size * exit_pct / 100
+    return f"{qty:.{_decimals_for(qty)}f} {name}"
 
 
 def _ctx_name(ctx: dict) -> str:
@@ -285,7 +315,7 @@ def _fmt_fill_price(event: dict, ctx: dict) -> str:
         return "price n/a"
     if _fill_uses_monitor_quote(event, ctx):
         return _fmt_price(fill, ctx)
-    return f"{fill:.2f} {_fill_quote(event)}"
+    return f"{fill:.{_decimals_for(fill)}f} {_fill_quote(event)}"
 
 
 def _fmt_fill_segment(event: dict, ctx: dict) -> str:
@@ -306,7 +336,7 @@ def _fmt_realised_pnl(event: dict, ctx: dict) -> str:
     "unavailable" whenever the figure cannot be computed."""
     pnl = event.get("realised_pnl")
     if pnl is not None:
-        return f"{pnl:+.2f}"
+        return f"{pnl:+.{_decimals_for(pnl)}f}"
     if event.get("entry_price") is None:
         return "cost basis unknown"
     if not _fill_uses_monitor_quote(event, ctx):
@@ -373,7 +403,7 @@ def format_as_default_venue_stop_fill(event: dict, ctx: dict) -> str:
 
     pnl = event.get("realised_pnl")
     if pnl is not None:
-        lines.append(f"  Realised P&L {pnl:+.2f} (fees {fee:.2f} included).")
+        lines.append(f"  Realised P&L {pnl:+.{_decimals_for(pnl)}f} (fees {fee:.{_decimals_for(fee)}f} included).")
     elif event.get("entry_price") is None:
         lines.append("  Realised P&L: cost basis unknown (no entry_price on the watch).")
     elif not _fill_uses_monitor_quote(event, ctx):

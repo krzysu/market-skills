@@ -72,6 +72,11 @@ def _quote_from_provider(provider: str) -> str:
     return ""
 
 
+def _amount_value(rendered: str) -> float:
+    """Parse the numeric part of a ``<symbol><amount>`` render back to float."""
+    return float(rendered.lstrip("€$£¥"))
+
+
 _EUR_CTX_KW = {"primary_quote": "EUR", "monitor_provider": "kraken:<PRIVATE_PERP>EUR"}
 
 
@@ -213,6 +218,41 @@ def test_fmt_price_unknown_quote_falls_back_to_eur_symbol():
     assert _fmt_price(100.0, _ctx(price=100.0, primary_quote="XYZ", monitor_provider="kraken:FOO")) == "€100.00"
 
 
+def test_fmt_price_sub_cent_eur():
+    """Sub-cent EUR price renders a non-zero magnitude-appropriate figure.
+
+    Live repro (2026-09-25): a kraken:PUMPEUR watch at 0.003455 rendered
+    ``€0.00`` on every alert and status line.
+    """
+    out = _fmt_price(0.003455, _ctx(price=0.003455, **_EUR_CTX_KW))
+    assert out != "€0.00"
+    assert _amount_value(out) == pytest.approx(0.003455, rel=0.01)
+
+
+def test_fmt_price_sub_cent_usd():
+    """Same sub-cent guard for a $-quoted monitor."""
+    out = _fmt_price(0.003455, _ctx(price=0.003455))
+    assert out != "$0.00"
+    assert _amount_value(out) == pytest.approx(0.003455, rel=0.01)
+
+
+def test_fmt_price_small_but_above_one_cent():
+    """0.01 <= price < 1 renders at 4 dp — never collapses to ``€0.00``."""
+    out = _fmt_price(0.055, _ctx(price=0.055, **_EUR_CTX_KW))
+    assert out != "€0.00"
+    assert _amount_value(out) == pytest.approx(0.055, rel=0.01)
+
+
+def test_fmt_amount_control_large_value():
+    """Control: precision is magnitude-derived, not disabled — ``abs(v) >= 1``
+    keeps the 2 dp render and ``0`` keeps ``0.00``."""
+    assert _fmt_price(48.0, _ctx(price=48.0)) == "$48.00"
+    assert (
+        _fmt_price(50000.0, _ctx(price=50000.0, primary_quote="GBP", monitor_provider="kraken:BTCGBP")) == "£50000.00"
+    )
+    assert _fmt_price(0.0, _ctx(price=0.0)) == "$0.00"
+
+
 # --- _fmt_live ---
 
 
@@ -257,6 +297,13 @@ def test_fmt_live_ignores_execution_quote_in_ctx():
     assert "45" not in out
 
 
+def test_fmt_live_sub_cent():
+    """_fmt_live shares the magnitude-aware precision — sub-cent never renders ``€0.00``."""
+    out = _fmt_live(0.003455, _ctx(price=0.003455, **_EUR_CTX_KW))
+    assert out != "€0.00"
+    assert _amount_value(out) == pytest.approx(0.003455, rel=0.01)
+
+
 # --- _fmt_pct ---
 
 
@@ -273,13 +320,23 @@ def test_fmt_pct_positive_uses_plus():
 # --- _fmt_tp_qty ---
 
 
-def test_fmt_tp_qty_formats_two_decimals_with_name():
-    assert _fmt_tp_qty(1.66, 33, "<PRIVATE_PERP>") == "0.55 <PRIVATE_PERP>"
+def test_fmt_tp_qty_renders_qty_with_name():
+    """A sub-unit qty (0.5478, the 4 dp band) renders non-zero with its precision;
+    a qty >= 1 keeps the 2 dp render."""
+    assert _fmt_tp_qty(1.66, 33, "<PRIVATE_PERP>") == "0.5478 <PRIVATE_PERP>"
+    assert _fmt_tp_qty(4.0, 33, "<PRIVATE_PERP>") == "1.32 <PRIVATE_PERP>"
 
 
 def test_fmt_tp_qty_empty_when_inputs_missing():
     assert _fmt_tp_qty(None, 33, "<PRIVATE_PERP>") == ""
     assert _fmt_tp_qty(1.66, None, "<PRIVATE_PERP>") == ""
+
+
+def test_fmt_tp_qty_small_slice():
+    """A 0.004-coin TP slice renders non-zero (pre-fix it printed ``0.00 PUMP``)."""
+    out = _fmt_tp_qty(0.4, 1, "PUMP")
+    assert out != "0.00 PUMP"
+    assert float(out.split()[0]) == pytest.approx(0.004, rel=0.01)
 
 
 # --- compact style ---
@@ -309,7 +366,7 @@ def test_compact_stop_ignores_execution_context():
 def test_compact_tp_with_qty():
     s = format_as_compact(_tp_event(), _ctx(**_EUR_CTX_KW))
     assert "✅ TP hit (€88.21)" in s
-    assert "sell 0.55 <PRIVATE_PERP>" in s
+    assert "sell 0.5478 <PRIVATE_PERP>" in s
     assert "~33%" in s
 
 
@@ -406,7 +463,7 @@ def test_default_tp_includes_exit_pct_and_qty():
     s = format_as_default(_tp_event(), _ctx(**_EUR_CTX_KW, format_style="default"))
     assert "✅ TP HIT — <PRIVATE_PERP>" in s
     assert "TP at €88.21" in s
-    assert "Exit 33% (0.55 <PRIVATE_PERP>)" in s
+    assert "Exit 33% (0.5478 <PRIVATE_PERP>)" in s
 
 
 def test_default_drop_warn_full_sentence():
@@ -631,3 +688,16 @@ def test_zone_regime_prefix(fmt_fn, zone_event_kw, expected):
     ev = _zone_event(**zone_event_kw)
     s = fmt_fn(ev, _ctx(**_EUR_CTX_KW, format_style="compact"))
     assert s == expected, f"got {s!r}"
+
+
+# --- computation integrity: the formatter is display-only, never an input ---
+
+
+def test_default_drop_render_pct_text_unchanged():
+    """pct_from_entry is computed in lib.py from raw floats and rendered via
+    _fmt_pct — the default-style drop render for a known event is byte-identical
+    to the pre-fix form, proving the magnitude helper is a leaf render that
+    never feeds back into the arithmetic."""
+    ev = _drop_event(current=57.0, entry=60.15, threshold=-5, severity="warn")
+    s = format_as_default(ev, _ctx(**_EUR_CTX_KW, format_style="default"))
+    assert s == "🟡 DROP WARNING — <PRIVATE_PERP>. Now €57.00 (−5.2% from entry €60.15)."
