@@ -2,7 +2,7 @@
 """backtest-pipeline — nightly backtest pipeline.
 
 Runs every L3 strategy against every active ticker on multiple intervals
-(1d, 4h), compares against a rolling 7-night baseline, and produces five
+(1d, 4h), compares against a rolling 7-night baseline, and produces six
 cross-boundary output files consumed by downstream skills.
 
 Schedule: 02:00 CEST (after feedback absorber, before morning brief).
@@ -13,6 +13,7 @@ Output files (all written to ``$MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR``):
   fitness_matrix.json                 → ESD conviction modulation
   watchdog_regime_state.json          → Position Watchdog alert suppression
   swing_scan_skip_list.json           → Swing Scan ticker triage
+  hold_regime.json                    → LLM / Morning Brief opportunity signal
   regime_health_brief.md              → Morning Brief injection
 
 Usage:
@@ -50,7 +51,7 @@ def _resolve_out_dir() -> Path:
         return Path(env).expanduser()
     raise OSError(
         f"{_lib.ENV_OUT_DIR} is not set; point it at the directory "
-        f"where the five pipeline output files should be written"
+        f"where the six pipeline output files should be written"
     )
 
 
@@ -99,6 +100,12 @@ def measured_strategies() -> list[str]:
 
 SHARPE_DROP_DELTA = 0.5
 BENCHMARK_BEAT_DELTA = 1.0
+# "Hold regime" (bead market-skills-xtp): a (ticker, interval) pair where
+# buy-and-hold beats every measured strategy by a wide margin — the edge is
+# exposure, not timing. Reported as a positive opportunity signal; it never
+# touches conviction thresholds.
+HOLD_REGIME_MIN_STRATEGIES = 3
+HOLD_REGIME_MIN_GAP = 1.0
 PAIR_TIMEOUT = 120
 MIN_FORWARD_BARS = 150
 
@@ -440,6 +447,11 @@ def _is_empty_artifact(name: str, payload) -> bool:
         # ``payload`` is a counts dict built in _write_regime_health_brief:
         # the brief is empty only when none of its tables has a body row.
         return not any(payload.get(key) for key in ("strategy_rows", "ranking_rows", "skipped_rows", "no_trade_rows"))
+    if name == "hold_regime.json":
+        # An empty list is the legitimate steady state (no pair qualifies
+        # tonight) — guarding it would keep yesterday's flags on disk as
+        # if they were tonight's. Always rewrite, like the watchdog state.
+        return False
     return False
 
 
@@ -734,6 +746,94 @@ def _partition_ticker_outcomes(current: dict) -> tuple[list[str], list[str], lis
     return sorted(negative), sorted(no_trades), sorted(keep)
 
 
+def _is_real_number(value: object) -> bool:
+    """True for a real JSON number — ``int``/``float`` but never ``bool``."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _hold_regime_flags(current: dict) -> list[dict]:
+    """Single source of truth for the hold-regime flag (bead market-skills-xtp).
+
+    A ``(ticker, interval)`` pair is a hold-regime asset when buy-and-hold
+    beats every measured strategy by a wide margin — the edge is exposure,
+    not timing. A pair flags when ALL of:
+
+    - ``benchmark_sharpe > 0`` and ``benchmark_total_return > 0``
+    - at least ``HOLD_REGIME_MIN_STRATEGIES`` records count as *measured*
+    - every measured record satisfies
+      ``benchmark_sharpe - strategy_sharpe >= HOLD_REGIME_MIN_GAP`` —
+      the boundary is inclusive (a gap of exactly 1.0 flags)
+
+    Counting decisions:
+
+    - ``insufficient_data`` records are skipped entirely: they neither
+      count toward ``strategies_measured`` / ``trades_total`` nor block
+      the flag. Records without a ``ticker`` are skipped too.
+    - A record counts as *measured* only when its ``strategy_sharpe`` AND
+      ``benchmark_sharpe`` are real numbers (``bool`` excluded). A
+      non-``insufficient_data`` record whose ``strategy_sharpe`` is
+      ``None`` is the engine's ``bankrupted`` case — a destroyed equity
+      curve — and is skipped entirely as well: it does not count toward
+      ``strategies_measured`` and does not block the flag, since a null
+      Sharpe has no gap to compare.
+    - ``trades_total`` sums ``info.get("trades", 0)`` over the measured
+      records of the group (missing key counts as 0; a non-int trades
+      value counts as 0, same as the withheld-low-trades guard).
+
+    ``benchmark_sharpe`` / ``benchmark_total_return`` are passed through
+    verbatim from the run record; ``min_gap`` / ``max_gap`` (the smallest
+    / largest per-strategy gap in the group) round to two decimals — the
+    same precision the ⚖️ footnote and the brief use. Returns the flagged
+    pairs sorted by ``max_gap`` descending, ties broken deterministically
+    by ``(ticker, interval)``.
+    """
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for key, info in current.items():
+        if not isinstance(info, dict):
+            continue
+        if info.get("insufficient_data"):
+            continue
+        ticker = info.get("ticker")
+        if not ticker:
+            continue
+        if not (_is_real_number(info.get("strategy_sharpe")) and _is_real_number(info.get("benchmark_sharpe"))):
+            continue
+        interval = key.split("\u00d7")[0] if "\u00d7" in key else "1d"
+        groups.setdefault((ticker, interval), []).append(info)
+
+    flags: list[dict] = []
+    for (ticker, interval), records in groups.items():
+        bench_sharpe = records[0]["benchmark_sharpe"]
+        bench_return = records[0].get("benchmark_total_return")
+        gaps = [rec["benchmark_sharpe"] - rec["strategy_sharpe"] for rec in records]
+        if not _is_real_number(bench_return) or bench_sharpe <= 0 or bench_return <= 0:
+            continue
+        if len(records) < HOLD_REGIME_MIN_STRATEGIES:
+            continue
+        if any(gap < HOLD_REGIME_MIN_GAP for gap in gaps):
+            continue
+        trades_total = 0
+        for rec in records:
+            trades = rec.get("trades", 0)
+            if not isinstance(trades, int) or isinstance(trades, bool):
+                trades = 0
+            trades_total += trades
+        flags.append(
+            {
+                "ticker": ticker,
+                "interval": interval,
+                "benchmark_sharpe": bench_sharpe,
+                "benchmark_total_return": bench_return,
+                "strategies_measured": len(records),
+                "min_gap": round(min(gaps), 2),
+                "max_gap": round(max(gaps), 2),
+                "trades_total": trades_total,
+            }
+        )
+    flags.sort(key=lambda flag: (-flag["max_gap"], flag["ticker"], flag["interval"]))
+    return flags
+
+
 def _write_swing_scan_skip(current: dict, state: dict, out_dir: Path) -> None:
     negative, no_trades, keep = _partition_ticker_outcomes(current)
 
@@ -763,11 +863,58 @@ def _write_swing_scan_skip(current: dict, state: dict, out_dir: Path) -> None:
         )
 
 
+def _write_hold_regime(current: dict, state: dict, out_dir: Path) -> None:
+    flags = _hold_regime_flags(current)
+    payload = {
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "hold_regime": flags,
+    }
+    _, validate_err = _lib.validate_hold_regime(payload)
+    if validate_err:
+        print(f"  [WARN] hold regime validation failed: {validate_err}", flush=True)
+    name = "hold_regime.json"
+    path = out_dir / name
+    text = json.dumps(payload, indent=2)
+    if _write_artifact(path, name, payload, text):
+        print(f"  → hold regime written ({len(flags)} pair(s))", flush=True)
+
+
+def _hold_regime_lines(flags: list[dict]) -> list[str]:
+    """Render hold-regime flags as the positive opportunity block.
+
+    Pure: empty ``flags`` renders to ``[]``. Both render sites (the main()
+    findings block and the markdown brief) derive their per-flag text from
+    this renderer so they can never disagree.
+    """
+    if not flags:
+        return []
+    lines = ["🎯 Hold-regime assets (edge is exposure, not timing):"]
+    for flag in flags:
+        lines.append(
+            f"  {flag['ticker']} {flag['interval']}: buy-and-hold Sharpe {flag['benchmark_sharpe']:+.2f} / "
+            f"{flag['benchmark_total_return']:+.0%} return; every strategy underperforms it by "
+            f"{flag['min_gap']:.2f}-{flag['max_gap']:.2f} Sharpe"
+        )
+    return lines
+
+
 def _write_regime_health_brief(current: dict, state: dict, out_dir: Path) -> None:
     lines = ["## \U0001f52c Backtest Regime Health (nightly)", ""]
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     lines.append(f"*Auto-generated at {ts} \u2014 feeds conviction thresholds, watchdog, and swing scan.*")
     lines.append("")
+
+    hold_flags = _hold_regime_flags(current)
+    hold_lines = _hold_regime_lines(hold_flags)
+    if hold_lines:
+        # Positive opportunity framing (bead market-skills-xtp): the edge is
+        # exposure, not timing. The section is absent entirely when no pair
+        # qualifies tonight — no heading, no empty stub.
+        lines.append(f"### {hold_lines[0][:-1]}")
+        lines.append("")
+        for flag, line in zip(hold_flags, hold_lines[1:]):
+            lines.append(f"- {line.strip()} ({flag['strategies_measured']} strategies, {flag['trades_total']} trades)")
+        lines.append("")
 
     min_trades = _resolve_min_trades()
     withheld = _withheld_low_trades(current, min_trades)
@@ -986,6 +1133,7 @@ def main() -> int:
     _write_fitness_matrix(current, state, out_dir)
     _write_watchdog_regime(current, state, out_dir)
     _write_swing_scan_skip(current, state, out_dir)
+    _write_hold_regime(current, state, out_dir)
     _write_regime_health_brief(current, state, out_dir)
 
     if is_first_run:
@@ -1006,6 +1154,10 @@ def main() -> int:
         print("\n\U0001f4cb Backtest findings (vs 7-night baseline):", flush=True)
         for f in findings:
             print(f"  {f}", flush=True)
+
+    hold_lines = _hold_regime_lines(_hold_regime_flags(current))
+    if hold_lines:
+        print("\n" + "\n".join(hold_lines), flush=True)
     if errors:
         print(f"\n\u26a0\ufe0f  {len(errors)} pair(s) errored (likely missing data on Kraken):", flush=True)
         for e in errors[:5]:

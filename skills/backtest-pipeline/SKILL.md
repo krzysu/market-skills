@@ -1,6 +1,6 @@
 ---
 name: backtest-pipeline
-description: "Nightly backtest pipeline — runs every L3 strategy against every active watchlist ticker on 1d + 4h intervals, compares against a rolling 7-night Sharpe baseline, detects strategy decay, and produces five cross-boundary output files consumed by downstream skills (DTP conviction floor, ESD conviction modulation, Position Watchdog regime, Swing Scan skip list, Morning Brief)."
+description: "Nightly backtest pipeline — runs every L3 strategy against every active watchlist ticker on 1d + 4h intervals, compares against a rolling 7-night Sharpe baseline, detects strategy decay, and produces six cross-boundary output files consumed by downstream skills (DTP conviction floor, ESD conviction modulation, Position Watchdog regime, Swing Scan skip list, hold-regime opportunities, Morning Brief)."
 version: 0.1.0
 metadata:
   hermes:
@@ -11,7 +11,7 @@ metadata:
 
 # backtest-pipeline
 
-Nightly backtest pipeline — the sole producer of five cross-boundary analysis files consumed by downstream skills. Runs every L3 strategy against every active watchlist ticker, compares against a rolling 7-night Sharpe baseline, and detects strategy decay or improvement.
+Nightly backtest pipeline — the sole producer of six cross-boundary analysis files consumed by downstream skills. Runs every L3 strategy against every active watchlist ticker, compares against a rolling 7-night Sharpe baseline, and detects strategy decay or improvement.
 
 ## When to use
 
@@ -51,12 +51,39 @@ All files are written to `$MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR`:
 | `fitness_matrix.json` | ESD (emerging-setup-detector) | `<OUT_DIR>/fitness_matrix.json` |
 | `watchdog_regime_state.json` | Position Watchdog | `MARKET_SKILLS_REGIME_STATE_PATH` or `<OUT_DIR>/watchdog_regime_state.json` |
 | `swing_scan_skip_list.json` | Swing Scan | `<OUT_DIR>/swing_scan_skip_list.json` |
+| `hold_regime.json` | LLM / morning brief opportunity section | `<OUT_DIR>/hold_regime.json` |
 | `regime_health_brief.md` | Morning Brief | `<OUT_DIR>/regime_health_brief.md` |
 
 `swing_scan_skip_list.json` splits tickers three ways: `skip_tickers` (all strategies
 negative Sharpe), `no_trade_tickers` (zero-signal / blind pairs — no trade signals on
 any strategy/interval), and `keep_tickers`. Blind pairs are surfaced, not silently
 excluded. The `reason` names each bucket it covers.
+
+## Hold-regime opportunity signal
+
+`hold_regime.json` surfaces a positive **opportunity** signal the ⚖️ footnotes only
+hinted at: a `(ticker, interval)` pair where the edge is *exposure, not timing* —
+buy-and-hold beats every measured strategy by a wide margin. A pair flags when ALL
+of:
+
+- `benchmark_sharpe > 0`
+- `benchmark_total_return > 0`
+- at least `HOLD_REGIME_MIN_STRATEGIES = 3` strategies carry a non-`insufficient_data` record
+- every measured strategy satisfies
+  `benchmark_sharpe - strategy_sharpe >= HOLD_REGIME_MIN_GAP = 1.0` (inclusive at exactly 1.0)
+
+Entries carry `min_gap` / `max_gap` (the smallest and largest per-strategy gap,
+two decimals) so the reader can judge strength, and are sorted by `max_gap`
+descending. A non-`insufficient_data` record with a null `strategy_sharpe` is a
+destroyed curve (`bankrupted`) and is skipped: it neither counts toward
+`strategies_measured` nor blocks the flag. An empty list is the legitimate steady
+state and is rewritten every night — stale flags never survive a quiet run.
+
+The regime health brief renders a `### 🎯 Hold-regime assets (edge is exposure,
+not timing)` section when the list is non-empty and omits the section entirely
+when it is empty. **This signal is additive**: it does NOT change conviction
+thresholds — a hold-regime ticker's strategies have negative Sharpe and stay
+floor-99-suppressed; no combo is un-suppressed.
 
 ## Measured strategy set
 
@@ -134,6 +161,7 @@ All output file contracts are defined in `lib.py` as TypedDicts with validation 
 - `FitnessMatrix` / `validate_fitness_matrix()` — Sharpe pivot table (intervals → tickers × strategies)
 - `WatchdogRegimeState` / `validate_watchdog_regime()` — per-position per-strategy regime status
 - `SwingScanSkipList` / `validate_swing_scan_skip()` — ticker triage list
+- `HoldRegime` / `validate_hold_regime()` — hold-regime opportunity flags per (ticker, interval)
 - `validate_regime_brief()` — Markdown structural check
 - `conviction_thresholds_private.json` contract is owned by `analysis/conviction_thresholds.py`
 
@@ -141,7 +169,7 @@ All output file contracts are defined in `lib.py` as TypedDicts with validation 
 
 | Env var | Required | Purpose |
 |---------|----------|---------|
-| `MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR` | **Yes** | Base directory for all 5 files + rolling state |
+| `MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR` | **Yes** | Base directory for all 6 files + rolling state |
 | `MARKET_SKILLS_BACKTEST_PIPELINE_OPEN_POSITIONS_PATH` | No | Source for watchdog regime output |
 | `MARKET_SKILLS_WATCHLIST_PATH` | No | Watchlist JSON (falls back to repo default) |
 | `MARKET_SKILLS_BACKTEST_PIPELINE_MIN_TRADES` | No | Minimum trade count for a combo's Sharpe to be trusted (default 10; `0` disables the guard) |
