@@ -1,6 +1,6 @@
 """Tests for backtest-pipeline contract validation.
 
-Defines the TypedDicts shapes and validators for all five cross-boundary
+Defines the TypedDicts shapes and validators for all six cross-boundary
 output files produced by the nightly backtest pipeline. Every validator
 must accept valid data and reject the common malformed shapes that a
 future producer or consumer change could introduce.
@@ -21,6 +21,7 @@ from analysis.skill_loader import load_skill
 _lib = load_skill("backtest-pipeline")
 
 validate_fitness_matrix = _lib.validate_fitness_matrix
+validate_hold_regime = _lib.validate_hold_regime
 validate_regime_brief = _lib.validate_regime_brief
 validate_swing_scan_skip = _lib.validate_swing_scan_skip
 validate_watchdog_regime = _lib.validate_watchdog_regime
@@ -485,6 +486,7 @@ class TestMinimumTradesGuard:
         monkeypatch.setattr(run_mod, "_write_fitness_matrix", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_watchdog_regime", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_swing_scan_skip", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_hold_regime", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_regime_health_brief", lambda *a: None)
         monkeypatch.setattr(run_mod, "measured_strategies", lambda: ["strategy-accumulation-swing"])
         monkeypatch.setattr(run_mod, "BACKTEST_INTERVALS", [("4h", "3mo", 200, 400)])
@@ -714,6 +716,7 @@ class TestErrorReporting:
         monkeypatch.setattr(run_mod, "_write_fitness_matrix", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_watchdog_regime", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_swing_scan_skip", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_hold_regime", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_regime_health_brief", lambda *a: None)
         monkeypatch.setattr(
             run_mod,
@@ -831,6 +834,7 @@ class TestMeasuredStrategy:
         monkeypatch.setattr(run_mod, "_write_fitness_matrix", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_watchdog_regime", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_swing_scan_skip", lambda *a: None)
+        monkeypatch.setattr(run_mod, "_write_hold_regime", lambda *a: None)
         monkeypatch.setattr(run_mod, "_write_regime_health_brief", lambda *a: None)
         monkeypatch.setattr(run_mod, "_read_active_tickers", lambda baskets=None: [("BTCUSD", "kraken:BTCUSD")])
         monkeypatch.setattr(run_mod, "_run_pair", lambda *a, **kw: None)
@@ -874,7 +878,7 @@ class TestMeasuredStrategy:
 
 class TestEmptyPairGridFailLoud:
     """A zero-pair night must exit non-zero with a FATAL line on stderr,
-    BEFORE the run record is appended, any of the five output files is
+    BEFORE the run record is appended, any of the six output files is
     written, or the rolling-baseline state file is mutated.
 
     Pre-fix (bead market-skills-kwu): an empty watchlist resolved 0
@@ -883,7 +887,7 @@ class TestEmptyPairGridFailLoud:
     cron reported ``ok`` while every downstream consumer saw empty edge
     artifacts. Writers are deliberately NOT patched here: if the guard
     fails to fire, the real writers append ``runs.jsonl`` and write the
-    five output files into ``out_dir``, and the no-artifacts assertion
+    six output files into ``out_dir``, and the no-artifacts assertion
     fails."""
 
     _OUTPUT_FILES = [
@@ -891,6 +895,7 @@ class TestEmptyPairGridFailLoud:
         "fitness_matrix.json",
         "watchdog_regime_state.json",
         "swing_scan_skip_list.json",
+        "hold_regime.json",
         "regime_health_brief.md",
         "runs.jsonl",
     ]
@@ -1569,3 +1574,558 @@ class TestWatchdogRegimeKeyResolution:
         assert pos["regime_status"] == "positive"
         assert pos["sharpe_7n"] == 0.5
         assert pos["ticker"] == "BTCUSD"
+
+
+# ── hold_regime.json (bead market-skills-xtp) ──────────────────────
+
+
+_VALID_HOLD_REGIME = {
+    "generated_at": "2026-01-01T00:00:00+00:00",
+    "hold_regime": [
+        {
+            "ticker": "kraken:AAAUSD",
+            "interval": "1d",
+            "benchmark_sharpe": 1.177,
+            "benchmark_total_return": 0.67,
+            "strategies_measured": 3,
+            "min_gap": 1.0,
+            "max_gap": 2.5,
+            "trades_total": 42,
+        }
+    ],
+}
+
+
+def _hold_flag(**overrides):
+    """A valid HoldRegimeFlag payload, per-case field overrides."""
+    flag = {
+        "ticker": "kraken:AAAUSD",
+        "interval": "1d",
+        "benchmark_sharpe": 1.177,
+        "benchmark_total_return": 0.67,
+        "strategies_measured": 3,
+        "min_gap": 1.0,
+        "max_gap": 2.5,
+        "trades_total": 42,
+    }
+    flag.update(overrides)
+    return flag
+
+
+def _hold_payload(flag_overrides=None, **payload_overrides):
+    """A valid hold_regime.json payload, per-case overrides."""
+    payload = {
+        "generated_at": "2026-01-01T00:00:00+00:00",
+        "hold_regime": [_hold_flag()],
+    }
+    if flag_overrides is not None:
+        payload["hold_regime"] = [_hold_flag(**f) for f in flag_overrides]
+    payload.update(payload_overrides)
+    return payload
+
+
+class TestValidateHoldRegime:
+    def test_valid(self):
+        data, err = validate_hold_regime(_VALID_HOLD_REGIME)
+        assert data is not None, err
+        assert err is None
+
+    def test_valid_empty_list_is_steady_state(self):
+        data, err = validate_hold_regime({"generated_at": "...", "hold_regime": []})
+        assert data is not None, err
+        assert err is None
+
+    def test_not_a_dict(self):
+        data, err = validate_hold_regime([])
+        assert data is None
+        assert "expected a JSON object" in err
+
+    def test_missing_hold_regime(self):
+        data, err = validate_hold_regime({"generated_at": "..."})
+        assert data is None
+        assert "hold_regime" in err
+
+    def test_hold_regime_not_a_list(self):
+        data, err = validate_hold_regime({"generated_at": "...", "hold_regime": {}})
+        assert data is None
+        assert "expected list" in err
+
+    def test_missing_generated_at(self):
+        data, err = validate_hold_regime({"hold_regime": []})
+        assert data is None
+        assert "generated_at" in err
+
+    def test_entry_not_a_dict(self):
+        payload = {"generated_at": "...", "hold_regime": ["nope"]}
+        data, err = validate_hold_regime(payload)
+        assert data is None
+        assert "must be an object" in err
+
+    def test_ticker_not_a_string(self):
+        data, err = validate_hold_regime(_hold_payload([{"ticker": 5}]))
+        assert data is None
+        assert "ticker" in err
+
+    def test_interval_not_a_string(self):
+        data, err = validate_hold_regime(_hold_payload([{"interval": None}]))
+        assert data is None
+        assert "interval" in err
+
+    def test_benchmark_sharpe_not_numeric(self):
+        data, err = validate_hold_regime(_hold_payload([{"benchmark_sharpe": "1.2"}]))
+        assert data is None
+        assert "benchmark_sharpe" in err
+
+    def test_benchmark_sharpe_bool_rejected(self):
+        data, err = validate_hold_regime(_hold_payload([{"benchmark_sharpe": True}]))
+        assert data is None
+        assert "benchmark_sharpe" in err
+
+    def test_benchmark_total_return_not_numeric(self):
+        data, err = validate_hold_regime(_hold_payload([{"benchmark_total_return": None}]))
+        assert data is None
+        assert "benchmark_total_return" in err
+
+    def test_min_gap_not_numeric(self):
+        data, err = validate_hold_regime(_hold_payload([{"min_gap": "1.0"}]))
+        assert data is None
+        assert "min_gap" in err
+
+    def test_max_gap_not_numeric(self):
+        data, err = validate_hold_regime(_hold_payload([{"max_gap": []}]))
+        assert data is None
+        assert "max_gap" in err
+
+    def test_strategies_measured_not_an_int(self):
+        data, err = validate_hold_regime(_hold_payload([{"strategies_measured": 3.5}]))
+        assert data is None
+        assert "strategies_measured" in err
+
+    def test_strategies_measured_bool_rejected(self):
+        data, err = validate_hold_regime(_hold_payload([{"strategies_measured": True}]))
+        assert data is None
+        assert "strategies_measured" in err
+
+    def test_trades_total_not_an_int(self):
+        data, err = validate_hold_regime(_hold_payload([{"trades_total": "42"}]))
+        assert data is None
+        assert "trades_total" in err
+
+
+class TestHoldRegimeFlags:
+    """_hold_regime_flags is the single source of truth for the hold-regime
+    opportunity flag (bead market-skills-xtp): a (ticker, interval) pair
+    where buy-and-hold beats EVERY measured strategy by >= 1.0 Sharpe."""
+
+    @staticmethod
+    def _combo(
+        strategy,
+        ticker,
+        strat_sharpe,
+        *,
+        bench_sharpe=1.177,
+        bench_return=0.67,
+        trades=10,
+        insufficient=False,
+        bankrupted=False,
+    ):
+        return {
+            "strategy": strategy,
+            "ticker": ticker,
+            "strategy_sharpe": None if bankrupted else strat_sharpe,
+            "benchmark_sharpe": bench_sharpe,
+            "benchmark_total_return": bench_return,
+            "trades": trades,
+            "insufficient_data": insufficient,
+            "bankrupted": bankrupted,
+        }
+
+    @staticmethod
+    def _flagged_current(interval="1d"):
+        """kraken:AAAUSD on one interval: three negative-Sharpe strategies,
+        buy-and-hold beats each by >= 1.0 Sharpe. Gaps: 1.68 / 2.18 / 2.48;
+        trades 12 + 20 + 10 = 42."""
+        return {
+            f"{interval}\u00d7strategy-a\u00d7kraken:AAAUSD": TestHoldRegimeFlags._combo(
+                "strategy-a", "kraken:AAAUSD", -0.5, trades=12
+            ),
+            f"{interval}\u00d7strategy-b\u00d7kraken:AAAUSD": TestHoldRegimeFlags._combo(
+                "strategy-b", "kraken:AAAUSD", -1.0, trades=20
+            ),
+            f"{interval}\u00d7strategy-c\u00d7kraken:AAAUSD": TestHoldRegimeFlags._combo(
+                "strategy-c", "kraken:AAAUSD", -1.3, trades=10
+            ),
+        }
+
+    def test_flag_constants_match_documented_rule(self):
+        run_mod = _load_run_mod("bp_hold_constants")
+        assert run_mod.HOLD_REGIME_MIN_STRATEGIES == 3
+        assert run_mod.HOLD_REGIME_MIN_GAP == 1.0
+
+    def test_benchmark_outperforming_pair_flags_with_expected_fields(self):
+        run_mod = _load_run_mod("bp_hold_flag_basic")
+        flags = run_mod._hold_regime_flags(self._flagged_current())
+        assert len(flags) == 1
+        flag = flags[0]
+        # exact field set and order
+        assert list(flag) == [
+            "ticker",
+            "interval",
+            "benchmark_sharpe",
+            "benchmark_total_return",
+            "strategies_measured",
+            "min_gap",
+            "max_gap",
+            "trades_total",
+        ]
+        assert flag["ticker"] == "kraken:AAAUSD"
+        assert flag["interval"] == "1d"
+        assert flag["benchmark_sharpe"] == pytest.approx(1.177)
+        assert flag["benchmark_total_return"] == pytest.approx(0.67)
+        assert flag["strategies_measured"] == 3
+        assert flag["min_gap"] == pytest.approx(1.68)
+        assert flag["max_gap"] == pytest.approx(2.48)
+        assert flag["trades_total"] == 42
+
+    def test_gap_exactly_min_gap_flags_boundary_inclusive(self):
+        run_mod = _load_run_mod("bp_hold_flag_boundary")
+        current = {
+            "1d\u00d7strategy-a\u00d7kraken:AAAUSD": self._combo("strategy-a", "kraken:AAAUSD", 1.0, bench_sharpe=2.0),
+            "1d\u00d7strategy-b\u00d7kraken:AAAUSD": self._combo("strategy-b", "kraken:AAAUSD", 1.0, bench_sharpe=2.0),
+            "1d\u00d7strategy-c\u00d7kraken:AAAUSD": self._combo("strategy-c", "kraken:AAAUSD", 1.0, bench_sharpe=2.0),
+        }
+        # every gap is exactly HOLD_REGIME_MIN_GAP (2.0 - 1.0 = 1.0)
+        # kraken:BBBUSD carries a below-gap strategy (2.0 - 1.5 = 0.5), so a
+        # deleted gap check would ALSO flag BBBUSD (len == 2), while a
+        # >= / > mutation drops the exactly-1.0 pair altogether (len == 0)
+        current["1d\u00d7strategy-a\u00d7kraken:BBBUSD"] = self._combo("strategy-a", "kraken:BBBUSD", 1.5, trades=10)
+        current["1d\u00d7strategy-b\u00d7kraken:BBBUSD"] = self._combo("strategy-b", "kraken:BBBUSD", 1.0, trades=10)
+        current["1d\u00d7strategy-c\u00d7kraken:BBBUSD"] = self._combo("strategy-c", "kraken:BBBUSD", 1.0, trades=10)
+        flags = run_mod._hold_regime_flags(current)
+        assert [(f["ticker"], f["min_gap"], f["max_gap"]) for f in flags] == [("kraken:AAAUSD", 1.0, 1.0)]
+
+    def test_one_strategy_beating_benchmark_blocks_flag(self):
+        run_mod = _load_run_mod("bp_hold_flag_outperform")
+        current = self._flagged_current()
+        # ONE strategy literally beats the benchmark → negative gap
+        current["1d\u00d7strategy-c\u00d7kraken:AAAUSD"]["strategy_sharpe"] = 2.5
+        assert run_mod._hold_regime_flags(current) == []
+
+    def test_gap_below_min_gap_blocks_flag(self):
+        run_mod = _load_run_mod("bp_hold_flag_gap_below")
+        current = self._flagged_current()
+        # gap 1.177 - 0.5 = 0.677 < HOLD_REGIME_MIN_GAP
+        current["1d\u00d7strategy-c\u00d7kraken:AAAUSD"]["strategy_sharpe"] = 0.5
+        assert run_mod._hold_regime_flags(current) == []
+
+    def test_too_few_measured_strategies_does_not_flag(self):
+        run_mod = _load_run_mod("bp_hold_flag_few")
+        current = {
+            "1d\u00d7strategy-a\u00d7kraken:AAAUSD": self._combo("strategy-a", "kraken:AAAUSD", -3.0, trades=10),
+            "1d\u00d7strategy-b\u00d7kraken:AAAUSD": self._combo("strategy-b", "kraken:AAAUSD", -3.5, trades=10),
+        }
+        # both gaps large (4.177 / 4.677) but only 2 measured strategies
+        assert run_mod._hold_regime_flags(current) == []
+
+    @staticmethod
+    def _deep_neg_current(bench_sharpe):
+        """kraken:AAAUSD on 1d with deeply negative strategies
+        (-1.5 / -2.0 / -2.5): every gap (1.3-2.5 for bench -0.2,
+        1.5-2.5 for bench 0.0) already clears HOLD_REGIME_MIN_GAP, so
+        ONLY the ``benchmark_sharpe > 0`` conjunct can block the flag —
+        deleting that sign check makes this fixture flag."""
+        current = {}
+        for strat, sharpe, trades in (
+            ("strategy-a", -1.5, 12),
+            ("strategy-b", -2.0, 20),
+            ("strategy-c", -2.5, 10),
+        ):
+            current[f"1d\u00d7{strat}\u00d7kraken:AAAUSD"] = TestHoldRegimeFlags._combo(
+                strat, "kraken:AAAUSD", sharpe, bench_sharpe=bench_sharpe, trades=trades
+            )
+        return current
+
+    @pytest.mark.parametrize(
+        ("spec_name", "bench_sharpe"),
+        [("bp_hold_flag_neg_bench", -0.2), ("bp_hold_flag_zero_bench", 0.0)],
+    )
+    def test_nonpositive_benchmark_sharpe_does_not_flag(self, spec_name, bench_sharpe):
+        run_mod = _load_run_mod(spec_name)
+        current = self._deep_neg_current(bench_sharpe)
+        assert run_mod._hold_regime_flags(current) == []
+
+    @pytest.mark.parametrize(
+        ("spec_name", "bench_return"),
+        [("bp_hold_flag_neg_return", -0.05), ("bp_hold_flag_zero_return", 0.0)],
+    )
+    def test_nonpositive_benchmark_return_does_not_flag(self, spec_name, bench_return):
+        run_mod = _load_run_mod(spec_name)
+
+        current = self._flagged_current()
+        for info in current.values():
+            info["benchmark_total_return"] = bench_return
+        assert run_mod._hold_regime_flags(current) == []
+
+    def test_insufficient_data_records_neither_count_nor_block(self):
+        run_mod = _load_run_mod("bp_hold_flag_insuff")
+        current = self._flagged_current()
+        # a same-group insufficient record: excluded entirely (if the skip
+        # were missing, its 9.9 Sharpe would create a negative gap that
+        # blocks the flag, and its 500 trades would inflate the totals)
+        current["1d\u00d7strategy-d\u00d7kraken:AAAUSD"] = self._combo(
+            "strategy-d", "kraken:AAAUSD", 9.9, trades=500, insufficient=True
+        )
+        flags = run_mod._hold_regime_flags(current)
+        assert [(f["ticker"], f["interval"]) for f in flags] == [("kraken:AAAUSD", "1d")]
+        assert flags[0]["strategies_measured"] == 3
+        assert flags[0]["trades_total"] == 42
+
+    def test_bankrupted_record_skipped_and_does_not_block(self):
+        run_mod = _load_run_mod("bp_hold_flag_bankrupt")
+        current = self._flagged_current()
+        # the engine's bankrupted case: numeric benchmark, strategy_sharpe
+        # None (destroyed curve), insufficient_data False — skipped entirely
+        current["1d\u00d7strategy-d\u00d7kraken:AAAUSD"] = self._combo(
+            "strategy-d", "kraken:AAAUSD", 9.9, trades=999, bankrupted=True
+        )
+        flags = run_mod._hold_regime_flags(current)
+        assert len(flags) == 1
+        assert flags[0]["strategies_measured"] == 3
+        assert flags[0]["trades_total"] == 42
+
+    def test_intervals_are_separate_groups(self):
+        run_mod = _load_run_mod("bp_hold_flag_intervals")
+        current = self._flagged_current(interval="1d")
+        # the 4h group has 3 measured strategies but a sub-threshold gap
+        current.update(
+            {
+                "4h\u00d7strategy-a\u00d7kraken:AAAUSD": self._combo("strategy-a", "kraken:AAAUSD", 0.0, trades=10),
+                "4h\u00d7strategy-b\u00d7kraken:AAAUSD": self._combo("strategy-b", "kraken:AAAUSD", 0.0, trades=10),
+                "4h\u00d7strategy-c\u00d7kraken:AAAUSD": self._combo(
+                    "strategy-c",
+                    "kraken:AAAUSD",
+                    0.5,
+                    trades=10,  # gap 0.677 < 1.0
+                ),
+            }
+        )
+        flags = run_mod._hold_regime_flags(current)
+        assert [(f["ticker"], f["interval"]) for f in flags] == [("kraken:AAAUSD", "1d")]
+
+    def test_sorted_by_max_gap_desc(self):
+        run_mod = _load_run_mod("bp_hold_flag_sorted")
+        current = self._flagged_current()  # kraken:AAAUSD 1d, max_gap 2.48
+        # hl:ZZZ 4h also flags, with a smaller max_gap
+        current.update(
+            {
+                "4h\u00d7strategy-a\u00d7hl:ZZZ": self._combo(
+                    "strategy-a", "hl:ZZZ", 0.177, bench_sharpe=1.177, bench_return=0.2, trades=5
+                ),
+                "4h\u00d7strategy-b\u00d7hl:ZZZ": self._combo(
+                    "strategy-b", "hl:ZZZ", 0.177, bench_sharpe=1.177, bench_return=0.2, trades=5
+                ),
+                "4h\u00d7strategy-c\u00d7hl:ZZZ": self._combo(
+                    "strategy-c", "hl:ZZZ", 0.177, bench_sharpe=1.177, bench_return=0.2, trades=5
+                ),
+            }
+        )
+        flags = run_mod._hold_regime_flags(current)
+        assert [(f["ticker"], f["interval"], f["max_gap"]) for f in flags] == [
+            ("kraken:AAAUSD", "1d", 2.48),
+            ("hl:ZZZ", "4h", 1.0),
+        ]
+
+    def test_ties_break_deterministically_by_ticker_interval(self):
+        run_mod = _load_run_mod("bp_hold_flag_tie")
+        current = {}
+        # two tickers with identical gaps (exactly 1.0) → tie on max_gap
+        for ticker_key in ("kraken:BBBUSD", "kraken:AAAUSD"):
+            for strat in ("strategy-a", "strategy-b", "strategy-c"):
+                current[f"1d\u00d7{strat}\u00d7{ticker_key}"] = self._combo(
+                    strat, ticker_key, 1.0, bench_sharpe=2.0, trades=10
+                )
+        flags = run_mod._hold_regime_flags(current)
+        assert [(f["ticker"], f["max_gap"]) for f in flags] == [
+            ("kraken:AAAUSD", 1.0),
+            ("kraken:BBBUSD", 1.0),
+        ]
+
+
+class TestWriteHoldRegime:
+    def test_writer_creates_valid_file_with_expected_entry(self, tmp_path, capsys):
+        run_mod = _load_run_mod("bp_hold_write")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        current = TestHoldRegimeFlags._flagged_current()
+        run_mod._write_hold_regime(current, {"baseline": {}}, out_dir)
+
+        path = out_dir / "hold_regime.json"
+        payload = json.loads(path.read_text())
+        assert isinstance(payload["generated_at"], str) and payload["generated_at"]
+        assert [f["ticker"] for f in payload["hold_regime"]] == ["kraken:AAAUSD"]
+        assert payload["hold_regime"][0]["strategies_measured"] == 3
+        assert payload["hold_regime"][0]["trades_total"] == 42
+        # round-trips through the contract validator
+        data, err = validate_hold_regime(json.loads(path.read_text()))
+        assert data is not None, err
+        captured = capsys.readouterr()
+        assert "hold regime written (1 pair(s))" in captured.out
+        assert "[WARN]" not in captured.out
+
+    def test_no_flag_run_overwrites_stale_file(self, tmp_path, capsys):
+        """Tonight's empty steady state must overwrite last night's flags:
+        the hold_regime.json emptiness guard must never keep a stale flag
+        list on disk as if it were current."""
+        run_mod = _load_run_mod("bp_hold_write_stale")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        stale = {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "hold_regime": [_hold_flag(ticker="hl:ZZZ", interval="4h")],
+        }
+        (out_dir / "hold_regime.json").write_text(json.dumps(stale, indent=2))
+
+        run_mod._write_hold_regime({}, {"baseline": {}}, out_dir)
+
+        payload = json.loads((out_dir / "hold_regime.json").read_text())
+        assert payload["hold_regime"] == []
+        assert payload["generated_at"] != "2026-01-01T00:00:00+00:00"
+        data, err = validate_hold_regime(payload)
+        assert data is not None, err
+        captured = capsys.readouterr()
+        assert "hold regime written (0 pair(s))" in captured.out
+        assert "[WARN]" not in captured.out
+
+
+class TestHoldRegimeDoesNotChangeConvictionThresholds:
+    """Hard constraint (bead market-skills-xtp): the hold-regime signal is
+    additive — a pair flagging as hold-regime must not change a single
+    conviction floor. A hold-regime ticker's strategies legitimately have
+    negative Sharpe and stay floor-99-suppressed."""
+
+    @staticmethod
+    def _current():
+        """Negative-Sharpe strategies next to a healthy ticker, with
+        benchmark fields below the flag rule so nothing qualifies yet."""
+        current = {}
+        for strat, sharpe, trades in (("strategy-a", -0.5, 20), ("strategy-b", -0.8, 30), ("strategy-c", -1.1, 40)):
+            current[f"1d\u00d7{strat}\u00d7AAAUSD"] = {
+                "strategy": strat,
+                "ticker": "kraken:AAAUSD",
+                "strategy_sharpe": sharpe,
+                "benchmark_sharpe": -0.2,
+                "benchmark_total_return": -0.1,
+                "trades": trades,
+                "insufficient_data": False,
+            }
+        current["1d\u00d7strategy-a\u00d7BBBUSD"] = {
+            "strategy": "strategy-a",
+            "ticker": "kraken:BBBUSD",
+            "strategy_sharpe": 1.0,
+            "benchmark_sharpe": 0.5,
+            "benchmark_total_return": 0.2,
+            "trades": 30,
+            "insufficient_data": False,
+        }
+        return current
+
+    def test_thresholds_byte_identical_when_hold_regime_flags(self, monkeypatch, tmp_path):
+        monkeypatch.delenv(_lib.ENV_MIN_TRADES, raising=False)
+        run_mod = _load_run_mod("bp_hold_invariance")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        thresholds_path = out_dir / "conviction_thresholds_private.json"
+
+        current = self._current()
+        assert run_mod._hold_regime_flags(current) == []  # nothing flags yet
+        run_mod._write_conviction_thresholds(current, {"baseline": {}}, out_dir)
+        before = thresholds_path.read_bytes()
+
+        # Mutate ONLY the benchmark fields so AAAUSD becomes hold-regime.
+        for info in current.values():
+            if info["ticker"] == "kraken:AAAUSD":
+                info["benchmark_sharpe"] = 1.177
+                info["benchmark_total_return"] = 0.67
+        flags = run_mod._hold_regime_flags(current)
+        assert [f["ticker"] for f in flags] == ["kraken:AAAUSD"]  # the mutation flags
+        run_mod._write_hold_regime(current, {"baseline": {}}, out_dir)
+        run_mod._write_conviction_thresholds(current, {"baseline": {}}, out_dir)
+
+        after = thresholds_path.read_bytes()
+        assert after == before  # byte-identical: no floor moved, none un-suppressed
+        table = json.loads(after)["MIN_CONVICTION_TO_EMIT_BY_STRATEGY"]
+        for strat in ("strategy-a", "strategy-b", "strategy-c"):
+            assert table[strat]["kraken:AAAUSD"]["1d"] == 99
+        assert table["strategy-a"]["kraken:BBBUSD"]["1d"] == 1
+        hold_payload = json.loads((out_dir / "hold_regime.json").read_text())
+        assert [f["ticker"] for f in hold_payload["hold_regime"]] == ["kraken:AAAUSD"]
+
+
+class TestHoldRegimeBriefSection:
+    def test_brief_contains_hold_regime_section_when_flag(self, tmp_path):
+        run_mod = _load_run_mod("bp_hold_brief_flag")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        current = TestHoldRegimeFlags._flagged_current()
+        run_mod._write_regime_health_brief(current, {"baseline": {}}, out_dir)
+
+        text = (out_dir / "regime_health_brief.md").read_text()
+        heading = "### 🎯 Hold-regime assets (edge is exposure, not timing)"
+        assert heading in text
+        assert text.index(heading) < text.index("### Strategy Health")
+        assert "- kraken:AAAUSD 1d: buy-and-hold Sharpe +1.18 / +67% return" in text
+        assert "underperforms it by 1.68-2.48 Sharpe (3 strategies, 42 trades)" in text
+        _, err = validate_regime_brief(text)
+        assert err is None
+
+    def test_brief_omits_hold_regime_section_when_no_flag(self, tmp_path):
+        run_mod = _load_run_mod("bp_hold_brief_noflag")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        # one measured strategy only: below HOLD_REGIME_MIN_STRATEGIES
+        current = {
+            "1d\u00d7strategy-a\u00d7kraken:AAAUSD": TestHoldRegimeFlags._combo(
+                "strategy-a", "kraken:AAAUSD", -0.5, trades=12
+            ),
+        }
+        run_mod._write_regime_health_brief(current, {"baseline": {}}, out_dir)
+
+        text = (out_dir / "regime_health_brief.md").read_text()
+        assert "Hold-regime" not in text
+        _, err = validate_regime_brief(text)
+        assert err is None
+
+
+class TestHoldRegimeLines:
+    def test_no_flags_render_nothing(self):
+        run_mod = _load_run_mod("bp_hold_lines_empty")
+        assert run_mod._hold_regime_lines([]) == []
+
+    def test_lines_contain_heading_and_per_flag_details(self):
+        run_mod = _load_run_mod("bp_hold_lines_flagged")
+        flags = [
+            _hold_flag(),
+            _hold_flag(
+                ticker="hl:ZZZ",
+                interval="4h",
+                benchmark_sharpe=0.9,
+                benchmark_total_return=0.25,
+                min_gap=1.0,
+                max_gap=1.5,
+                trades_total=30,
+            ),
+        ]
+        lines = run_mod._hold_regime_lines(flags)
+        assert lines[0] == "🎯 Hold-regime assets (edge is exposure, not timing):"
+        assert len(lines) == 3
+        assert lines[1] == (
+            "  kraken:AAAUSD 1d: buy-and-hold Sharpe +1.18 / +67% return; "
+            "every strategy underperforms it by 1.00-2.50 Sharpe"
+        )
+        assert "hl:ZZZ 4h:" in lines[2]
+        assert "+0.90 / +25% return" in lines[2]
+        assert "1.00-1.50 Sharpe" in lines[2]

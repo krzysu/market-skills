@@ -8,7 +8,7 @@ Env vars
 --------
 
   ``MARKET_SKILLS_BACKTEST_PIPELINE_OUT_DIR`` (**required**) — base
-  directory for all five output files and the rolling baseline state.
+  directory for all six output files and the rolling baseline state.
   Every file is written to ``<OUT_DIR>/<filename>``.
 
 Consumer-side overrides (all optional; default to ``<OUT_DIR>/<filename>``):
@@ -163,6 +163,51 @@ def validate_swing_scan_skip(data: object) -> tuple[SwingScanSkipList | None, st
         return None, "swing_scan_skip: missing or invalid 'keep_tickers' (expected list)"
     if not isinstance(reason, str):
         return None, "swing_scan_skip: missing or invalid 'reason' (expected string)"
+    return data, None  # type: ignore[return-value]
+
+
+# ── hold_regime.json ───────────────────────────────────────────────
+
+
+class HoldRegimeFlag(TypedDict):
+    ticker: str
+    interval: str
+    benchmark_sharpe: float
+    benchmark_total_return: float
+    strategies_measured: int
+    min_gap: float
+    max_gap: float
+    trades_total: int
+
+
+class HoldRegime(TypedDict):
+    generated_at: str
+    hold_regime: list[HoldRegimeFlag]
+
+
+def validate_hold_regime(data: object) -> tuple[HoldRegime | None, str | None]:
+    if not isinstance(data, dict):
+        return None, "hold_regime: expected a JSON object"
+    generated_at = data.get("generated_at")
+    if not isinstance(generated_at, str):
+        return None, "hold_regime: missing or invalid 'generated_at' (expected string)"
+    flags = data.get("hold_regime")
+    if not isinstance(flags, list):
+        return None, "hold_regime: missing or invalid 'hold_regime' (expected list)"
+    for index, flag in enumerate(flags):
+        if not isinstance(flag, dict):
+            return None, f"hold_regime: hold_regime[{index}] must be an object"
+        for field in ("ticker", "interval"):
+            if not isinstance(flag.get(field), str):
+                return None, f"hold_regime: hold_regime[{index}].{field} must be a string"
+        for field in ("benchmark_sharpe", "benchmark_total_return", "min_gap", "max_gap"):
+            value = flag.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None, f"hold_regime: hold_regime[{index}].{field} must be a number"
+        for field in ("strategies_measured", "trades_total"):
+            value = flag.get(field)
+            if isinstance(value, bool) or not isinstance(value, int):
+                return None, f"hold_regime: hold_regime[{index}].{field} must be an int"
     return data, None  # type: ignore[return-value]
 
 
