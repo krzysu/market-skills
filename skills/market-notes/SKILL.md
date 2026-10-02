@@ -167,6 +167,28 @@ uv run skills/market-notes/scripts/run.py list --all
 uv run skills/market-notes/scripts/run.py prune
 ```
 
+## Refresh sweep (all notes, on demand)
+
+"Refresh all notes" means: re-ground the whole file against live structure, not just run `prune`. Procedure:
+
+1. **Back up first** — `cp notes.json notes.json.bak-<YYYYMMDD>-refresh`. The sweep rewrites every note; the backup is the only copy of the old text.
+2. **Scan structure per pair** — one pass of `market-trend` + `market-s-r` at `1d` and `4h` for every note key, saving the raw JSON to a scratch file. `market-trend --json --full` carries `current_price` (the last CLOSED 1d candle) plus `ema_21/50/100/200`, and a live spot fetch gives the current price — keep both, they can diverge by a percent or more.
+3. **Classify each existing note**, then rewrite or drop:
+   - `post_mortem` / `invalidated` / superseded duplicates → drop (prune semantics; do not archive).
+   - Thesis still live but levels stale → rewrite in place with current levels.
+   - Pair no longer in the watchlist → drop with it.
+   - Pair has no note → leave it; a refresh is not a campaign to add coverage.
+4. **Rewrite each note** with: position context from the ledger (qty/basis/book via `positions` per book, never the watchdog file), the live 1d/4h structure read (signal + alignment + EMA stack + S/R), the trigger, and the invalidation. Live levels go in `price_refs` (`extra` for per-timeframe sets), and `added`/`updated` are set to now — a refreshed note is a NEW note, not an edit.
+5. **Verify** — `validate --strict` (must be error- and warning-free), then prove attachment by running `run-watchlist <basket> --json` and reading `tickers[<key>].notes`.
+
+### Pitfall — a note that never attaches
+
+`load_active(pair)` is an exact string match on the key, and the runners pass the **watchlist ticker**. So:
+
+- A note whose key carries a provider prefix will not attach when the watchlist entry is the bare ticker (and vice-versa). Mirror the watchlist key exactly — including the prefix when the watchlist itself uses one for a venue-specific market.
+- Expired notes return `[]` silently, so an expired key looks identical to a key that was never written. When a scan shows `notes=0` for a pair you know has a thesis, check `expires` before assuming the note is missing.
+- A sweep that refreshes levels but keeps the old keys can therefore change nothing visible in the scanners. Confirm a non-zero note count per pair in `run-watchlist` output, not just `list`.
+
 ## Validation
 
 `validate` walks the file and reports findings as errors (hard failures) or warnings (advisory):
